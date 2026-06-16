@@ -26,8 +26,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const isAuthRoute = request.nextUrl.pathname.startsWith("/auth")
-  const isPublicAsset =
-    request.nextUrl.pathname === "/manifest.json" || request.nextUrl.pathname.startsWith("/api/seed-demo")
+  const isPublicAsset = request.nextUrl.pathname === "/manifest.json"
 
   if (!user && !isAuthRoute && !isPublicAsset) {
     const url = request.nextUrl.clone()
