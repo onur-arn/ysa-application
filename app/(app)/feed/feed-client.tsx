@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, Calendar, Lightbulb } from "lucide-react"
-import { AppShell } from "@/components/app-shell"
 import { useI18n } from "@/lib/i18n/context"
 import { StoriesBar } from "./stories-bar"
 import { EventsList } from "./events-list"
@@ -18,10 +17,10 @@ export function FeedClient() {
   const [createOpen, setCreateOpen] = useState(false)
 
   return (
-    <AppShell title="YouthStation">
+    <>
       <StoriesBar />
 
-      <div className="sticky top-[61px] z-20 flex gap-1 border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
+      <div className="sticky top-[57px] z-20 flex gap-1 border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
         <TabButton active={tab === "events"} onClick={() => setTab("events")} icon={<Calendar className="h-4 w-4" />}>
           {t("feed.events")}
         </TabButton>
@@ -53,7 +52,7 @@ export function FeedClient() {
       </button>
 
       <CreateContent open={createOpen} onClose={() => setCreateOpen(false)} defaultTab={tab} />
-    </AppShell>
+    </>
   )
 }
 
