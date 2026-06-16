@@ -7,6 +7,7 @@ export type ChatMessage = {
   text: string
   time: string
   self?: boolean
+  image?: string
 }
 
 export type GroupConversation = {

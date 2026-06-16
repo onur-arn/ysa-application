@@ -22,6 +22,8 @@ export function station(id: StationId): Station {
   return STATIONS.find((s) => s.id === id) ?? STATIONS[0]
 }
 
+export const getStation = station
+
 export type Role =
   | "Président"
   | "Présidente"
