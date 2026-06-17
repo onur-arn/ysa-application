@@ -2,6 +2,7 @@
 
 import { Logo } from "@/components/logo"
 import { BottomNav } from "@/components/bottom-nav"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { Settings } from "lucide-react"
 import Link from "next/link"
 import type { ReactNode } from "react"
@@ -14,13 +15,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Logo size={34} />
           <span className="font-heading text-base font-extrabold tracking-tight text-primary">YouthStation</span>
         </Link>
-        <Link
-          href="/ayarlar"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary"
-          aria-label="Paramètres"
-        >
-          <Settings className="h-5 w-5" />
-        </Link>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <Link
+            href="/ayarlar"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary"
+            aria-label="Ayarlar"
+          >
+            <Settings className="h-5 w-5" />
+          </Link>
+        </div>
       </header>
       <main className="flex-1 pb-24">{children}</main>
       <BottomNav />
