@@ -2,10 +2,9 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { motion, AnimatePresence } from "framer-motion"
-import { User, Bell, Info, LogOut, Globe, Check, ChevronRight } from "lucide-react"
+import { User, Bell, Info, LogOut, Moon, Sun } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { LANGS, type Lang } from "@/lib/i18n/translations"
+import { useTheme } from "@/lib/theme/context"
 import { getStation } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { createClient } from "@/lib/supabase/client"
@@ -19,9 +18,9 @@ export function SettingsClient({
   fullName: string
   station: string
 }) {
-  const { t, lang, setLang } = useI18n()
+  const { t } = useI18n()
+  const { theme, toggle } = useTheme()
   const router = useRouter()
-  const [langOpen, setLangOpen] = useState(false)
   const [notifs, setNotifs] = useState({ push: true, email: false, events: true })
   const [loggingOut, setLoggingOut] = useState(false)
 
@@ -68,43 +67,24 @@ export function SettingsClient({
           </div>
         </div>
 
-        {/* Language */}
-        <Section title={t("settings.language")} icon={Globe}>
-          <button
-            onClick={() => setLangOpen((o) => !o)}
-            className="flex w-full items-center justify-between px-4 py-3.5"
-          >
+        {/* Appearance */}
+        <Section title={t("settings.appearance")} icon={theme === "dark" ? Moon : Sun}>
+          <div className="flex items-center justify-between px-4 py-3.5">
             <span className="flex items-center gap-2 text-foreground">
-              <span className="text-lg">{LANGS.find((l) => l.code === lang)?.flag}</span>
-              {LANGS.find((l) => l.code === lang)?.label}
+              {theme === "dark" ? <Moon className="size-5 text-primary" /> : <Sun className="size-5 text-primary" />}
+              {t("settings.darkMode")}
             </span>
-            <ChevronRight className={`size-5 text-muted-foreground transition-transform ${langOpen ? "rotate-90" : ""}`} />
-          </button>
-          <AnimatePresence initial={false}>
-            {langOpen && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden border-t border-border"
-              >
-                {LANGS.map((l) => (
-                  <button
-                    key={l.code}
-                    onClick={() => {
-                      setLang(l.code as Lang)
-                      setLangOpen(false)
-                    }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-secondary"
-                  >
-                    <span className="text-lg">{l.flag}</span>
-                    <span className="flex-1 text-foreground">{l.label}</span>
-                    {lang === l.code && <Check className="size-5 text-primary" />}
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
+            <button
+              role="switch"
+              aria-checked={theme === "dark"}
+              onClick={toggle}
+              className={`relative h-7 w-12 rounded-full transition-colors ${theme === "dark" ? "bg-primary" : "bg-secondary"}`}
+            >
+              <span
+                className={`absolute top-1 size-5 rounded-full bg-card shadow transition-transform ${theme === "dark" ? "translate-x-6" : "translate-x-1"}`}
+              />
+            </button>
+          </div>
         </Section>
 
         {/* Account */}
