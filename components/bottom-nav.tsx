@@ -8,10 +8,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 const items = [
-  { href: "/feed", icon: Home, key: "nav.feed" },
-  { href: "/messages", icon: MessageCircle, key: "nav.messages" },
-  { href: "/agenda", icon: CalendarDays, key: "nav.agenda" },
   { href: "/annuaire", icon: Users, key: "nav.directory" },
+  { href: "/messages", icon: MessageCircle, key: "nav.messages" },
+  { href: "/feed", icon: Home, key: "nav.feed" },
+  { href: "/agenda", icon: CalendarDays, key: "nav.agenda" },
   { href: "/gorevler", icon: ListChecks, key: "nav.tasks" },
 ]
 
@@ -36,7 +36,7 @@ export function BottomNav() {
                   <motion.span
                     layoutId="nav-pill"
                     className="absolute -top-px h-1 w-8 rounded-full bg-primary"
-                    transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                    transition={{ type: "spring", stiffness: 700, damping: 36 }}
                   />
                 )}
                 <Icon
