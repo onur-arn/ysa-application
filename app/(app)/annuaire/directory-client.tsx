@@ -1,30 +1,36 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Search, Phone, Mail, Cake, MapPin } from "lucide-react"
+import { Search, Phone, Mail, Cake, MapPin, ExternalLink, Home } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { MEMBERS, getStation, type Member } from "@/lib/data/stations"
+import { MEMBERS, STATIONS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
+
+type StationFilter = "all" | StationId
 
 export function DirectoryClient() {
   const { t } = useI18n()
   const [search, setSearch] = useState("")
+  const [stationFilter, setStationFilter] = useState<StationFilter>("all")
   const [selected, setSelected] = useState<Member | null>(null)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return [...MEMBERS]
-      .filter(
-        (m) =>
+      .filter((m) => {
+        const matchesSearch =
+          !q ||
           m.name.toLowerCase().includes(q) ||
+          m.role.toLowerCase().includes(q) ||
           getStation(m.station).name.toLowerCase().includes(q) ||
-          m.city.toLowerCase().includes(q),
-      )
+          m.city.toLowerCase().includes(q)
+        const matchesStation = stationFilter === "all" || m.station === stationFilter
+        return matchesSearch && matchesStation
+      })
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [search])
+  }, [search, stationFilter])
 
-  // group by first letter
   const grouped = useMemo(() => {
     const map: Record<string, Member[]> = {}
     filtered.forEach((m) => {
@@ -40,15 +46,37 @@ export function DirectoryClient() {
       <PageHeader title={t("nav.directory")} />
 
       <div className="px-4 pt-3">
-        <div className="relative mb-1">
+        {/* Search */}
+        <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("directory.searchMember")}
+            placeholder="İsim, görev veya şehir..."
             className="h-11 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-base outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
         </div>
+
+        {/* Station filter chips */}
+        <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
+          <StationChip
+            active={stationFilter === "all"}
+            onClick={() => setStationFilter("all")}
+            label="Tümü"
+          />
+          {[...STATIONS]
+            .sort((a, b) => a.city.localeCompare(b.city, "tr"))
+            .map((s) => (
+              <StationChip
+                key={s.id}
+                active={stationFilter === s.id}
+                onClick={() => setStationFilter(s.id)}
+                label={s.city}
+                color={s.color}
+              />
+            ))}
+        </div>
+
         <p className="px-1 py-2 text-xs text-muted-foreground">
           {filtered.length} {t("directory.members")}
         </p>
@@ -65,12 +93,39 @@ export function DirectoryClient() {
             ))}
           </div>
         ))}
+        {grouped.length === 0 && (
+          <p className="py-12 text-center text-sm text-muted-foreground">Üye bulunamadı</p>
+        )}
       </div>
 
       <Modal open={!!selected} onClose={() => setSelected(null)} title={t("nav.directory")}>
         {selected && <MemberDetail member={selected} />}
       </Modal>
     </div>
+  )
+}
+
+function StationChip({
+  active,
+  onClick,
+  label,
+  color,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  color?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+        active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground"
+      }`}
+    >
+      {color && <span className="size-2 rounded-full" style={{ backgroundColor: `hsl(${color})` }} />}
+      {label}
+    </button>
   )
 }
 
@@ -105,12 +160,20 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
 function MemberDetail({ member }: { member: Member }) {
   const { t } = useI18n()
   const station = getStation(member.station)
+
   const rows = [
     { icon: Phone, label: t("directory.phone"), value: member.phone, href: `tel:${member.phone}` },
     { icon: Mail, label: t("directory.email"), value: member.email, href: `mailto:${member.email}` },
     { icon: Cake, label: t("directory.birthday"), value: member.birthday },
     { icon: MapPin, label: t("directory.city"), value: member.city },
+    ...(member.memleket
+      ? [{ icon: Home, label: t("directory.memleket"), value: member.memleket }]
+      : []),
+    ...(member.linkedin
+      ? [{ icon: ExternalLink, label: "LinkedIn", value: "Profili gör", href: member.linkedin }]
+      : []),
   ]
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col items-center text-center">
@@ -149,7 +212,7 @@ function MemberDetail({ member }: { member: Member }) {
             </div>
           )
           return r.href ? (
-            <a key={r.label} href={r.href}>
+            <a key={r.label} href={r.href} target={r.label === "LinkedIn" ? "_blank" : undefined} rel="noopener noreferrer">
               {content}
             </a>
           ) : (

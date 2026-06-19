@@ -75,7 +75,7 @@ function TabButton({
       }`}
     >
       {active && (
-        <motion.span layoutId="feed-tab" className="absolute inset-0 rounded-xl bg-primary" transition={{ type: "spring", stiffness: 400, damping: 32 }} />
+        <motion.span layoutId="feed-tab" className="absolute inset-0 rounded-xl bg-primary" transition={{ type: "spring", stiffness: 700, damping: 28 }} />
       )}
       <span className="relative flex items-center gap-2">
         {icon}

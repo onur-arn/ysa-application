@@ -5,11 +5,14 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { TASKS, type Task, type TaskStatus, type TaskPriority, type TaskComment } from "@/lib/data/tasks"
-import { getStation, type StationId } from "@/lib/data/stations"
+import { getStation, STATIONS, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
+
+// Simulated current user station — intl sees everything, others only see their own + intl
+const MY_STATION: StationId = "lyon"
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done"]
 
@@ -19,16 +22,25 @@ export function TasksClient() {
   const [filter, setFilter] = useState<TaskStatus | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
 
-  const counts = useMemo(
-    () => ({
-      todo: tasks.filter((t) => t.status === "todo").length,
-      in_progress: tasks.filter((t) => t.status === "in_progress").length,
-      done: tasks.filter((t) => t.status === "done").length,
-    }),
+  // Visibility: intl sees all, others see own station + intl tasks
+  const visibleTasks = useMemo(
+    () =>
+      MY_STATION === "intl"
+        ? tasks
+        : tasks.filter((t) => t.station === MY_STATION || t.station === "intl"),
     [tasks],
   )
 
-  const visible = filter ? tasks.filter((t) => t.status === filter) : tasks
+  const displayed = filter ? visibleTasks.filter((t) => t.status === filter) : visibleTasks
+
+  const counts = useMemo(
+    () => ({
+      todo: visibleTasks.filter((t) => t.status === "todo").length,
+      in_progress: visibleTasks.filter((t) => t.status === "in_progress").length,
+      done: visibleTasks.filter((t) => t.status === "done").length,
+    }),
+    [visibleTasks],
+  )
 
   function cycleStatus(id: string) {
     setTasks((prev) =>
@@ -48,7 +60,7 @@ export function TasksClient() {
               ...t,
               comments: [
                 ...t.comments,
-                { id: String(Date.now()), author: "Moi", initials: "MO", text, time: "À l'instant" },
+                { id: String(Date.now()), author: "Ben", initials: "BN", text, time: "Şimdi" },
               ],
             }
           : t,
@@ -56,9 +68,24 @@ export function TasksClient() {
     )
   }
 
+  const myStation = getStation(MY_STATION)
+
   return (
     <div>
       <PageHeader title={t("nav.tasks")} />
+
+      {/* Station indicator */}
+      <div className="mx-4 mb-1 mt-2 flex items-center gap-2 rounded-xl bg-secondary px-3 py-2 text-sm text-muted-foreground">
+        <span
+          className="size-2.5 rounded-full"
+          style={{ backgroundColor: `hsl(${myStation.color})` }}
+        />
+        <span>
+          {MY_STATION === "intl"
+            ? "Uluslararası Büro — tüm görevleri görüyorsunuz"
+            : `${myStation.name} — yalnızca istasyonunuzun görevleri`}
+        </span>
+      </div>
 
       {/* Status counters */}
       <div className="grid grid-cols-3 gap-2 px-4 pt-3">
@@ -88,7 +115,7 @@ export function TasksClient() {
       {/* Task list */}
       <div className="flex flex-col gap-3 px-4 pt-4">
         <AnimatePresence initial={false}>
-          {visible.map((task) => (
+          {displayed.map((task) => (
             <TaskCard
               key={task.id}
               task={task}
@@ -97,7 +124,7 @@ export function TasksClient() {
             />
           ))}
         </AnimatePresence>
-        {visible.length === 0 && (
+        {displayed.length === 0 && (
           <p className="py-10 text-center text-sm text-muted-foreground">{t("tasks.empty")}</p>
         )}
       </div>
@@ -165,12 +192,9 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
 
 function priorityStyle(p: TaskPriority) {
   switch (p) {
-    case "urgent":
-      return "bg-destructive/10 text-destructive"
-    case "normal":
-      return "bg-primary/10 text-primary"
-    case "low":
-      return "bg-muted text-muted-foreground"
+    case "urgent": return "bg-destructive/10 text-destructive"
+    case "normal": return "bg-primary/10 text-primary"
+    case "low": return "bg-muted text-muted-foreground"
   }
 }
 
@@ -213,9 +237,7 @@ function TaskCard({
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <p
-              className={`font-semibold text-foreground ${task.status === "done" ? "text-muted-foreground line-through" : ""}`}
-            >
+            <p className={`font-semibold text-foreground ${task.status === "done" ? "text-muted-foreground line-through" : ""}`}>
               {task.title}
             </p>
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${priorityStyle(task.priority)}`}>
@@ -223,7 +245,6 @@ function TaskCard({
             </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{task.description}</p>
-
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <span
               className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
@@ -241,7 +262,6 @@ function TaskCard({
         </div>
       </div>
 
-      {/* Comments toggle */}
       <button
         onClick={() => setShowComments((s) => !s)}
         className="flex w-full items-center gap-2 border-t border-border px-3.5 py-2.5 text-xs font-medium text-muted-foreground"
@@ -274,7 +294,6 @@ function TaskCard({
                   </div>
                 </div>
               ))}
-
               <div className="mt-1 flex items-center gap-2">
                 <input
                   value={draft}
@@ -322,34 +341,28 @@ function CreateTaskModal({
   const { t } = useI18n()
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [station, setStation] = useState<string>("paris")
+  const [station, setStation] = useState<string>(MY_STATION)
   const [priority, setPriority] = useState<TaskPriority>("normal")
   const [assignee, setAssignee] = useState("")
 
   function submit() {
     if (!title.trim()) return
     const initials =
-      assignee
-        .trim()
-        .split(" ")
-        .map((w) => w[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase() || "NA"
+      assignee.trim().split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "NA"
     onCreate({
       id: String(Date.now()),
       title: title.trim(),
       description: description.trim(),
       station: station as StationId,
       priority,
-      assignee: assignee.trim() || "Non assigné",
+      assignee: assignee.trim() || "Atanmadı",
       assigneeInitials: initials,
       status: "todo",
       comments: [],
     })
     setTitle("")
     setDescription("")
-    setStation("paris")
+    setStation(MY_STATION)
     setPriority("normal")
     setAssignee("")
   }
@@ -392,7 +405,7 @@ function CreateTaskModal({
           </div>
         </Field>
         <Field label={t("tasks.assignee")}>
-          <input value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputClass} placeholder="Ex : Lucas Martin" />
+          <input value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputClass} placeholder="Örn: Lucas Martin" />
         </Field>
         <Field label={t("agenda.station")}>
           <StationSelect value={station} onChange={setStation} />

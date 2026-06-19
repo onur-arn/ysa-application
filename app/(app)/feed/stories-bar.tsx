@@ -26,7 +26,7 @@ export function StoriesBar() {
           <button key={s.id} onClick={() => setActive(s.id)} className="flex shrink-0 flex-col items-center gap-1.5">
             <span className="rounded-full bg-gradient-to-tr from-primary to-chart-3 p-[2.5px]">
               <span
-                className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-card font-heading text-sm font-bold text-white"
+                className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-card font-heading text-[11px] font-bold tracking-wide text-white"
                 style={{ backgroundColor: `hsl(${STORY_BG[s.id]})` }}
               >
                 {s.short}

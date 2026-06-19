@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus } from "lucide-react"
+import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { EVENTS, type EventItem } from "@/lib/data/feed"
 import { STATIONS, getStation, type StationId } from "@/lib/data/stations"
@@ -14,27 +14,18 @@ import { Button } from "@/components/ui/button"
 type View = "calendar" | "list"
 type Filter = "all" | StationId
 
-const MONTHS_FR = [
-  "Janvier",
-  "Février",
-  "Mars",
-  "Avril",
-  "Mai",
-  "Juin",
-  "Juillet",
-  "Août",
-  "Septembre",
-  "Octobre",
-  "Novembre",
-  "Décembre",
+const MONTHS_TR = [
+  "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
 ]
-const WEEKDAYS = ["L", "M", "M", "J", "V", "S", "D"]
+const WEEKDAYS = ["Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz"]
+const WEEKDAYS_FULL = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 export function AgendaClient() {
   const { t } = useI18n()
   const [view, setView] = useState<View>("calendar")
   const [filter, setFilter] = useState<Filter>("all")
-  const [cursor, setCursor] = useState(new Date(2026, 5, 1)) // June 2026
+  const [cursor, setCursor] = useState(new Date(2026, 5, 1))
   const [events, setEvents] = useState<EventItem[]>(EVENTS)
   const [selected, setSelected] = useState<EventItem | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -68,7 +59,7 @@ export function AgendaClient() {
     return map
   }, [monthEvents])
 
-  const firstDayIdx = (new Date(year, month, 1).getDay() + 6) % 7 // Monday-first
+  const firstDayIdx = (new Date(year, month, 1).getDay() + 6) % 7
   const daysInMonth = new Date(year, month + 1, 0).getDate()
 
   function changeMonth(delta: number) {
@@ -108,7 +99,7 @@ export function AgendaClient() {
                 <motion.span
                   layoutId="agendaview"
                   className="absolute inset-0 rounded-lg bg-primary"
-                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                  transition={{ type: "spring", stiffness: 600, damping: 30 }}
                 />
               )}
               <span className="relative flex items-center justify-center gap-1.5">
@@ -128,7 +119,7 @@ export function AgendaClient() {
               <ChevronLeft className="size-5" />
             </button>
             <h2 className="font-heading text-base font-bold">
-              {MONTHS_FR[month]} {year}
+              {MONTHS_TR[month]} {year}
             </h2>
             <button onClick={() => changeMonth(1)} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
               <ChevronRight className="size-5" />
@@ -178,20 +169,10 @@ export function AgendaClient() {
             })}
           </div>
 
-          {/* This month's events under calendar */}
-          <div className="mt-5">
-            <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
-              {t("agenda.eventsThisMonth")} · {monthEvents.length}
-            </h3>
-            <div className="flex flex-col gap-2">
-              {monthEvents.map((e) => (
-                <EventRow key={e.id} event={e} onClick={() => setSelected(e)} />
-              ))}
-              {monthEvents.length === 0 && (
-                <p className="py-6 text-center text-sm text-muted-foreground">{t("agenda.noEvents")}</p>
-              )}
-            </div>
-          </div>
+          {/* No event list under calendar — only dots on days */}
+          {monthEvents.length === 0 && (
+            <p className="mt-6 py-4 text-center text-sm text-muted-foreground">{t("agenda.noEvents")}</p>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-2 px-4">
@@ -200,6 +181,9 @@ export function AgendaClient() {
             .map((e) => (
               <EventRow key={e.id} event={e} onClick={() => setSelected(e)} showMonth />
             ))}
+          {filtered.length === 0 && (
+            <p className="py-10 text-center text-sm text-muted-foreground">{t("agenda.noEvents")}</p>
+          )}
         </div>
       )}
 
@@ -225,18 +209,38 @@ export function AgendaClient() {
               <h3 className="font-heading text-lg font-bold text-balance">{selected.title}</h3>
               <p className="mt-1 text-sm text-white/90">{getStation(selected.station).name}</p>
             </div>
+
             <div className="flex items-center gap-3 text-sm">
-              <CalendarDays className="size-5 text-primary" />
+              <CalendarDays className="size-5 shrink-0 text-primary" />
               <span>{formatLongDate(selected.date)}</span>
             </div>
             <div className="flex items-center gap-3 text-sm">
-              <Clock className="size-5 text-primary" />
+              <Clock className="size-5 shrink-0 text-primary" />
               <span>{selected.time}</span>
             </div>
             <div className="flex items-center gap-3 text-sm">
-              <MapPin className="size-5 text-primary" />
+              <MapPin className="size-5 shrink-0 text-primary" />
               <span>{selected.place}</span>
             </div>
+            {selected.description && (
+              <div className="flex items-start gap-3 text-sm">
+                <FileText className="size-5 shrink-0 text-primary mt-0.5" />
+                <span className="text-foreground">{selected.description}</span>
+              </div>
+            )}
+            {selected.link && (
+              <div className="flex items-center gap-3 text-sm">
+                <LinkIcon className="size-5 shrink-0 text-primary" />
+                <a
+                  href={selected.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="truncate text-primary underline"
+                >
+                  {selected.link}
+                </a>
+              </div>
+            )}
           </div>
         )}
       </Modal>
@@ -299,18 +303,18 @@ function EventRow({
         style={{ backgroundColor: `hsl(${station.color})` }}
       >
         <span className="text-base font-bold leading-none">{d.getDate()}</span>
-        {showMonth && <span className="text-[10px] uppercase">{MONTHS_FR[d.getMonth()].slice(0, 3)}</span>}
+        {showMonth && <span className="text-[10px] uppercase">{MONTHS_TR[d.getMonth()].slice(0, 3)}</span>}
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-foreground">{event.title}</p>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="mt-0.5 flex flex-col gap-0.5 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Clock className="size-3" />
+            <Clock className="size-3 shrink-0" />
             {event.time}
           </span>
-          <span className="flex items-center gap-1 truncate">
+          <span className="flex items-center gap-1">
             <MapPin className="size-3 shrink-0" />
-            {event.place}
+            <span className="truncate">{event.place}</span>
           </span>
         </div>
       </div>
@@ -332,6 +336,8 @@ function CreateEventModal({
   const [day, setDay] = useState("")
   const [time, setTime] = useState("")
   const [place, setPlace] = useState("")
+  const [description, setDescription] = useState("")
+  const [link, setLink] = useState("")
   const [station, setStation] = useState<string>("paris")
 
   function submit() {
@@ -343,11 +349,19 @@ function CreateEventModal({
       time: time || "18:00",
       place: place || "—",
       station: station as StationId,
+      description: description.trim() || undefined,
+      link: link.trim() || undefined,
+      likes: 0,
+      participantsCount: 0,
+      notAttendingCount: 0,
+      comments: [],
     })
     setTitle("")
     setDay("")
     setTime("")
     setPlace("")
+    setDescription("")
+    setLink("")
     setStation("paris")
   }
 
@@ -368,6 +382,18 @@ function CreateEventModal({
         <Field label={t("agenda.place")}>
           <input value={place} onChange={(e) => setPlace(e.target.value)} className={inputClass} placeholder={t("agenda.placePlaceholder")} />
         </Field>
+        <Field label="Açıklama">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            className={`${inputClass} h-auto py-2.5`}
+            placeholder="Etkinlik açıklaması..."
+          />
+        </Field>
+        <Field label="Bağlantı (Zoom vb.)">
+          <input value={link} onChange={(e) => setLink(e.target.value)} className={inputClass} placeholder="https://zoom.us/..." />
+        </Field>
         <Field label={t("agenda.station")}>
           <StationSelect value={station} onChange={setStation} />
         </Field>
@@ -381,7 +407,5 @@ function CreateEventModal({
 
 function formatLongDate(iso: string) {
   const d = new Date(iso)
-  return `${WEEKDAYS_FULL[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}`
+  return `${WEEKDAYS_FULL[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS_TR[d.getMonth()]} ${d.getFullYear()}`
 }
-
-const WEEKDAYS_FULL = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]

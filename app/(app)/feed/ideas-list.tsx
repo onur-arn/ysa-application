@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { ThumbsUp, ThumbsDown, TrendingUp, Sparkles, Check } from "lucide-react"
+import { ThumbsUp, ThumbsDown, TrendingUp, Sparkles, Check, Rocket } from "lucide-react"
 import { IDEAS, type IdeaItem, type IdeaStatus } from "@/lib/data/feed"
 import { station } from "@/lib/data/stations"
 import { useI18n } from "@/lib/i18n/context"
@@ -11,6 +11,7 @@ const statusConfig: Record<IdeaStatus, { key: string; icon: typeof TrendingUp; c
   trending: { key: "feed.trending", icon: TrendingUp, className: "bg-chart-4/15 text-chart-4" },
   new: { key: "feed.new", icon: Sparkles, className: "bg-primary/15 text-primary" },
   accepted: { key: "feed.accepted", icon: Check, className: "bg-emerald-500/15 text-emerald-600" },
+  igem: { key: "feed.igem", icon: Rocket, className: "bg-purple-500/15 text-purple-600" },
 }
 
 function IdeaCard({ idea }: { idea: IdeaItem }) {
@@ -68,9 +69,34 @@ function IdeaCard({ idea }: { idea: IdeaItem }) {
 }
 
 export function IdeasList() {
+  const [igemIdeas, setIgemIdeas] = useState<IdeaItem[]>([])
+
+  useEffect(() => {
+    try {
+      const stored: { author: string; motivation: string; date: string }[] = JSON.parse(
+        localStorage.getItem("igem-requests") ?? "[]"
+      )
+      const items: IdeaItem[] = stored.map((r, i) => ({
+        id: `igem-${i}`,
+        title: "iGEM Programı Katılım Talebi",
+        description: r.motivation || "Üye iGEM programına katılmak istiyor.",
+        author: r.author,
+        station: "intl" as const,
+        up: 0,
+        down: 0,
+        status: "igem" as const,
+      }))
+      setIgemIdeas(items)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const allIdeas = [...igemIdeas, ...IDEAS]
+
   return (
     <div className="flex flex-col gap-3">
-      {IDEAS.map((idea) => (
+      {allIdeas.map((idea) => (
         <IdeaCard key={idea.id} idea={idea} />
       ))}
     </div>

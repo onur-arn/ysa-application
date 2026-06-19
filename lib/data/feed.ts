@@ -1,5 +1,13 @@
 import type { StationId } from "./stations"
 
+export type EventComment = {
+  id: string
+  author: string
+  initials: string
+  text: string
+  time: string
+}
+
 export type EventItem = {
   id: string
   title: string
@@ -8,62 +16,104 @@ export type EventItem = {
   place: string
   station: StationId
   past?: boolean
+  description?: string
+  link?: string
+  image?: string
+  likes: number
+  participantsCount: number
+  notAttendingCount: number
+  comments: EventComment[]
 }
 
 export const EVENTS: EventItem[] = [
   {
     id: "e1",
-    title: "Assemblée Générale Annuelle",
+    title: "Yıllık Genel Kurul",
     date: "2026-06-22",
     time: "18:00",
-    place: "Maison des Associations, Paris",
+    place: "Dernekler Evi, Paris",
     station: "intl",
+    description: "Tüm istasyonların katılımıyla yıllık genel kurul toplantısı.",
+    link: "https://zoom.us/j/123456789",
+    likes: 14,
+    participantsCount: 32,
+    notAttendingCount: 5,
+    comments: [
+      { id: "c1", author: "Aylin Demir", initials: "AD", text: "Katılacağım, sabırsızlanıyorum!", time: "2g önce" },
+    ],
   },
   {
     id: "e2",
-    title: "Atelier Leadership & Projets",
+    title: "Liderlik & Proje Atölyesi",
     date: "2026-06-25",
     time: "14:30",
-    place: "Espace Jeunes, Lyon",
+    place: "Gençlik Merkezi, Lyon",
     station: "lyon",
+    description: "Proje yönetimi ve liderlik becerilerini geliştirmek için atölye.",
+    likes: 8,
+    participantsCount: 15,
+    notAttendingCount: 2,
+    comments: [],
   },
   {
     id: "e3",
-    title: "Tournoi de Football Inter-Stations",
+    title: "İstasyonlar Arası Futbol Turnuvası",
     date: "2026-06-28",
     time: "10:00",
-    place: "Stade Municipal, Marseille",
-    station: "marseille",
+    place: "Belediye Stadyumu, Nancy",
+    station: "nancy",
+    description: "Tüm istasyonlar katılabilir. Takımlar en az 5 kişilik olmalı.",
+    likes: 22,
+    participantsCount: 48,
+    notAttendingCount: 3,
+    comments: [
+      { id: "c2", author: "Thomas Girard", initials: "TG", text: "Nancy takımı hazır!", time: "1g önce" },
+    ],
   },
   {
     id: "e4",
-    title: "Soirée Culturelle & Repas Partagé",
+    title: "Kültür Gecesi & Ortak Yemek",
     date: "2026-07-04",
     time: "19:30",
-    place: "Salle Polyvalente, Bordeaux",
-    station: "bordeaux",
+    place: "Çok Amaçlı Salon, Strasbourg",
+    station: "strasbourg",
+    description: "Her istasyondan bir yemek getirin, birlikte paylaşalım!",
+    link: "https://zoom.us/j/987654321",
+    likes: 19,
+    participantsCount: 27,
+    notAttendingCount: 4,
+    comments: [],
   },
   {
     id: "e5",
-    title: "Forum des Bénévoles",
+    title: "Gönüllüler Forumu",
     date: "2026-05-30",
     time: "16:00",
-    place: "Mairie de Toulouse",
-    station: "toulouse",
+    place: "Belediye Binası, Caen",
+    station: "caen",
     past: true,
+    likes: 11,
+    participantsCount: 20,
+    notAttendingCount: 6,
+    comments: [],
   },
   {
     id: "e6",
-    title: "Collecte Solidaire de Printemps",
+    title: "Bahar Dayanışma Kampanyası",
     date: "2026-05-18",
     time: "09:00",
-    place: "Place Centrale, Lille",
-    station: "lille",
+    place: "Merkez Meydan, Hamburg",
+    station: "hamburg",
     past: true,
+    image: "/youth-event.png",
+    likes: 7,
+    participantsCount: 18,
+    notAttendingCount: 1,
+    comments: [],
   },
 ]
 
-export type IdeaStatus = "trending" | "new" | "accepted"
+export type IdeaStatus = "trending" | "new" | "accepted" | "igem"
 
 export type IdeaItem = {
   id: string
@@ -79,8 +129,8 @@ export type IdeaItem = {
 export const IDEAS: IdeaItem[] = [
   {
     id: "i1",
-    title: "Créer une newsletter mensuelle inter-stations",
-    description: "Un récap des activités de chaque station envoyé à tous les membres.",
+    title: "İstasyonlar arası aylık bülten",
+    description: "Her istasyonun faaliyetlerinin özetinin tüm üyelere gönderilmesi.",
     author: "Aylin Demir",
     station: "intl",
     up: 42,
@@ -89,8 +139,8 @@ export const IDEAS: IdeaItem[] = [
   },
   {
     id: "i2",
-    title: "Week-end d'intégration pour les nouveaux",
-    description: "Un séjour pour accueillir les nouveaux membres et créer du lien.",
+    title: "Yeni üyeler için entegrasyon hafta sonu",
+    description: "Yeni üyeleri karşılamak ve bağ kurmak için bir kamp.",
     author: "Lucas Martin",
     station: "paris",
     up: 38,
@@ -99,20 +149,20 @@ export const IDEAS: IdeaItem[] = [
   },
   {
     id: "i3",
-    title: "Application de covoiturage pour les événements",
-    description: "Faciliter les trajets partagés entre membres pour les grands événements.",
+    title: "Etkinlikler için araç paylaşım uygulaması",
+    description: "Büyük etkinliklere gidişi kolaylaştırmak için üyeler arası araç paylaşımı.",
     author: "Hugo Moreau",
-    station: "toulouse",
+    station: "nancy",
     up: 12,
     down: 1,
     status: "new",
   },
   {
     id: "i4",
-    title: "Partenariat avec des entreprises locales",
-    description: "Obtenir des réductions et du sponsoring pour nos projets.",
+    title: "Yerel işletmelerle ortaklık",
+    description: "Projelerimiz için indirim ve sponsorluk almak.",
     author: "Mehmet Yılmaz",
-    station: "marseille",
+    station: "caen",
     up: 27,
     down: 8,
     status: "trending",
@@ -122,9 +172,10 @@ export const IDEAS: IdeaItem[] = [
 export const STORY_BG: Record<string, string> = {
   intl: "188 57% 48%",
   paris: "221 70% 55%",
-  lyon: "350 70% 55%",
-  marseille: "28 85% 55%",
-  bordeaux: "280 50% 55%",
-  toulouse: "150 55% 45%",
-  lille: "200 70% 50%",
+  caen: "350 70% 55%",
+  nancy: "28 85% 55%",
+  strasbourg: "280 50% 55%",
+  lyon: "150 55% 45%",
+  hamburg: "200 70% 50%",
+  bucarest: "45 90% 50%",
 }

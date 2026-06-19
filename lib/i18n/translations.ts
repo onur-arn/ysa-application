@@ -347,6 +347,18 @@ const tr: Dict = {
   "tasks.changeStatus": "Durumu değiştir",
   "tasks.titlePlaceholder": "Örn: Salonu ayırt",
   "tasks.descPlaceholder": "Görev detayları…",
+  "settings.appearance": "Görünüm",
+  "settings.darkMode": "Karanlık mod",
+  "settings.lightMode": "Aydınlık mod",
+  "settings.igem": "iGEM",
+  "settings.igemRequestBtn": "iGEM Talebi Gönder",
+  "settings.igemSent": "Talebiniz gönderildi ve fil'de yayınlandı!",
+  "settings.igemDesc": "iGEM programına katılmak istediğinizi bildirin.",
+  "settings.igemMotivation": "Motivasyonunuz (isteğe bağlı)",
+  "settings.igemMotivationPlaceholder": "iGEM'e neden katılmak istiyorsunuz?",
+  "directory.memleket": "Memleket",
+  "auth.memleket": "Memleket",
+  "feed.igem": "iGEM Talebi",
 }
 
 const de: Dict = {

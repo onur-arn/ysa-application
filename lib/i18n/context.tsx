@@ -5,14 +5,14 @@ import { translations } from "./translations"
 
 type I18nContextType = {
   t: (key: string) => string
+  lang: string
 }
 
 const I18nContext = createContext<I18nContextType | null>(null)
 
-// The app is Turkish-only. We keep a tiny context so existing `t()` calls keep working.
 export function I18nProvider({ children }: { children: ReactNode }) {
   const t = (key: string) => translations.tr[key] ?? key
-  return <I18nContext.Provider value={{ t }}>{children}</I18nContext.Provider>
+  return <I18nContext.Provider value={{ t, lang: "tr" }}>{children}</I18nContext.Provider>
 }
 
 export function useI18n() {

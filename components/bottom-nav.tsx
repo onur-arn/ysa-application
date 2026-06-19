@@ -36,7 +36,7 @@ export function BottomNav() {
                   <motion.span
                     layoutId="nav-pill"
                     className="absolute -top-px h-1 w-8 rounded-full bg-primary"
-                    transition={{ type: "spring", stiffness: 700, damping: 36 }}
+                    transition={{ type: "spring", stiffness: 900, damping: 30 }}
                   />
                 )}
                 <Icon

@@ -74,7 +74,7 @@ export function MessagesClient() {
                 <motion.span
                   layoutId="msgtab"
                   className="absolute inset-0 rounded-lg bg-primary"
-                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                  transition={{ type: "spring", stiffness: 700, damping: 28 }}
                 />
               )}
               <span className="relative flex items-center justify-center gap-1.5">
@@ -200,6 +200,7 @@ function ChatView({
   const [draft, setDraft] = useState("")
   const [attached, setAttached] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
@@ -299,8 +300,22 @@ function ChatView({
           </div>
         )}
         <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                const url = URL.createObjectURL(file)
+                setAttached(url)
+                e.target.value = ""
+              }
+            }}
+          />
           <button
-            onClick={() => setAttached("/youth-event.png")}
+            onClick={() => fileInputRef.current?.click()}
             className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-secondary"
             aria-label={t("messages.attachImage")}
           >
