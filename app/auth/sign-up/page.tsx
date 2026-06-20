@@ -130,7 +130,9 @@ export default function SignUpPage() {
         // Supabase not configured — continue to success in demo mode
       }
     }
-    // Send notification email to secretary
+    // Send notification email to secretary — best-effort, must not block sign-up.
+    // The Supabase account is already created at this point, so an email failure
+    // should never prevent the user from completing registration.
     try {
       let photoBase64: string | null = null
       if (photo) {
@@ -147,16 +149,10 @@ export default function SignUpPage() {
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
-        console.error("signup-request failed:", json)
-        setError("L'e-mail de notification n'a pas pu être envoyé. Veuillez réessayer.")
-        setLoading(false)
-        return
+        console.error("signup-request failed (non-blocking):", json)
       }
     } catch (err) {
-      console.error("signup-request error:", err)
-      setError("Erreur réseau lors de l'envoi. Vérifiez votre connexion.")
-      setLoading(false)
-      return
+      console.error("signup-request error (non-blocking):", err)
     }
 
     // Save to local directory
