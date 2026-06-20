@@ -7,14 +7,16 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useRef } from "react"
 import {
   Mail, Lock, User, Phone, Cake, ExternalLink, Loader2,
-  ChevronDown, ChevronLeft, Check, MapPin, Briefcase, CheckCircle2, Camera,
+  ChevronDown, ChevronLeft, Check, MapPin, Briefcase, CheckCircle2, Camera, Home, Moon, Sun,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n/context"
+import { useTheme } from "@/lib/theme/context"
 import {
   STATIONS,
+  STATIONS_SORTED,
   SEHIRLER,
   YONETIM_KURULU_ROLES,
   YURUTME_KURULU_ROLES,
@@ -42,6 +44,8 @@ type FormData = {
   linkedin: string
   role: Role
   station: StationId
+  igemEgitimi: "evet" | "hayır" | ""
+  igemTarihi: string
   memleket: string
 }
 
@@ -55,6 +59,8 @@ const INITIAL: FormData = {
   linkedin: "",
   role: "" as Role,
   station: "paris",
+  igemEgitimi: "",
+  igemTarihi: "",
   memleket: "",
 }
 
@@ -72,6 +78,7 @@ const variants = {
 export default function SignUpPage() {
   const router = useRouter()
   const { t } = useI18n()
+  const { theme, toggle } = useTheme()
   const [step, setStep] = useState(1)
   const [dir, setDir] = useState(1)
   const [data, setData] = useState<FormData>(INITIAL)
@@ -108,6 +115,8 @@ export default function SignUpPage() {
               phone: data.phone,
               birthday: data.birthday,
               linkedin: data.linkedin,
+              igem_egitimi: data.igemEgitimi,
+              igem_tarihi: data.igemTarihi,
               memleket: data.memleket,
             },
           },
@@ -134,19 +143,59 @@ export default function SignUpPage() {
       await fetch("/api/signup-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...data, photoBase64 }),
+        body: JSON.stringify({ ...data, photoBase64, igemEgitimi: data.igemEgitimi, igemTarihi: data.igemTarihi }),
       })
     } catch {
       // Non-blocking — proceed to success even if email fails
     }
+
+    // Save to local directory
+    try {
+      const existing = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
+      const initials = `${data.firstName[0] ?? ""}${data.lastName[0] ?? ""}`.toUpperCase()
+      existing.push({
+        id: `reg-${Date.now()}`,
+        name: `${data.firstName} ${data.lastName}`.trim(),
+        initials,
+        role: data.role,
+        station: data.station,
+        city: data.station,
+        memleket: data.memleket,
+        phone: data.phone,
+        email: data.email,
+        password: data.password,
+        birthday: data.birthday,
+        linkedin: data.linkedin,
+        igemEgitimi: data.igemEgitimi || undefined,
+        igemTarihi: data.igemTarihi || undefined,
+        online: false,
+      })
+      localStorage.setItem("ysa-registered-members", JSON.stringify(existing))
+    } catch {}
 
     setLoading(false)
     go(1)
   }
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
+    <main className="relative flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-sm">
+        {/* Back to home + theme toggle */}
+        <div className="absolute left-4 top-4 flex items-center gap-2">
+          <button
+            onClick={() => router.push("/")}
+            className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Home className="size-4" />
+          </button>
+          <button
+            onClick={toggle}
+            className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </button>
+        </div>
+
         {/* Logo */}
         <div className="mb-6 flex flex-col items-center">
           <Logo className="h-12 w-12" />
@@ -346,14 +395,6 @@ function Step1({
 }
 
 // ── Step 2 — Role + Station (Europe map) ─────────────────────────────────────
-const STATIONS_SORTED = [
-  // Uluslararası toujours en premier
-  ...STATIONS.filter(s => s.id === "intl"),
-  // les autres triées alphabétiquement par ville
-  ...[...STATIONS.filter(s => s.id !== "intl")].sort((a, b) =>
-    a.city.localeCompare(b.city, "tr")
-  ),
-]
 
 function Step2({
   data,
@@ -451,7 +492,7 @@ function Step2({
   )
 }
 
-// ── Step 3 — Memleket (Turkey map) ────────────────────────────────────────────
+// ── Step 3 — iGEM + Memleket ──────────────────────────────────────────────────
 function Step3({
   data,
   onBack,
@@ -466,16 +507,61 @@ function Step3({
   error: string | null
 }) {
   const [memleket, setMemleket] = useState(data.memleket)
+  const [igemEgitimi, setIgemEgitimi] = useState<"evet" | "hayır" | "">(data.igemEgitimi)
+  const [igemTarihi, setIgemTarihi] = useState(data.igemTarihi)
+
+  const canSubmit = !!memleket && igemEgitimi !== "" && (igemEgitimi === "hayır" || !!igemTarihi)
 
   return (
     <div>
       <button onClick={onBack} className="mb-4 flex items-center gap-1 text-sm text-muted-foreground">
         <ChevronLeft className="size-4" /> Geri
       </button>
-      <h1 className="mb-1 font-heading text-2xl font-bold text-foreground">Memleket</h1>
+      <h1 className="mb-1 font-heading text-2xl font-bold text-foreground">Eğitim & Memleket</h1>
       <p className="mb-5 text-sm text-muted-foreground">Adım 3 / 3</p>
 
+      {/* iGEM question */}
+      <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
+        <p className="text-sm font-semibold text-foreground">
+          iGEM eğitimini gerçekleştirdiniz mi? <span className="text-destructive">*</span>
+        </p>
+        <div className="flex gap-3">
+          {(["evet", "hayır"] as const).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => { setIgemEgitimi(opt); if (opt === "hayır") setIgemTarihi("") }}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-xl border-2 py-3 text-sm font-semibold transition-colors ${
+                igemEgitimi === opt
+                  ? opt === "evet"
+                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-600"
+                    : "border-destructive bg-destructive/10 text-destructive"
+                  : "border-border text-muted-foreground"
+              }`}
+            >
+              {opt === "evet" ? <Check className="size-4" /> : <span className="text-base leading-none">✕</span>}
+              {opt === "evet" ? "Evet" : "Hayır"}
+            </button>
+          ))}
+        </div>
+
+        {igemEgitimi === "evet" && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Ne zaman? <span className="text-destructive">*</span></label>
+            <input
+              type="date"
+              value={igemTarihi}
+              onChange={e => setIgemTarihi(e.target.value)}
+              className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            />
+          </div>
+        )}
+      </div>
+
       {/* Turkey map */}
+      <p className="mb-2 text-sm font-semibold text-foreground">
+        Memleket <span className="text-destructive">*</span>
+      </p>
       <div className="mb-4 overflow-hidden rounded-2xl border border-border bg-card p-2">
         <TurkeyMap selected={memleket} onSelect={setMemleket} />
       </div>
@@ -500,8 +586,8 @@ function Step3({
       <Button
         size="lg"
         className="w-full"
-        disabled={loading || !memleket}
-        onClick={() => onSubmit({ memleket })}
+        disabled={loading || !canSubmit}
+        onClick={() => onSubmit({ memleket, igemEgitimi, igemTarihi })}
       >
         {loading ? <Loader2 className="size-5 animate-spin" /> : "Kayıt talebini gönder"}
       </Button>

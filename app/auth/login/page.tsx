@@ -4,15 +4,17 @@ import type React from "react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
-import { Mail, Lock, Loader2 } from "lucide-react"
+import { Mail, Lock, Loader2, Home, Moon, Sun } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n/context"
+import { useTheme } from "@/lib/theme/context"
 
 export default function LoginPage() {
   const router = useRouter()
   const { t } = useI18n()
+  const { theme, toggle } = useTheme()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -24,7 +26,18 @@ export default function LoginPage() {
     setError(null)
     try {
       if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        // Demo mode — skip auth
+        // Demo mode — check against localStorage members
+        const registered: { email: string; password: string }[] =
+          JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
+        const match = registered.find(
+          (m) => m.email === email && m.password === password,
+        )
+        if (!match) {
+          setError("E-posta veya şifre hatalı.")
+          setLoading(false)
+          return
+        }
+        localStorage.setItem("ysa-current-user-email", match.email)
         router.push("/feed")
         return
       }
@@ -44,6 +57,20 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
+      <div className="absolute left-4 top-4 flex items-center gap-2">
+        <button
+          onClick={() => router.push("/")}
+          className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Home className="size-4" />
+        </button>
+        <button
+          onClick={toggle}
+          className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </button>
+      </div>
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}

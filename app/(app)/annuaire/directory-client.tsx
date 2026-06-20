@@ -1,23 +1,51 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { Search, Phone, Mail, Cake, MapPin, ExternalLink, Home } from "lucide-react"
+import { useState, useMemo, useEffect } from "react"
+import { Search, Phone, Mail, Cake, MapPin, ExternalLink, Home, GraduationCap, ChevronDown, Check } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { MEMBERS, STATIONS, getStation, type Member, type StationId } from "@/lib/data/stations"
+import { MEMBERS, STATIONS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 
 type StationFilter = "all" | StationId
+
+function getCurrentUserStation(): { station: StationId; isIntl: boolean } {
+  if (typeof window === "undefined") return { station: "paris", isIntl: false }
+  try {
+    const email = localStorage.getItem("ysa-current-user-email")
+    const registered: (Member & { password?: string })[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
+    const found = registered.find((m) => m.email === email)
+    if (found) return { station: found.station, isIntl: found.station === "intl" }
+  } catch {}
+  return { station: "paris", isIntl: false }
+}
 
 export function DirectoryClient() {
   const { t } = useI18n()
   const [search, setSearch] = useState("")
   const [stationFilter, setStationFilter] = useState<StationFilter>("all")
   const [selected, setSelected] = useState<Member | null>(null)
+  const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
+  const [currentUser, setCurrentUser] = useState<{ station: StationId; isIntl: boolean }>({ station: "paris", isIntl: false })
+  const [assignOpen, setAssignOpen] = useState(false)
+
+  useEffect(() => {
+    const cu = getCurrentUserStation()
+    setCurrentUser(cu)
+    try {
+      const registered: Member[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
+      const overrides: Record<string, Role> = JSON.parse(localStorage.getItem("ysa-role-overrides") ?? "{}")
+      const withOverrides = registered.map((m) => overrides[m.id] ? { ...m, role: overrides[m.id] } : m)
+      if (registered.length > 0) setAllMembers([...MEMBERS, ...withOverrides])
+    } catch {}
+  }, [])
+
+  // All stations see all members
+  const visibleMembers = allMembers
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    return [...MEMBERS]
+    return [...visibleMembers]
       .filter((m) => {
         const matchesSearch =
           !q ||
@@ -29,7 +57,7 @@ export function DirectoryClient() {
         return matchesSearch && matchesStation
       })
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [search, stationFilter])
+  }, [search, stationFilter, visibleMembers])
 
   const grouped = useMemo(() => {
     const map: Record<string, Member[]> = {}
@@ -40,6 +68,19 @@ export function DirectoryClient() {
     })
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
   }, [filtered])
+
+  function assignRole(member: Member, role: Role) {
+    try {
+      const overrides: Record<string, Role> = JSON.parse(localStorage.getItem("ysa-role-overrides") ?? "{}")
+      overrides[member.id] = role
+      localStorage.setItem("ysa-role-overrides", JSON.stringify(overrides))
+      setAllMembers((prev) => prev.map((m) => m.id === member.id ? { ...m, role } : m))
+      setSelected((prev) => prev?.id === member.id ? { ...prev, role } : prev)
+    } catch {}
+    setAssignOpen(false)
+  }
+
+  const showStationFilter = true
 
   return (
     <div>
@@ -57,16 +98,11 @@ export function DirectoryClient() {
           />
         </div>
 
-        {/* Station filter chips */}
-        <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
-          <StationChip
-            active={stationFilter === "all"}
-            onClick={() => setStationFilter("all")}
-            label="Tümü"
-          />
-          {[...STATIONS]
-            .sort((a, b) => a.city.localeCompare(b.city, "tr"))
-            .map((s) => (
+        {/* Station filter chips — intl only */}
+        {showStationFilter && (
+          <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
+            <StationChip active={stationFilter === "all"} onClick={() => setStationFilter("all")} label="Tümü" />
+            {STATIONS_SORTED.map((s) => (
               <StationChip
                 key={s.id}
                 active={stationFilter === s.id}
@@ -75,7 +111,8 @@ export function DirectoryClient() {
                 color={s.color}
               />
             ))}
-        </div>
+          </div>
+        )}
 
         <p className="px-1 py-2 text-xs text-muted-foreground">
           {filtered.length} {t("directory.members")}
@@ -98,24 +135,76 @@ export function DirectoryClient() {
         )}
       </div>
 
-      <Modal open={!!selected} onClose={() => setSelected(null)} title={t("nav.directory")}>
-        {selected && <MemberDetail member={selected} />}
+      <Modal open={!!selected} onClose={() => { setSelected(null); setAssignOpen(false) }} title={t("nav.directory")}>
+        {selected && (
+          <>
+            <MemberDetail member={selected} />
+            {currentUser.isIntl && (
+              <div className="mt-4 border-t border-border pt-4">
+                {!assignOpen ? (
+                  <button
+                    onClick={() => setAssignOpen(true)}
+                    className="w-full rounded-xl bg-primary/10 py-2.5 text-sm font-semibold text-primary transition-colors active:bg-primary/20"
+                  >
+                    Görev ver / değiştir
+                  </button>
+                ) : (
+                  <RoleAssignPanel member={selected} onAssign={(role) => assignRole(selected, role)} onCancel={() => setAssignOpen(false)} />
+                )}
+              </div>
+            )}
+          </>
+        )}
       </Modal>
     </div>
   )
 }
 
-function StationChip({
-  active,
-  onClick,
-  label,
-  color,
-}: {
-  active: boolean
-  onClick: () => void
-  label: string
-  color?: string
-}) {
+function RoleAssignPanel({ member, onAssign, onCancel }: { member: Member; onAssign: (r: Role) => void; onCancel: () => void }) {
+  const [selected, setSelected] = useState<Role>(member.role)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm font-semibold text-foreground">Yeni görev seç</p>
+      <div className="max-h-52 overflow-y-auto rounded-xl border border-border">
+        <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Yönetim Kurulu</p>
+        {YONETIM_KURULU_ROLES.map((r) => (
+          <RoleOption key={r} role={r} checked={selected === r} onSelect={() => setSelected(r)} />
+        ))}
+        <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground border-t border-border mt-1">Yürütme Kurulu</p>
+        {YURUTME_KURULU_ROLES.map((r) => (
+          <RoleOption key={r} role={r} checked={selected === r} onSelect={() => setSelected(r)} />
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium text-muted-foreground">
+          İptal
+        </button>
+        <button
+          onClick={() => onAssign(selected)}
+          disabled={selected === member.role}
+          className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-40"
+        >
+          Kaydet
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function RoleOption({ role, checked, onSelect }: { role: string; checked: boolean; onSelect: () => void }) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition-colors ${checked ? "bg-primary/10 font-semibold text-primary" : "text-foreground"}`}
+    >
+      {role}
+      {checked && <Check className="size-4 shrink-0 text-primary" />}
+    </button>
+  )
+}
+
+function StationChip({ active, onClick, label, color }: { active: boolean; onClick: () => void; label: string; color?: string }) {
   return (
     <button
       onClick={onClick}
@@ -166,12 +255,17 @@ function MemberDetail({ member }: { member: Member }) {
     { icon: Mail, label: t("directory.email"), value: member.email, href: `mailto:${member.email}` },
     { icon: Cake, label: t("directory.birthday"), value: member.birthday },
     { icon: MapPin, label: t("directory.city"), value: member.city },
-    ...(member.memleket
-      ? [{ icon: Home, label: t("directory.memleket"), value: member.memleket }]
+    ...(member.memleket ? [{ icon: Home, label: t("directory.memleket"), value: member.memleket }] : []),
+    ...(member.igemEgitimi
+      ? [{
+          icon: GraduationCap,
+          label: "iGEM Eğitimi",
+          value: member.igemEgitimi === "evet"
+            ? `✅ Evet${member.igemTarihi ? ` — ${member.igemTarihi}` : ""}`
+            : "❌ Hayır",
+        }]
       : []),
-    ...(member.linkedin
-      ? [{ icon: ExternalLink, label: "LinkedIn", value: "Profili gör", href: member.linkedin }]
-      : []),
+    ...(member.linkedin ? [{ icon: ExternalLink, label: "LinkedIn", value: "Profili gör", href: member.linkedin }] : []),
   ]
 
   return (

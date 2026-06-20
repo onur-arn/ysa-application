@@ -3,7 +3,7 @@ import { transporter } from "@/lib/mailer"
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { firstName, lastName, email, phone, birthday, linkedin, role, station, memleket, photoBase64 } = body
+  const { firstName, lastName, email, phone, birthday, linkedin, role, station, memleket, igemEgitimi, igemTarihi, photoBase64 } = body
 
   const token = Buffer.from(JSON.stringify({ firstName, lastName, email })).toString("base64url")
   const base = process.env.NEXT_PUBLIC_APP_URL ?? `${req.nextUrl.protocol}//${req.headers.get("host")}`
@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
               ${row("Görev", role)}
               ${row("İstasyon", station)}
               ${row("Memleket", memleket)}
+              ${row("iGEM Eğitimi", igemEgitimi === "evet" ? `✅ Evet${igemTarihi ? ` — ${igemTarihi}` : ""}` : igemEgitimi === "hayır" ? "❌ Hayır" : "—")}
             </table>
             <div style="margin-top:28px">
               <a href="${approveUrl}" style="display:inline-block;padding:12px 28px;background:#16a34a;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none">✓ Accepter</a>

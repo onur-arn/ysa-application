@@ -10,7 +10,7 @@ import {
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
 import { getStation, SEHIRLER } from "@/lib/data/stations"
-import { PageHeader } from "@/components/app-shell"
+
 import { createClient } from "@/lib/supabase/client"
 
 type ProfileData = {
@@ -87,14 +87,33 @@ export function SettingsClient({
         await supabase.auth.signOut()
       }
     } catch {}
-    window.location.href = "/auth/login"
+    window.location.href = "/"
   }
 
   function submitIgem() {
-    const requests: { author: string; motivation: string; date: string }[] = JSON.parse(
+    const requests: { author: string; motivation: string; date: string; station: string; initials: string }[] = JSON.parse(
       localStorage.getItem("igem-requests") ?? "[]"
     )
-    requests.push({ author: fullName || profile.email || "Kullanıcı", motivation: igemMotivation, date: new Date().toISOString() })
+
+    // Try to resolve real name from localStorage in demo mode
+    let authorName = fullName || profile.email || ""
+    let authorStation = station
+    let authorInitials = initials
+    try {
+      const email = localStorage.getItem("ysa-current-user-email")
+      const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
+      const me = registered.find((m: { email: string; name: string; station: string; initials: string }) => m.email === email)
+      if (me) {
+        if (!authorName) authorName = me.name
+        authorStation = me.station || authorStation
+        authorInitials = me.initials || authorInitials
+      }
+    } catch {}
+
+    if (!authorName) authorName = "Kullanıcı"
+    const ini = authorInitials || authorName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+
+    requests.push({ author: authorName, motivation: igemMotivation, date: new Date().toISOString(), station: authorStation, initials: ini })
     localStorage.setItem("igem-requests", JSON.stringify(requests))
     setIgemSent(true)
     setIgemOpen(false)
@@ -103,9 +122,7 @@ export function SettingsClient({
 
   return (
     <div>
-      <PageHeader title={t("settings.title")} />
-
-      <div className="flex flex-col gap-6 px-4 pt-2">
+      <div className="flex flex-col gap-6 px-4 pt-4">
         {/* Profile card */}
         <div className="flex items-center gap-4 rounded-2xl border border-border bg-card p-4">
           <div className="relative shrink-0">
@@ -169,7 +186,6 @@ export function SettingsClient({
         {/* Notifications */}
         <Section title={t("settings.notifications")} icon={Bell}>
           <Toggle label={t("settings.pushNotif")} checked={notifs.push} onChange={() => setNotifs((n) => ({ ...n, push: !n.push }))} />
-          <Toggle label={t("settings.emailNotif")} checked={notifs.email} onChange={() => setNotifs((n) => ({ ...n, email: !n.email }))} />
           <Toggle label={t("settings.events")} checked={notifs.events} onChange={() => setNotifs((n) => ({ ...n, events: !n.events }))} last />
         </Section>
 

@@ -17,6 +17,9 @@ export type Task = {
   description: string
   station: StationId
   priority: TaskPriority
+  assignedBy: string
+  assignedByInitials: string
+  assignedByStation: StationId
   assignee: string
   assigneeInitials: string
   status: TaskStatus
@@ -30,6 +33,9 @@ export const TASKS: Task[] = [
     description: "Dernekler Evi ile iletişime geç ve 22 Haziran için rezervasyonu onayla.",
     station: "intl",
     priority: "urgent",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Lucas Martin",
     assigneeInitials: "LM",
     status: "in_progress",
@@ -44,6 +50,9 @@ export const TASKS: Task[] = [
     description: "Aylık özeti hazırla ve tüm üyelere gönder.",
     station: "intl",
     priority: "normal",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Aylin Demir",
     assigneeInitials: "AD",
     status: "done",
@@ -55,6 +64,9 @@ export const TASKS: Task[] = [
     description: "Nancy istasyonlararası turnuvası için çekici bir görsel oluştur.",
     station: "nancy",
     priority: "normal",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Chloé Petit",
     assigneeInitials: "CP",
     status: "todo",
@@ -66,6 +78,9 @@ export const TASKS: Task[] = [
     description: "Mayıs ayı harcamalarını kontrol et ve hazineye rapor et.",
     station: "nancy",
     priority: "urgent",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Thomas Girard",
     assigneeInitials: "TG",
     status: "in_progress",
@@ -77,6 +92,9 @@ export const TASKS: Task[] = [
     description: "Liste: keçeli kalem, flipchart, post-it, rozet.",
     station: "lyon",
     priority: "low",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Marie Leroy",
     assigneeInitials: "ML",
     status: "todo",
@@ -88,6 +106,9 @@ export const TASKS: Task[] = [
     description: "Catering tekliflerini kontrol et ve hazineciye sun.",
     station: "strasbourg",
     priority: "urgent",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Léa Martin",
     assigneeInitials: "LM",
     status: "in_progress",
@@ -99,6 +120,9 @@ export const TASKS: Task[] = [
     description: "Hedef: önümüzdeki kampanya için 15 gönüllü.",
     station: "hamburg",
     priority: "normal",
+    assignedBy: "Aylin Demir",
+    assignedByInitials: "AD",
+    assignedByStation: "intl",
     assignee: "Jana Müller",
     assigneeInitials: "JM",
     status: "done",

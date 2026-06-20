@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
@@ -11,8 +11,20 @@ import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
 
-// Simulated current user station — intl sees everything, others only see their own + intl
-const MY_STATION: StationId = "lyon"
+type CurrentUser = { station: StationId; role: string; name: string; initials: string }
+
+function getCurrentUser(): CurrentUser {
+  const fallback: CurrentUser = { station: "intl", role: "Başkan", name: "Demo", initials: "DM" }
+  if (typeof window === "undefined") return fallback
+  try {
+    const email = localStorage.getItem("ysa-current-user-email")
+    if (!email) return fallback
+    const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
+    const found = registered.find((m: { email: string }) => m.email === email)
+    if (found) return { station: found.station ?? "intl", role: found.role ?? "", name: found.name ?? "", initials: found.initials ?? "?" }
+  } catch {}
+  return fallback
+}
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done"]
 
@@ -21,14 +33,27 @@ export function TasksClient() {
   const [tasks, setTasks] = useState<Task[]>(TASKS)
   const [filter, setFilter] = useState<TaskStatus | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [myStation, setMyStation] = useState<StationId>("intl")
+  const [myRole, setMyRole]       = useState("")
+  const [myName, setMyName]       = useState("")
+  const [myInitials, setMyInitials] = useState("")
 
-  // Visibility: intl sees all, others see own station + intl tasks
+  useEffect(() => {
+    const u = getCurrentUser()
+    setMyStation(u.station)
+    setMyRole(u.role)
+    setMyName(u.name)
+    setMyInitials(u.initials)
+  }, [])
+
+  const isIntl     = myStation === "intl"
+  const isPresident = myRole === "Başkan"
+  const canCreate  = isIntl || isPresident
+
+  // Visibility: intl sees all, stations see only their own tasks
   const visibleTasks = useMemo(
-    () =>
-      MY_STATION === "intl"
-        ? tasks
-        : tasks.filter((t) => t.station === MY_STATION || t.station === "intl"),
-    [tasks],
+    () => myStation === "intl" ? tasks : tasks.filter((t) => t.station === myStation),
+    [tasks, myStation],
   )
 
   const displayed = filter ? visibleTasks.filter((t) => t.status === filter) : visibleTasks
@@ -68,7 +93,7 @@ export function TasksClient() {
     )
   }
 
-  const myStation = getStation(MY_STATION)
+  const myStationInfo = getStation(myStation)
 
   return (
     <div>
@@ -78,12 +103,12 @@ export function TasksClient() {
       <div className="mx-4 mb-1 mt-2 flex items-center gap-2 rounded-xl bg-secondary px-3 py-2 text-sm text-muted-foreground">
         <span
           className="size-2.5 rounded-full"
-          style={{ backgroundColor: `hsl(${myStation.color})` }}
+          style={{ backgroundColor: `hsl(${myStationInfo.color})` }}
         />
         <span>
-          {MY_STATION === "intl"
+          {myStation === "intl"
             ? "Uluslararası Büro — tüm görevleri görüyorsunuz"
-            : `${myStation.name} — yalnızca istasyonunuzun görevleri`}
+            : `${myStationInfo.name} — yalnızca istasyonunuzun görevleri`}
         </span>
       </div>
 
@@ -129,18 +154,24 @@ export function TasksClient() {
         )}
       </div>
 
-      {/* FAB */}
-      <button
-        onClick={() => setCreateOpen(true)}
-        className="fixed bottom-20 right-4 z-30 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 transition-transform active:scale-90"
-        aria-label={t("tasks.newTask")}
-      >
-        <Plus className="size-6" />
-      </button>
+      {/* FAB — intl or station president */}
+      {canCreate && (
+        <button
+          onClick={() => setCreateOpen(true)}
+          className="fixed bottom-20 right-4 z-30 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 transition-transform active:scale-90"
+          aria-label={t("tasks.newTask")}
+        >
+          <Plus className="size-6" />
+        </button>
+      )}
 
       <CreateTaskModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        isIntl={isIntl}
+        creatorStation={myStation}
+        creatorName={myName}
+        creatorInitials={myInitials}
         onCreate={(task) => {
           setTasks((prev) => [task, ...prev])
           setCreateOpen(false)
@@ -252,11 +283,17 @@ function TaskCard({
             >
               {station.short}
             </span>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {/* assignedBy → assignee */}
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-[9px] font-bold text-primary">
+                {task.assignedByInitials}
+              </span>
+              <span className="max-w-[72px] truncate">{task.assignedBy}</span>
+              <span className="text-muted-foreground/50">→</span>
               <span className="flex size-5 items-center justify-center rounded-full bg-secondary text-[9px] font-bold text-secondary-foreground">
                 {task.assigneeInitials}
               </span>
-              {task.assignee}
+              <span className="max-w-[72px] truncate">{task.assignee}</span>
             </span>
           </div>
         </div>
@@ -333,36 +370,48 @@ function CreateTaskModal({
   open,
   onClose,
   onCreate,
+  isIntl,
+  creatorStation,
+  creatorName,
+  creatorInitials,
 }: {
   open: boolean
   onClose: () => void
   onCreate: (t: Task) => void
+  isIntl: boolean
+  creatorStation: StationId
+  creatorName: string
+  creatorInitials: string
 }) {
   const { t } = useI18n()
-  const [title, setTitle] = useState("")
+  const [title, setTitle]             = useState("")
   const [description, setDescription] = useState("")
-  const [station, setStation] = useState<string>(MY_STATION)
-  const [priority, setPriority] = useState<TaskPriority>("normal")
-  const [assignee, setAssignee] = useState("")
+  const [station, setStation]         = useState<string>(isIntl ? "paris" : creatorStation)
+  const [priority, setPriority]       = useState<TaskPriority>("normal")
+  const [assignee, setAssignee]       = useState("")
 
   function submit() {
     if (!title.trim()) return
-    const initials =
+    const targetStation = (isIntl ? station : creatorStation) as StationId
+    const assigneeInitials =
       assignee.trim().split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "NA"
     onCreate({
       id: String(Date.now()),
       title: title.trim(),
       description: description.trim(),
-      station: station as StationId,
+      station: targetStation,
       priority,
+      assignedBy: creatorName || "Uluslararası Büro",
+      assignedByInitials: creatorInitials || "INT",
+      assignedByStation: creatorStation,
       assignee: assignee.trim() || "Atanmadı",
-      assigneeInitials: initials,
+      assigneeInitials,
       status: "todo",
       comments: [],
     })
     setTitle("")
     setDescription("")
-    setStation(MY_STATION)
+    setStation(isIntl ? "paris" : creatorStation)
     setPriority("normal")
     setAssignee("")
   }
@@ -372,6 +421,8 @@ function CreateTaskModal({
     { value: "normal", label: t("tasks.normal") },
     { value: "low", label: t("tasks.low") },
   ]
+
+  const stationInfo = getStation(creatorStation)
 
   return (
     <Modal open={open} onClose={onClose} title={t("tasks.newTask")}>
@@ -407,10 +458,18 @@ function CreateTaskModal({
         <Field label={t("tasks.assignee")}>
           <input value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputClass} placeholder="Örn: Lucas Martin" />
         </Field>
-        <Field label={t("agenda.station")}>
-          <StationSelect value={station} onChange={setStation} />
-        </Field>
-        <Button onClick={submit} className="mt-1 h-12">
+        {isIntl ? (
+          <Field label={t("agenda.station")}>
+            <StationSelect value={station} onChange={setStation} />
+          </Field>
+        ) : (
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 py-2.5">
+            <span className="size-2.5 rounded-full" style={{ backgroundColor: `hsl(${stationInfo.color})` }} />
+            <span className="text-sm font-medium text-foreground">{stationInfo.name}</span>
+            <span className="ml-auto text-xs text-muted-foreground">Station fixée</span>
+          </div>
+        )}
+        <Button onClick={submit} className="mt-1 h-12" disabled={!title.trim()}>
           {t("common.create")}
         </Button>
       </div>

@@ -5,9 +5,13 @@ import { BottomNav } from "@/components/bottom-nav"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Settings } from "lucide-react"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname()
+  const onSettings = pathname.startsWith("/ayarlar")
+
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background">
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card/95 px-4 py-2.5 backdrop-blur-lg">
@@ -17,13 +21,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Link>
         <div className="flex items-center gap-1">
           <ThemeToggle />
-          <Link
-            href="/ayarlar"
-            className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary"
-            aria-label="Ayarlar"
-          >
-            <Settings className="h-5 w-5" />
-          </Link>
+          {!onSettings && (
+            <Link
+              href="/ayarlar"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary"
+              aria-label="Ayarlar"
+            >
+              <Settings className="h-5 w-5" />
+            </Link>
+          )}
         </div>
       </header>
       <main className="flex-1 pb-24">{children}</main>

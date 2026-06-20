@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { EVENTS, type EventItem } from "@/lib/data/feed"
-import { STATIONS, getStation, type StationId } from "@/lib/data/stations"
+import { STATIONS_SORTED, getStation, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
@@ -73,7 +73,7 @@ export function AgendaClient() {
       {/* Station filter */}
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-2 pt-3">
         <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label={t("agenda.all")} />
-        {STATIONS.map((s) => (
+        {STATIONS_SORTED.map((s) => (
           <FilterChip
             key={s.id}
             active={filter === s.id}

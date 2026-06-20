@@ -19,6 +19,13 @@ export const STATIONS: Station[] = [
   { id: "bucarest", name: "Bükreş İstasyonu", short: "BUC", city: "Bükreş", color: "45 90% 50%" },
 ]
 
+export const STATIONS_SORTED: Station[] = [
+  STATIONS.find(s => s.id === "intl")!,
+  ...[...STATIONS.filter(s => s.id !== "intl")].sort((a, b) =>
+    a.city.localeCompare(b.city, "tr")
+  ),
+]
+
 export function station(id: StationId): Station {
   return STATIONS.find((s) => s.id === id) ?? STATIONS[0]
 }
@@ -37,6 +44,7 @@ export const YONETIM_KURULU_ROLES = [
   "İç İlişkiler Direktörü",
   "Kurumsal İletişim Direktörü",
   "Eğitim Koordinatörü",
+  "Avrupa Birliği Projeler Sorumlusu",
 ] as const
 
 // ── Yürütme Kurulu ───────────────────────────────────────────────────────────
@@ -89,6 +97,8 @@ export type Member = {
   linkedin?: string
   online: boolean
   initials: string
+  igemEgitimi?: "evet" | "hayır"
+  igemTarihi?: string
 }
 
 export function initialsOf(name: string) {
