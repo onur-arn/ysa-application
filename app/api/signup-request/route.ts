@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   try {
     await transporter.sendMail({
       from: `"YSA Kayıt" <${process.env.GMAIL_USER}>`,
-      to: "secretaire@youthstation.org",
+      to: process.env.ADMIN_EMAIL ?? "secretaire@youthstation.org",
       subject: `[YSA] Nouvelle demande — ${firstName} ${lastName}`,
       attachments,
       html: `

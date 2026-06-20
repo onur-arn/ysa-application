@@ -140,13 +140,23 @@ export default function SignUpPage() {
           reader.readAsDataURL(photo)
         })
       }
-      await fetch("/api/signup-request", {
+      const res = await fetch("/api/signup-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...data, photoBase64, igemEgitimi: data.igemEgitimi, igemTarihi: data.igemTarihi }),
       })
-    } catch {
-      // Non-blocking — proceed to success even if email fails
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        console.error("signup-request failed:", json)
+        setError("L'e-mail de notification n'a pas pu être envoyé. Veuillez réessayer.")
+        setLoading(false)
+        return
+      }
+    } catch (err) {
+      console.error("signup-request error:", err)
+      setError("Erreur réseau lors de l'envoi. Vérifiez votre connexion.")
+      setLoading(false)
+      return
     }
 
     // Save to local directory
