@@ -47,6 +47,15 @@ export async function POST(req: NextRequest) {
       <td style="padding:7px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6">${value || "—"}</td>
     </tr>`
 
+  // Guard: Gmail credentials must be configured, otherwise nodemailer fails with an opaque SMTP error
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+    console.error("[signup-request] Missing GMAIL_USER or GMAIL_APP_PASSWORD env vars")
+    return NextResponse.json(
+      { ok: false, error: "EMAIL_NOT_CONFIGURED" },
+      { status: 500 },
+    )
+  }
+
   try {
     const transporter = getTransporter()
     await transporter.sendMail({

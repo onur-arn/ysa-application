@@ -119,6 +119,9 @@ export default function SignUpPage() {
         const json = await res.json().catch(() => ({}))
         if (json.error === "EMAIL_TAKEN") {
           setError("Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.")
+        } else if (json.error === "EMAIL_NOT_CONFIGURED") {
+          console.error("signup-request failed: email not configured")
+          setError("La configuration e-mail est manquante (GMAIL_USER / GMAIL_APP_PASSWORD). Contactez l'administrateur.")
         } else {
           console.error("signup-request failed:", json)
           setError("L'e-mail de notification n'a pas pu être envoyé. Veuillez réessayer.")
