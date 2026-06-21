@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getTransporter } from "@/lib/mailer"
+import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -160,19 +160,10 @@ export async function POST(req: NextRequest) {
 </html>`
 
   try {
-    const transporter = getTransporter()
-    await transporter.sendMail({
-      from: `"YSA Application" <${process.env.GMAIL_USER}>`,
-      to: process.env.ADMIN_EMAIL ?? "secretaire@youthstation.org",
+    await sendMail({
+      to: ADMIN_TO,
       subject: `[YSA] Export complet — ${now}`,
-      html: `<p style="font-family:sans-serif;color:#374151">Bonjour,<br><br>Veuillez trouver ci-joint l'export complet de l'application YSA.<br><br>Ce document contient toutes les données membres, publications, tâches et demandes iGEM.</p>`,
-      attachments: [
-        {
-          filename: `ysa-export-${new Date().toISOString().slice(0, 10)}.html`,
-          content: html,
-          contentType: "text/html",
-        },
-      ],
+      html: `<p style="font-family:sans-serif;color:#374151">Bonjour,<br><br>Veuillez trouver ci-dessous l'export complet de l'application YSA.</p>${html}`,
     })
     return NextResponse.json({ ok: true })
   } catch (err: unknown) {
