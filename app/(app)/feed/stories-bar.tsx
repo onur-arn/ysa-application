@@ -7,8 +7,7 @@ import { STATIONS_SORTED } from "@/lib/data/stations"
 import { STORY_BG } from "@/lib/data/feed"
 import { useI18n } from "@/lib/i18n/context"
 import { StoryEditor } from "./story-editor"
-
-const STORIES_KEY = "ysa-stories"
+import { createClient } from "@/lib/supabase/client"
 
 function storyTimeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
@@ -26,18 +25,7 @@ type Story = {
   imageUrl: string
   createdAt: string
   fitMode?: "cover" | "contain"
-}
-
-function getCurrentUser(): { name: string; station: string; initials: string } {
-  if (typeof window === "undefined") return { name: "Moi", station: "paris", initials: "ME" }
-  try {
-    const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-    if (registered.length > 0) {
-      const last = registered[registered.length - 1]
-      return { name: last.name, station: last.station ?? "paris", initials: last.initials ?? "ME" }
-    }
-  } catch {}
-  return { name: "Moi", station: "paris", initials: "ME" }
+  musicPreviewUrl?: string
 }
 
 export function StoriesBar() {
@@ -47,21 +35,47 @@ export function StoriesBar() {
   const [storyIdx, setStoryIdx]       = useState(0)
   const [fromMyButton, setFromMyButton] = useState(false)
   const [editingImage, setEditingImage] = useState<string | null>(null)
+  const [user, setUser] = useState<{ name: string; station: string; initials: string }>({ name: "", station: "paris", initials: "" })
   const fileRef = useRef<HTMLInputElement>(null)
+  const storyAudioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
-    try {
-      const saved: Story[] = JSON.parse(localStorage.getItem(STORIES_KEY) ?? "[]")
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000
-      const fresh = saved.filter((s) => new Date(s.createdAt).getTime() > cutoff)
-      if (fresh.length !== saved.length) {
-        localStorage.setItem(STORIES_KEY, JSON.stringify(fresh))
+    async function load() {
+      const supabase = createClient()
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        const { data: profile } = await supabase.from("profiles").select("name,initials,station").eq("id", authUser.id).single()
+        if (profile) {
+          setUser({
+            name: profile.name ?? "",
+            station: profile.station ?? "paris",
+            initials: profile.initials ?? "",
+          })
+        }
       }
-      setStories(fresh)
-    } catch {}
-  }, [])
 
-  const user = getCurrentUser()
+      // Load stories from last 24h
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      const { data: dbStories } = await supabase
+        .from("stories")
+        .select("*")
+        .gte("created_at", cutoff)
+        .order("created_at", { ascending: true })
+      if (dbStories) {
+        setStories(dbStories.map((s) => ({
+          id: s.id,
+          station: s.station,
+          authorName: s.author_name,
+          initials: s.initials,
+          imageUrl: s.image_url,
+          createdAt: s.created_at,
+          fitMode: (s.fit_mode as "cover" | "contain") ?? "cover",
+          musicPreviewUrl: s.music_preview_url ?? undefined,
+        })))
+      }
+    }
+    load()
+  }, [])
   const myStories = stories.filter((s) => s.station === user.station)
 
   function openStation(stationId: string, startIdx = 0, myBtn = false) {
@@ -79,29 +93,45 @@ export function StoriesBar() {
     e.target.value = ""
   }
 
-  function publishStory(flatUrl: string, fitMode: "cover" | "contain") {
+  async function publishStory(flatUrl: string, fitMode: "cover" | "contain", musicPreviewUrl?: string) {
+    const newId = `story-${Date.now()}`
     const newStory: Story = {
-      id: `story-${Date.now()}`,
+      id: newId,
       station: user.station,
       authorName: user.name,
       initials: user.initials,
       imageUrl: flatUrl,
       createdAt: new Date().toISOString(),
       fitMode,
+      musicPreviewUrl,
     }
     const updated = [...stories, newStory]
     setStories(updated)
-    localStorage.setItem(STORIES_KEY, JSON.stringify(updated))
     setEditingImage(null)
+    try {
+      const supabase = createClient()
+      await supabase.from("stories").insert({
+        id: newId,
+        station: user.station,
+        author_name: user.name,
+        initials: user.initials,
+        image_url: flatUrl,
+        fit_mode: fitMode,
+        music_preview_url: musicPreviewUrl ?? null,
+      })
+    } catch {}
     // open on the newly added story
     const stationStories = updated.filter((s) => s.station === user.station)
     openStation(user.station, stationStories.length - 1, true)
   }
 
-  function deleteStory(id: string) {
+  async function deleteStory(id: string) {
     const updated = stories.filter((s) => s.id !== id)
     setStories(updated)
-    localStorage.setItem(STORIES_KEY, JSON.stringify(updated))
+    try {
+      const supabase = createClient()
+      await supabase.from("stories").delete().eq("id", id)
+    } catch {}
     const remaining = updated.filter((s) => s.station === active)
     if (remaining.length === 0) {
       setActive(null)
@@ -118,6 +148,20 @@ export function StoriesBar() {
   const activeStories = stories.filter((s) => s.station === active)
   const currentStory  = activeStories[storyIdx] ?? null
   const activeStation = STATIONS_SORTED.find((s) => s.id === active)
+
+  // Play/stop music when the viewed story changes
+  useEffect(() => {
+    storyAudioRef.current?.pause()
+    storyAudioRef.current = null
+    if (active && currentStory?.musicPreviewUrl) {
+      const audio = new Audio(currentStory.musicPreviewUrl)
+      audio.loop = true
+      audio.volume = 0.7
+      audio.play().catch(() => {})
+      storyAudioRef.current = audio
+    }
+    return () => { storyAudioRef.current?.pause() }
+  }, [active, currentStory?.id])
 
   function goNext() {
     if (storyIdx < activeStories.length - 1) {
@@ -158,12 +202,15 @@ export function StoriesBar() {
             )}
             {/* Add more button */}
             {myStories.length > 0 && (
-              <button
+              <span
+                role="button"
+                tabIndex={0}
                 onClick={(e) => { e.stopPropagation(); fileRef.current?.click() }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); fileRef.current?.click() } }}
                 className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-white shadow"
               >
                 <Plus className="size-3" />
-              </button>
+              </span>
             )}
           </span>
           <span className="max-w-16 truncate text-[11px] font-medium text-muted-foreground">

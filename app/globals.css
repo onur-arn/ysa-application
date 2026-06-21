@@ -1,8 +1,19 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import 'react-easy-crop/react-easy-crop.css';
 
 @custom-variant dark (&:is(.dark *));
+
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
 
 @theme inline {
   --font-heading: var(--font-geist-mono), 'Geist Mono Fallback';

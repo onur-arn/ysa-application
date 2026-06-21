@@ -1,38 +1,53 @@
 import { NextRequest, NextResponse } from "next/server"
-import { transporter } from "@/lib/mailer"
-import { signature } from "@/lib/email-signature"
+import { getTransporter } from "@/lib/mailer"
+import { createAdminClient } from "@/lib/supabase/admin"
+
+const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token")
   if (!token) return new NextResponse("Token manquant", { status: 400 })
 
-  let firstName = "", lastName = "", email = ""
+  let firstName = "", lastName = "", email = "", pendingId: string | null = null
   try {
     const parsed = JSON.parse(Buffer.from(token, "base64url").toString())
     firstName = parsed.firstName
     lastName  = parsed.lastName
     email     = parsed.email
+    pendingId = parsed.pendingId ?? null
   } catch {
     return new NextResponse("Token invalide", { status: 400 })
   }
 
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? `${req.nextUrl.protocol}//${req.headers.get("host")}`
+  // Delete from pending_members so the person can re-apply later
+  if (SUPABASE_ENABLED) {
+    try {
+      const admin = createAdminClient()
+      if (pendingId) {
+        await admin.from("pending_members").delete().eq("id", pendingId)
+      } else {
+        await admin.from("pending_members").delete().eq("email", email)
+      }
+    } catch (err) {
+      console.error("[signup-reject] Supabase delete failed:", err)
+    }
+  }
 
   try {
+    const transporter = getTransporter()
     await transporter.sendMail({
-      from: `"Onur Arslan – YouthStation" <${process.env.GMAIL_USER}>`,
+      from: `"Youth Station Derneği Uygulaması" <${process.env.GMAIL_USER}>`,
       to: email,
-      subject: "YSA üyelik başvurunuz hakkında",
+      subject: "Youth Station Derneği Uygulaması – Üyelik başvurunuz hakkında",
       html: `
         <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
           <p style="font-size:15px;color:#111827">Merhaba <strong>${firstName} ${lastName}</strong>,</p>
           <p style="font-size:14px;color:#374151;line-height:1.7">
-            YouthStation Derneği'ne üyelik başvurunuzu inceledik. Maalesef şu an için başvurunuzu kabul edemiyoruz.
+            <strong>Youth Station Derneği Uygulaması</strong>'na üyelik başvurunuzu inceledik. Maalesef şu an için başvurunuzu kabul edemiyoruz.
           </p>
           <p style="font-size:14px;color:#374151;line-height:1.7">
             Herhangi bir sorunuz olursa bizimle iletişime geçebilirsiniz.
           </p>
-          ${signature(base)}
         </div>
       `,
     })

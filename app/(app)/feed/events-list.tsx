@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, Clock, MapPin, ThumbsUp, ThumbsDown, Heart, MessageSquare, Send } from "lucide-react"
 import { EVENTS, type EventItem } from "@/lib/data/feed"
 import { station } from "@/lib/data/stations"
 import { useI18n } from "@/lib/i18n/context"
+import { createClient } from "@/lib/supabase/client"
 
-function EventCard({ event }: { event: EventItem }) {
+function EventCard({ event, authorName, authorInitials }: { event: EventItem; authorName: string; authorInitials: string }) {
   const { lang } = useI18n()
   const s = station(event.station)
   const [liked, setLiked] = useState(false)
@@ -46,7 +47,7 @@ function EventCard({ event }: { event: EventItem }) {
     if (!draft.trim()) return
     setComments((prev) => [
       ...prev,
-      { id: String(Date.now()), author: "Ben", initials: "BN", text: draft.trim(), time: "Şimdi" },
+      { id: String(Date.now()), author: authorName, initials: authorInitials, text: draft.trim(), time: "Şimdi" },
     ])
     setDraft("")
   }
@@ -181,14 +182,31 @@ function EventCard({ event }: { event: EventItem }) {
 export function EventsList() {
   const { t } = useI18n()
   const [showPast, setShowPast] = useState(false)
+  const [authorName, setAuthorName] = useState("")
+  const [authorInitials, setAuthorInitials] = useState("")
   const upcoming = EVENTS.filter((e) => !e.past)
   const past = EVENTS.filter((e) => e.past)
+
+  useEffect(() => {
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from("profiles").select("name,initials").eq("id", user.id).single()
+        if (profile) {
+          setAuthorName(profile.name ?? "")
+          setAuthorInitials(profile.initials ?? profile.name?.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() ?? "")
+        }
+      }
+    }
+    load()
+  }, [])
 
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{t("feed.upcoming")}</h2>
       {upcoming.map((e) => (
-        <EventCard key={e.id} event={e} />
+        <EventCard key={e.id} event={e} authorName={authorName} authorInitials={authorInitials} />
       ))}
 
       <button
@@ -209,7 +227,7 @@ export function EventsList() {
           >
             {past.map((e) => (
               <div key={e.id} className="opacity-70">
-                <EventCard event={e} />
+                <EventCard event={e} authorName={authorName} authorInitials={authorInitials} />
               </div>
             ))}
           </motion.div>

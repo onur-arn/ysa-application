@@ -1,21 +1,24 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useState } from "react"
+import { useState, useCallback } from "react"
+import { getCroppedImg } from "@/lib/crop"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { useRef } from "react"
 import {
   Mail, Lock, User, Phone, Cake, ExternalLink, Loader2,
-  ChevronDown, ChevronLeft, Check, MapPin, Briefcase, CheckCircle2, Camera, Home, Moon, Sun,
+  ChevronDown, ChevronLeft, Check, MapPin, Briefcase, CheckCircle2,
+  Camera, Home, Moon, Sun, Eye, EyeOff, ZoomIn,
 } from "lucide-react"
+import Cropper from "react-easy-crop"
+import type { Area } from "react-easy-crop"
 import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
 import {
-  STATIONS,
   STATIONS_SORTED,
   SEHIRLER,
   YONETIM_KURULU_ROLES,
@@ -68,6 +71,8 @@ const fieldClass =
   "h-12 w-full rounded-xl border border-input bg-card pl-10 pr-3 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
 const selectClass =
   "h-12 w-full appearance-none rounded-xl border border-input bg-card pl-3 pr-9 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
+const dateClass =
+  "h-12 w-full rounded-xl border border-input bg-card px-3 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 [appearance:none] [-webkit-appearance:none]"
 
 const variants = {
   enter: (d: number) => ({ x: d * 40, opacity: 0 }),
@@ -75,6 +80,7 @@ const variants = {
   exit: (d: number) => ({ x: d * -40, opacity: 0 }),
 }
 
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function SignUpPage() {
   const router = useRouter()
   const { t } = useI18n()
@@ -93,62 +99,30 @@ export default function SignUpPage() {
     setStep(s => s + delta)
   }
 
-  async function submit() {
+  async function submit(step3: Partial<FormData> = {}) {
     setLoading(true)
     setError(null)
-    const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supaKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    if (supaUrl && supaKey) {
-      try {
-        const supabase = createClient()
-        const { error: err } = await supabase.auth.signUp({
-          email: data.email,
-          password: data.password,
-          options: {
-            emailRedirectTo:
-              process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
-              `${window.location.origin}/auth/callback`,
-            data: {
-              full_name: `${data.firstName} ${data.lastName}`.trim(),
-              station: data.station,
-              role: data.role,
-              phone: data.phone,
-              birthday: data.birthday,
-              linkedin: data.linkedin,
-              igem_egitimi: data.igemEgitimi,
-              igem_tarihi: data.igemTarihi,
-              memleket: data.memleket,
-            },
-          },
-        })
-        if (err) {
-          setError(err.message)
-          setLoading(false)
-          return
-        }
-      } catch {
-        // Supabase not configured — continue to success in demo mode
-      }
-    }
+    // Merge step3 immediately — setData() is async, can't rely on `data` here
+    const finalData: FormData = { ...data, ...step3 }
+
+    // Check duplicate email in pending_members via API
+    // (actual Supabase user is only created when admin approves)
+
     // Send notification email to secretary
     try {
-      let photoBase64: string | null = null
-      if (photo) {
-        photoBase64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsDataURL(photo)
-        })
-      }
       const res = await fetch("/api/signup-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...data, photoBase64, igemEgitimi: data.igemEgitimi, igemTarihi: data.igemTarihi }),
+        body: JSON.stringify({ ...finalData }),
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
-        console.error("signup-request failed:", json)
-        setError("L'e-mail de notification n'a pas pu être envoyé. Veuillez réessayer.")
+        if (json.error === "EMAIL_TAKEN") {
+          setError("Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.")
+        } else {
+          console.error("signup-request failed:", json)
+          setError("L'e-mail de notification n'a pas pu être envoyé. Veuillez réessayer.")
+        }
         setLoading(false)
         return
       }
@@ -158,31 +132,6 @@ export default function SignUpPage() {
       setLoading(false)
       return
     }
-
-    // Save to local directory
-    try {
-      const existing = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      const initials = `${data.firstName[0] ?? ""}${data.lastName[0] ?? ""}`.toUpperCase()
-      existing.push({
-        id: `reg-${Date.now()}`,
-        name: `${data.firstName} ${data.lastName}`.trim(),
-        initials,
-        role: data.role,
-        station: data.station,
-        city: data.station,
-        memleket: data.memleket,
-        phone: data.phone,
-        email: data.email,
-        password: data.password,
-        birthday: data.birthday,
-        linkedin: data.linkedin,
-        igemEgitimi: data.igemEgitimi || undefined,
-        igemTarihi: data.igemTarihi || undefined,
-        online: false,
-      })
-      localStorage.setItem("ysa-registered-members", JSON.stringify(existing))
-    } catch {}
-
     setLoading(false)
     go(1)
   }
@@ -250,7 +199,7 @@ export default function SignUpPage() {
               <Step3
                 data={data}
                 onBack={() => go(-1)}
-                onSubmit={(d) => { setData(p => ({ ...p, ...d })); submit() }}
+                onSubmit={(d) => { setData(p => ({ ...p, ...d })); submit(d) }}
                 loading={loading}
                 error={error}
               />
@@ -283,129 +232,238 @@ function Step1({
   const [lastName, setLastName] = useState(data.lastName)
   const [email, setEmail] = useState(data.email)
   const [password, setPassword] = useState(data.password)
+  const [showPassword, setShowPassword] = useState(false)
   const [phone, setPhone] = useState(data.phone)
   const [birthday, setBirthday] = useState(data.birthday)
   const [linkedin, setLinkedin] = useState(data.linkedin)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Crop modal state
+  const [cropSrc, setCropSrc] = useState<string | null>(null)
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
+
+  const onCropComplete = useCallback((_: Area, pixels: Area) => {
+    setCroppedAreaPixels(pixels)
+  }, [])
+
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = () => onPhotoChange(file, reader.result as string)
+    reader.onload = () => {
+      setCropSrc(reader.result as string)
+      setCrop({ x: 0, y: 0 })
+      setZoom(1)
+    }
     reader.readAsDataURL(file)
   }
 
+  async function handleCropConfirm() {
+    if (!cropSrc || !croppedAreaPixels) return
+    const { dataUrl, file } = await getCroppedImg(cropSrc, croppedAreaPixels)
+    onPhotoChange(file, dataUrl)
+    setCropSrc(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  function handleCropCancel() {
+    setCropSrc(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const canProceed = !!photo && !!firstName && !!lastName && !!email && password.length >= 6 && !!phone && !!birthday
+
   function handleNext(e: React.FormEvent) {
     e.preventDefault()
-    if (!photo) return
+    if (!canProceed) return
     onNext({ firstName, lastName, email, password, phone, birthday, linkedin })
   }
 
   return (
-    <div>
-      <h1 className="mb-1 font-heading text-2xl font-bold text-foreground">İletişim bilgileri</h1>
-      <p className="mb-6 text-sm text-muted-foreground">Adım 1 / 3</p>
-      <form onSubmit={handleNext} className="flex flex-col gap-4">
+    <>
+      {/* ── Photo crop modal ── */}
+      {cropSrc && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black">
+          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+            <span className="text-sm font-medium text-white">Fotoğrafı düzenle</span>
+            <button
+              type="button"
+              onClick={handleCropCancel}
+              className="text-sm text-white/60 underline"
+            >
+              İptal
+            </button>
+          </div>
 
-        {/* Photo picker */}
-        <div className="flex flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="group relative flex size-24 items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-border bg-card transition-colors hover:border-primary"
-          >
-            {photoPreview ? (
-              <img src={photoPreview} alt="Profil" className="size-full object-cover" />
-            ) : (
-              <div className="flex flex-col items-center gap-1 text-muted-foreground group-hover:text-primary">
-                <Camera className="size-7" />
-                <span className="text-[10px] font-medium">Fotoğraf ekle</span>
-              </div>
-            )}
-            {photoPreview && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                <Camera className="size-6 text-white" />
-              </div>
-            )}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handlePhotoChange}
-          />
-          {!photo && (
-            <p className="text-xs text-destructive">Profil fotoğrafı zorunludur <span aria-hidden>*</span></p>
-          )}
+          {/* Cropper area */}
+          <div className="relative flex-1">
+            <Cropper
+              image={cropSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={1}
+              cropShape="round"
+              showGrid={false}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={onCropComplete}
+            />
+          </div>
+
+          {/* Controls */}
+          <div className="flex flex-col gap-4 bg-black/90 px-6 pb-10 pt-4">
+            <div className="flex items-center gap-3">
+              <ZoomIn className="size-4 text-white/40" style={{ transform: "scale(0.75)" }} />
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.01}
+                value={zoom}
+                onChange={e => setZoom(Number(e.target.value))}
+                className="flex-1 accent-white"
+              />
+              <ZoomIn className="size-4 text-white/70" />
+            </div>
+            <button
+              type="button"
+              onClick={handleCropConfirm}
+              className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-white transition-opacity active:opacity-80"
+            >
+              Onayla
+            </button>
+          </div>
         </div>
+      )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Ad" icon={User}>
+      {/* ── Step 1 form ── */}
+      <div>
+        <h1 className="mb-1 font-heading text-2xl font-bold text-foreground">İletişim bilgileri</h1>
+        <p className="mb-6 text-sm text-muted-foreground">Adım 1 / 3</p>
+        <form onSubmit={handleNext} className="flex flex-col gap-4">
+
+          {/* Photo picker */}
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="group relative flex size-24 items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-border bg-card transition-colors hover:border-primary"
+            >
+              {photoPreview ? (
+                <img src={photoPreview} alt="Profil" className="size-full object-cover" />
+              ) : (
+                <div className="flex flex-col items-center gap-1 text-muted-foreground group-hover:text-primary">
+                  <Camera className="size-7" />
+                  <span className="text-[10px] font-medium">Fotoğraf ekle</span>
+                </div>
+              )}
+              {photoPreview && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Camera className="size-6 text-white" />
+                </div>
+              )}
+            </button>
             <input
-              type="text" required value={firstName}
-              onChange={e => setFirstName(e.target.value)}
-              placeholder="Jean" className={fieldClass}
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoChange}
+            />
+            {!photo && (
+              <p className="text-xs text-destructive">Profil fotoğrafı zorunludur <span aria-hidden>*</span></p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ad" icon={User}>
+              <input
+                type="text" required value={firstName}
+                onChange={e => setFirstName(e.target.value)}
+                placeholder="Jean" className={fieldClass}
+              />
+            </Field>
+            <Field label="Soyad" icon={User}>
+              <input
+                type="text" required value={lastName}
+                onChange={e => setLastName(e.target.value)}
+                placeholder="Dupont" className={fieldClass}
+              />
+            </Field>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Field label="E-posta" icon={Mail}>
+              <input
+                type="email" required value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="uye@youthstation.org"
+                className={fieldClass}
+              />
+            </Field>
+          </div>
+
+          {/* Password with eye toggle */}
+          <Field label="Şifre" icon={Lock}>
+            <input
+              type={showPassword ? "text" : "password"}
+              required
+              minLength={6}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-10 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={() => setShowPassword(v => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={showPassword ? "Şifreyi gizle" : "Şifreyi göster"}
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </Field>
+
+          <Field label="Telefon" icon={Phone}>
+            <input
+              type="tel" value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="+33 6 12 34 56 78" className={fieldClass}
             />
           </Field>
-          <Field label="Soyad" icon={User}>
+
+          <Field label="Doğum tarihi" icon={Cake}>
             <input
-              type="text" required value={lastName}
-              onChange={e => setLastName(e.target.value)}
-              placeholder="Dupont" className={fieldClass}
+              type="date"
+              value={birthday}
+              onChange={e => setBirthday(e.target.value)}
+              className={`${fieldClass} [appearance:none] [-webkit-appearance:none]`}
             />
           </Field>
-        </div>
-        <Field label="E-posta" icon={Mail}>
-          <input
-            type="email" required value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="uye@youthstation.org" className={fieldClass}
-          />
-        </Field>
-        <Field label="Şifre" icon={Lock}>
-          <input
-            type="password" required minLength={6} value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="••••••••" className={fieldClass}
-          />
-        </Field>
-        <Field label="Telefon" icon={Phone}>
-          <input
-            type="tel" value={phone}
-            onChange={e => setPhone(e.target.value)}
-            placeholder="+33 6 12 34 56 78" className={fieldClass}
-          />
-        </Field>
-        <Field label="Doğum tarihi" icon={Cake}>
-          <input
-            type="date" value={birthday}
-            onChange={e => setBirthday(e.target.value)}
-            className={fieldClass}
-          />
-        </Field>
-        <Field label="LinkedIn (isteğe bağlı)" icon={ExternalLink}>
-          <input
-            type="url" value={linkedin}
-            onChange={e => setLinkedin(e.target.value)}
-            placeholder="https://linkedin.com/in/…" className={fieldClass}
-          />
-        </Field>
-        <Button type="submit" size="lg" className="mt-2" disabled={!photo}>
-          Devam et
-        </Button>
-      </form>
-      <p className="mt-6 text-center text-sm text-muted-foreground">
-        Zaten üye misin?{" "}
-        <button onClick={onLogin} className="font-semibold text-primary">Giriş yap</button>
-      </p>
-    </div>
+
+          <Field label="LinkedIn (isteğe bağlı)" icon={ExternalLink}>
+            <input
+              type="url" value={linkedin}
+              onChange={e => setLinkedin(e.target.value)}
+              placeholder="https://linkedin.com/in/…" className={fieldClass}
+            />
+          </Field>
+          <Button type="submit" size="lg" className="mt-2" disabled={!canProceed}>
+            Devam et
+          </Button>
+        </form>
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Zaten üye misin?{" "}
+          <button onClick={onLogin} className="font-semibold text-primary">Giriş yap</button>
+        </p>
+      </div>
+    </>
   )
 }
 
 // ── Step 2 — Role + Station (Europe map) ─────────────────────────────────────
-
 function Step2({
   data,
   onNext,
@@ -463,7 +521,6 @@ function Step2({
         <div className="overflow-hidden rounded-2xl border border-border bg-card p-2">
           <EuropeMap selected={station} onSelect={setStation} />
         </div>
-        {/* Fallback grid — alphabetical, intl first */}
         <div className="grid grid-cols-2 gap-2">
           {STATIONS_SORTED.map(s => {
             const sel = station === s.id
@@ -562,7 +619,7 @@ function Step3({
               type="date"
               value={igemTarihi}
               onChange={e => setIgemTarihi(e.target.value)}
-              className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+              className={dateClass}
             />
           </div>
         )}
@@ -576,7 +633,6 @@ function Step3({
         <TurkeyMap selected={memleket} onSelect={setMemleket} />
       </div>
 
-      {/* Dropdown — sorted by numeric prefix */}
       <div className="relative mb-5">
         <select
           value={memleket}
@@ -622,7 +678,7 @@ function SuccessStep({ email, onLogin }: { email: string; onLogin: () => void })
         Hesabınız yöneticiler tarafından onaylandıktan sonra aktif hale gelecektir.
       </p>
       <Button size="lg" className="mt-8 w-full" onClick={onLogin}>
-        Giriş sayfasına git
+        Giriş yap
       </Button>
     </div>
   )

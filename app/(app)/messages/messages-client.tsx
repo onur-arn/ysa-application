@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
+import { createClient } from "@/lib/supabase/client"
 
 type Tab = "groups" | "dm"
 
@@ -43,36 +44,33 @@ type CustomDM = {
 
 type CurrentUser = { station: StationId; name: string; isIntl: boolean }
 
-function getCurrentUser(): CurrentUser {
-  const fallback: CurrentUser = { station: "intl", name: "Demo", isIntl: true }
-  if (typeof window === "undefined") return fallback
-  try {
-    const email = localStorage.getItem("ysa-current-user-email")
-    if (!email) return fallback
-    const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-    const me = registered.find((m: { email: string }) => m.email === email)
-    if (me) return {
-      station: me.station ?? "intl",
-      name: me.name ?? "",
-      isIntl: me.station === "intl",
-    }
-  } catch {}
-  return fallback
-}
-
 export function MessagesClient() {
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>("groups")
   const [search, setSearch] = useState("")
   const [openId, setOpenId] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<CurrentUser>({ station: "intl", name: "Demo", isIntl: true })
+  const [currentUser, setCurrentUser] = useState<CurrentUser>({ station: "intl", name: "", isIntl: true })
   const [customGroups, setCustomGroups] = useState<CustomGroup[]>([])
   const [customDMs, setCustomDMs]       = useState<CustomDM[]>([])
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [newDMOpen, setNewDMOpen]             = useState(false)
 
   useEffect(() => {
-    setCurrentUser(getCurrentUser())
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from("profiles").select("name,station").eq("id", user.id).single()
+        if (profile) {
+          setCurrentUser({
+            station: (profile.station as StationId) ?? "intl",
+            name: profile.name ?? "",
+            isIntl: profile.station === "intl",
+          })
+        }
+      }
+    }
+    load()
     try {
       const saved: CustomGroup[] = JSON.parse(localStorage.getItem(CUSTOM_GROUPS_KEY) ?? "[]")
       setCustomGroups(saved)
@@ -212,6 +210,8 @@ export function MessagesClient() {
     })
   }
 
+  const senderInitials = currentUser.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
+
   // ── Filtering ─────────────────────────────────────────────────────────────
   // Station groups: intl sees all, others only see their own station
   const visibleStationGroups = GROUP_CHATS.filter(
@@ -250,6 +250,8 @@ export function MessagesClient() {
         color={CUSTOM_COLOR}
         initials={activeCustomGroup.initials}
         isPrivate={false}
+        senderName={currentUser.name}
+        senderInitials={senderInitials}
         initialMessages={activeCustomGroup.messages}
         onMessagesChange={(msgs) => updateCustomGroupMessages(activeCustomGroup.id, msgs)}
         groupSettings={{
@@ -274,6 +276,8 @@ export function MessagesClient() {
         initials={activeCustomDM.initials}
         isPrivate
         online={activeCustomDM.online}
+        senderName={currentUser.name}
+        senderInitials={senderInitials}
         initialMessages={activeCustomDM.messages}
         onMessagesChange={(msgs) => updateCustomDMMessages(activeCustomDM.id, msgs)}
       />
@@ -294,6 +298,8 @@ export function MessagesClient() {
         initials={activeStationGroup ? getStation(activeStationGroup.id).short : activeDM!.initials}
         isPrivate={!!activeDM}
         online={activeDM?.online}
+        senderName={currentUser.name}
+        senderInitials={senderInitials}
         initialMessages={activeStationGroup ? activeStationGroup.messages : activeDM!.messages}
       />
     )
@@ -493,10 +499,21 @@ function GroupSettingsPanel({
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
-    try {
-      const registered: Member[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      if (registered.length > 0) setAllMembers([...MEMBERS, ...registered])
-    } catch {}
+    async function load() {
+      const supabase = createClient()
+      const { data: profiles } = await supabase.from("profiles").select("id,name,initials,station,role,email,phone,birthday,linkedin,memleket,photo_url,igem_egitimi")
+      if (profiles && profiles.length > 0) {
+        const mapped: Member[] = profiles.map((p) => ({
+          id: p.id, name: p.name ?? "", initials: p.initials ?? "",
+          role: p.role ?? "", station: (p.station ?? "paris") as StationId,
+          city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
+          birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
+          memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
+        }))
+        setAllMembers([...MEMBERS, ...mapped])
+      }
+    }
+    load()
   }, [])
 
   const groupMembers = allMembers.filter((m) => memberNames.includes(m.name))
@@ -790,10 +807,21 @@ function NewDMModal({
   const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
 
   useEffect(() => {
-    try {
-      const registered: Member[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      if (registered.length > 0) setAllMembers([...MEMBERS, ...registered])
-    } catch {}
+    async function load() {
+      const supabase = createClient()
+      const { data: profiles } = await supabase.from("profiles").select("id,name,initials,station,role,email,phone,birthday,linkedin,memleket,photo_url,igem_egitimi")
+      if (profiles && profiles.length > 0) {
+        const mapped: Member[] = profiles.map((p) => ({
+          id: p.id, name: p.name ?? "", initials: p.initials ?? "",
+          role: p.role ?? "", station: (p.station ?? "paris") as StationId,
+          city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
+          birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
+          memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
+        }))
+        setAllMembers([...MEMBERS, ...mapped])
+      }
+    }
+    load()
   }, [])
 
   const filtered = allMembers
@@ -884,10 +912,21 @@ function CreateGroupModal({
   const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
 
   useEffect(() => {
-    try {
-      const registered: Member[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      if (registered.length > 0) setAllMembers([...MEMBERS, ...registered])
-    } catch {}
+    async function load() {
+      const supabase = createClient()
+      const { data: profiles } = await supabase.from("profiles").select("id,name,initials,station,role,email,phone,birthday,linkedin,memleket,photo_url,igem_egitimi")
+      if (profiles && profiles.length > 0) {
+        const mapped: Member[] = profiles.map((p) => ({
+          id: p.id, name: p.name ?? "", initials: p.initials ?? "",
+          role: p.role ?? "", station: (p.station ?? "paris") as StationId,
+          city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
+          birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
+          memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
+        }))
+        setAllMembers([...MEMBERS, ...mapped])
+      }
+    }
+    load()
   }, [])
 
   const filtered = allMembers
@@ -993,7 +1032,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials,
 }: {
   onBack: () => void
   title: string
@@ -1004,6 +1043,8 @@ function ChatView({
   online?: boolean
   initialMessages: ChatMessage[]
   onMessagesChange?: (messages: ChatMessage[]) => void
+  senderName: string
+  senderInitials: string
   groupSettings?: {
     memberNames: string[]
     isAdmin: boolean
@@ -1039,8 +1080,8 @@ function ChatView({
     if (!draft.trim() && !attached) return
     const newMsg = {
       id: String(Date.now()),
-      author: "Moi",
-      initials: "MO",
+      author: senderName,
+      initials: senderInitials,
       text: draft.trim(),
       time: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
       self: true,

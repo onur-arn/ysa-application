@@ -6,6 +6,7 @@ import { ThumbsUp, ThumbsDown, TrendingUp, Sparkles, Check, Rocket } from "lucid
 import { IDEAS, type IdeaItem, type IdeaStatus } from "@/lib/data/feed"
 import { station } from "@/lib/data/stations"
 import { useI18n } from "@/lib/i18n/context"
+import { createClient } from "@/lib/supabase/client"
 
 const statusConfig: Record<IdeaStatus, { key: string; icon: typeof TrendingUp; className: string }> = {
   trending: { key: "feed.trending", icon: TrendingUp, className: "bg-chart-4/15 text-chart-4" },
@@ -72,24 +73,28 @@ export function IdeasList() {
   const [igemIdeas, setIgemIdeas] = useState<IdeaItem[]>([])
 
   useEffect(() => {
-    try {
-      const stored: { author: string; motivation: string; date: string }[] = JSON.parse(
-        localStorage.getItem("igem-requests") ?? "[]"
-      )
-      const items: IdeaItem[] = stored.map((r, i) => ({
-        id: `igem-${i}`,
-        title: "iGEM Programı Katılım Talebi",
-        description: r.motivation || "Üye iGEM programına katılmak istiyor.",
-        author: r.author,
-        station: "intl" as const,
-        up: 0,
-        down: 0,
-        status: "igem" as const,
-      }))
-      setIgemIdeas(items)
-    } catch {
-      // ignore
+    async function load() {
+      try {
+        const supabase = createClient()
+        const { data } = await supabase.from("igem_requests").select("author,motivation,created_at").order("created_at", { ascending: false })
+        if (data) {
+          const items: IdeaItem[] = data.map((r, i) => ({
+            id: `igem-${i}`,
+            title: "iGEM Programı Katılım Talebi",
+            description: r.motivation || "Üye iGEM programına katılmak istiyor.",
+            author: r.author,
+            station: "intl" as const,
+            up: 0,
+            down: 0,
+            status: "igem" as const,
+          }))
+          setIgemIdeas(items)
+        }
+      } catch {
+        // ignore
+      }
     }
+    load()
   }, [])
 
   const allIdeas = [...igemIdeas, ...IDEAS]

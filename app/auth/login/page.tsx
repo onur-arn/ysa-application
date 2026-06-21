@@ -25,26 +25,10 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
     try {
-      if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        // Demo mode — check against localStorage members
-        const registered: { email: string; password: string }[] =
-          JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-        const match = registered.find(
-          (m) => m.email === email && m.password === password,
-        )
-        if (!match) {
-          setError("E-posta veya şifre hatalı.")
-          setLoading(false)
-          return
-        }
-        localStorage.setItem("ysa-current-user-email", match.email)
-        router.push("/feed")
-        return
-      }
       const supabase = createClient()
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
-        setError(error.message)
+        setError("E-posta veya şifre hatalı.")
         setLoading(false)
         return
       }

@@ -2,11 +2,11 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp } from "lucide-react"
-import { POSTS, type Post, type PostComment } from "@/lib/data/posts"
+import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users } from "lucide-react"
+import { POSTS, type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
 import { getStation } from "@/lib/data/stations"
+import { createClient } from "@/lib/supabase/client"
 
-const STORAGE_KEY = "ysa-posts"
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 function timeAgo(iso: string) {
@@ -29,8 +29,13 @@ function Avatar({ initials, station, size = 10 }: { initials: string; station: s
   )
 }
 
-function PostCard({ post, onUpdate, onDelete }: { post: Post; onUpdate: (p: Post) => void; onDelete?: () => void }) {
-  const ME = "Moi"
+function PostCard({ post, onUpdate, onDelete, me }: {
+  post: Post
+  onUpdate: (p: Post) => void
+  onDelete?: () => void
+  me: { name: string; initials: string; station: string }
+}) {
+  const ME = me.name
   const isOwn = post.author === ME
   const [liked, setLiked] = useState(() => (post.likedBy ?? []).includes(ME))
   const [showComments, setShowComments] = useState(false)
@@ -39,6 +44,22 @@ function PostCard({ post, onUpdate, onDelete }: { post: Post; onUpdate: (p: Post
   const [commentText, setCommentText] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
   const s = getStation(post.station as never)
+
+  const myVote = post.poll
+    ? (post.poll.options.find(o => o.voters.includes(ME))?.id ?? null)
+    : null
+
+  function vote(optionId: string) {
+    if (!post.poll) return
+    const alreadyMine = post.poll.options.find(o => o.id === optionId)?.voters.includes(ME)
+    const newOptions = post.poll.options.map(o => {
+      const without = o.voters.filter(v => v !== ME)
+      return o.id === optionId && !alreadyMine
+        ? { ...o, voters: [...without, ME] }
+        : { ...o, voters: without }
+    })
+    onUpdate({ ...post, poll: { ...post.poll, options: newOptions } })
+  }
 
   function toggleLike() {
     const current = post.likedBy ?? []
@@ -51,9 +72,9 @@ function PostCard({ post, onUpdate, onDelete }: { post: Post; onUpdate: (p: Post
     if (!commentText.trim()) return
     const newComment: PostComment = {
       id: `c-${Date.now()}`,
-      author: ME,
-      initials: "ME",
-      station: "paris" as never,
+      author: me.name,
+      initials: me.initials,
+      station: me.station as never,
       text: commentText.trim(),
       time: "şimdi",
     }
@@ -102,6 +123,9 @@ function PostCard({ post, onUpdate, onDelete }: { post: Post; onUpdate: (p: Post
       {/* Content */}
       <p className="px-4 py-3 text-sm leading-relaxed text-foreground">{post.content}</p>
 
+      {/* Poll */}
+      {post.poll && <PollBlock poll={post.poll} myVote={myVote} onVote={vote} />}
+
       {/* Image */}
       {post.imageUrl && (
         <div className="px-4 pb-3">
@@ -126,12 +150,15 @@ function PostCard({ post, onUpdate, onDelete }: { post: Post; onUpdate: (p: Post
             <Heart className={`size-4 ${liked ? "fill-rose-500" : ""}`} />
           </motion.div>
           {(post.likedBy ?? []).length > 0 && (
-            <button
+            <span
+              role="button"
+              tabIndex={0}
               onClick={e => { e.stopPropagation(); setShowLikers(v => !v) }}
-              className="font-medium underline-offset-2 hover:underline"
+              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setShowLikers(v => !v) } }}
+              className="font-medium underline-offset-2 hover:underline cursor-pointer"
             >
               {(post.likedBy ?? []).length}
-            </button>
+            </span>
           )}
         </button>
         <button
@@ -214,10 +241,17 @@ function PostCard({ post, onUpdate, onDelete }: { post: Post; onUpdate: (p: Post
 }
 
 // ── Compose modal ─────────────────────────────────────────────────────────────
-function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (content: string, imageUrl?: string) => void }) {
+function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (content: string, imageUrl?: string, poll?: Poll) => void }) {
+  const [tab, setTab] = useState<"post" | "poll">("post")
+
+  // Post state
   const [content, setContent] = useState("")
   const [imageUrl, setImageUrl] = useState<string | undefined>()
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Poll state
+  const [question, setQuestion] = useState("")
+  const [options, setOptions] = useState(["", ""])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -225,6 +259,36 @@ function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (conte
     const reader = new FileReader()
     reader.onload = () => setImageUrl(reader.result as string)
     reader.readAsDataURL(file)
+  }
+
+  function setOption(i: number, v: string) {
+    setOptions(p => p.map((o, idx) => idx === i ? v : o))
+  }
+  function addOption() { setOptions(p => [...p, ""]) }
+  function removeOption(i: number) {
+    if (options.length <= 2) return
+    setOptions(p => p.filter((_, idx) => idx !== i))
+  }
+
+  const validOptions = options.filter(o => o.trim())
+  const canPost = content.trim()
+  const canPoll = question.trim() && validOptions.length >= 2
+
+  function submitPost() {
+    if (!canPost) return
+    onPost(content.trim(), imageUrl)
+    onClose()
+  }
+
+  function submitPoll() {
+    if (!canPoll) return
+    const pollOptions: PollOption[] = validOptions.map((text, i) => ({
+      id: `opt-${i}`,
+      text: text.trim(),
+      voters: [],
+    }))
+    onPost(question.trim(), undefined, { question: question.trim(), options: pollOptions })
+    onClose()
   }
 
   return (
@@ -239,55 +303,182 @@ function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (conte
         onClick={e => e.stopPropagation()}
         className="w-full max-w-sm overflow-hidden rounded-2xl border border-border bg-card"
       >
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3.5">
           <h2 className="font-heading text-base font-bold text-foreground">Yeni paylaşım</h2>
           <button onClick={onClose} className="rounded-full p-1 text-muted-foreground active:bg-secondary">
             <X className="size-5" />
           </button>
         </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 border-b border-border px-4 py-2.5">
+          <button
+            onClick={() => setTab("post")}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+              tab === "post" ? "bg-primary/10 text-primary" : "text-muted-foreground"
+            }`}
+          >
+            <MessageCircle className="size-3.5" /> Paylaşım
+          </button>
+          <button
+            onClick={() => setTab("poll")}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+              tab === "poll" ? "bg-primary/10 text-primary" : "text-muted-foreground"
+            }`}
+          >
+            <BarChart2 className="size-3.5" /> Anket
+          </button>
+        </div>
+
         <div className="p-4">
-          <textarea
-            autoFocus
-            value={content}
-            onChange={e => setContent(e.target.value)}
-            placeholder="Ne paylaşmak istiyorsunuz?"
-            rows={4}
-            className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-          />
+          {tab === "post" ? (
+            <>
+              <textarea
+                autoFocus
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                placeholder="Ne paylaşmak istiyorsunuz?"
+                rows={4}
+                className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+              />
+              {imageUrl && (
+                <div className="relative mt-3">
+                  <img src={imageUrl} alt="" className="w-full rounded-xl object-cover" style={{ maxHeight: 200 }} />
+                  <button
+                    onClick={() => setImageUrl(undefined)}
+                    className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/60 text-white"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              )}
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors active:bg-secondary"
+                >
+                  <ImagePlus className="size-4" /> Fotoğraf
+                </button>
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+                <button
+                  onClick={submitPost}
+                  disabled={!canPost}
+                  className="ml-auto rounded-xl bg-primary px-6 py-2.5 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
+                >
+                  Paylaş
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Question */}
+              <div className="mb-3">
+                <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Soru</label>
+                <input
+                  autoFocus
+                  value={question}
+                  onChange={e => setQuestion(e.target.value)}
+                  placeholder="Sorunuzu yazın…"
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                />
+              </div>
 
-          {/* Image preview */}
-          {imageUrl && (
-            <div className="relative mt-3">
-              <img src={imageUrl} alt="" className="w-full rounded-xl object-cover" style={{ maxHeight: 200 }} />
+              {/* Options */}
+              <div className="mb-3 flex flex-col gap-2">
+                <label className="text-xs font-semibold text-muted-foreground">Seçenekler</label>
+                {options.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      value={opt}
+                      onChange={e => setOption(i, e.target.value)}
+                      placeholder={`Seçenek ${i + 1}`}
+                      className="flex-1 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                    />
+                    {options.length > 2 && (
+                      <button
+                        onClick={() => removeOption(i)}
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-secondary"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {options.length < 6 && (
+                  <button
+                    onClick={addOption}
+                    className="flex items-center gap-1.5 self-start rounded-xl border border-dashed border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors active:bg-secondary"
+                  >
+                    <Plus className="size-3.5" /> Seçenek ekle
+                  </button>
+                )}
+              </div>
+
               <button
-                onClick={() => setImageUrl(undefined)}
-                className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/60 text-white"
+                onClick={submitPoll}
+                disabled={!canPoll}
+                className="w-full rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
               >
-                <X className="size-4" />
+                Anketi paylaş
               </button>
-            </div>
+            </>
           )}
-
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors active:bg-secondary"
-            >
-              <ImagePlus className="size-4" />
-              Fotoğraf
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-            <button
-              onClick={() => { if (content.trim()) { onPost(content.trim(), imageUrl); onClose() } }}
-              disabled={!content.trim()}
-              className="ml-auto rounded-xl bg-primary px-6 py-2.5 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
-            >
-              Paylaş
-            </button>
-          </div>
         </div>
       </motion.div>
     </motion.div>
+  )
+}
+
+// ── Poll block ────────────────────────────────────────────────────────────────
+function PollBlock({ poll, myVote, onVote }: { poll: Poll; myVote: string | null; onVote: (id: string) => void }) {
+  const total = poll.options.reduce((s, o) => s + o.voters.length, 0)
+
+  return (
+    <div className="mx-4 mb-3 flex flex-col gap-2 rounded-xl border border-border bg-secondary/30 p-3">
+      {poll.options.map(opt => {
+        const pct = total > 0 ? Math.round((opt.voters.length / total) * 100) : 0
+        const isMyVote = myVote === opt.id
+        return (
+          <div key={opt.id}>
+            <button
+              onClick={() => onVote(opt.id)}
+              className={`relative w-full overflow-hidden rounded-xl border text-left transition-all ${
+                isMyVote ? "border-primary" : "border-border/70"
+              }`}
+            >
+              {/* Progress bar */}
+              <div
+                className={`absolute inset-y-0 left-0 rounded-xl transition-all duration-500 ${
+                  isMyVote ? "bg-primary/20" : "bg-muted"
+                }`}
+                style={{ width: total > 0 ? `${pct}%` : "0%" }}
+              />
+              <div className="relative flex items-center gap-2 px-3 py-2.5">
+                <span className={`flex-1 text-sm font-medium ${isMyVote ? "text-primary" : "text-foreground"}`}>
+                  {opt.text}
+                </span>
+                {isMyVote && <Check className="size-3.5 shrink-0 text-primary" />}
+                <span className="shrink-0 text-xs font-bold text-muted-foreground">{pct}%</span>
+              </div>
+            </button>
+
+            {/* Voters */}
+            {opt.voters.length > 0 && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 px-1">
+                <Users className="size-3 shrink-0 text-muted-foreground/50" />
+                {opt.voters.map((v, i) => (
+                  <span key={v} className="text-xs text-muted-foreground">
+                    {v}{i < opt.voters.length - 1 ? "," : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <p className="mt-0.5 text-right text-[11px] text-muted-foreground">{total} oy</p>
+    </div>
   )
 }
 
@@ -328,29 +519,40 @@ export function PostsFeed() {
   const [igemRequests, setIgemRequests] = useState<{ author: string; initials: string; station: string; motivation: string; date: string }[]>([])
   const [showArchive, setShowArchive] = useState(false)
   const [isIntl, setIsIntl] = useState(false)
+  const [me, setMe] = useState<{ name: string; initials: string; station: string }>({
+    name: "", initials: "", station: "paris",
+  })
 
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("igem-requests") ?? "[]")
-      setIgemRequests(stored)
-    } catch {}
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from("profiles").select("name,initials,station").eq("id", user.id).single()
+        if (profile) {
+          const ini = profile.initials || profile.name?.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || ""
+          setMe({ name: profile.name || "", initials: ini, station: profile.station || "paris" })
+          setIsIntl(profile.station === "intl")
+        }
+      } else {
+        setIsIntl(true)
+      }
 
-    try {
-      const email = localStorage.getItem("ysa-current-user-email")
-      if (!email) { setIsIntl(true); return }
-      const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      const me = registered.find((m: { email: string }) => m.email === email)
-      setIsIntl(!me || me.station === "intl")
-    } catch { setIsIntl(true) }
+      const { data: igem } = await supabase.from("igem_requests").select("author,initials,station,motivation,created_at")
+      if (igem) {
+        setIgemRequests(igem.map((r) => ({
+          author: r.author,
+          initials: r.initials ?? "?",
+          station: r.station ?? "intl",
+          motivation: r.motivation ?? "",
+          date: r.created_at,
+        })))
+      }
+    }
+    load()
   }, [])
 
-  const [posts, setPosts] = useState<Post[]>(() => {
-    if (typeof window === "undefined") return POSTS
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      return saved ? [...JSON.parse(saved), ...POSTS] : POSTS
-    } catch { return POSTS }
-  })
+  const [posts, setPosts] = useState<Post[]>(POSTS)
   const [composeOpen, setComposeOpen] = useState(false)
 
   function updatePost(updated: Post) {
@@ -358,34 +560,36 @@ export function PostsFeed() {
   }
 
   function deletePost(id: string) {
-    setPosts(prev => {
-      const updated = prev.filter(p => p.id !== id)
-      try {
-        const userPosts = updated.filter(p => p.id.startsWith("user-"))
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(userPosts))
-      } catch {}
-      return updated
-    })
+    setPosts(prev => prev.filter(p => p.id !== id))
   }
 
-  function addPost(content: string, imageUrl?: string) {
+  async function addPost(content: string, imageUrl?: string, poll?: Poll) {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
     const newPost: Post = {
       id: `user-${Date.now()}`,
-      author: "Moi",
-      initials: "ME",
-      station: "paris",
+      author: me.name,
+      initials: me.initials,
+      station: me.station as never,
       content,
       imageUrl,
+      poll,
       createdAt: new Date().toISOString(),
       likedBy: [],
       comments: [],
     }
-    const updated = [newPost, ...posts]
-    setPosts(updated)
-    try {
-      const userPosts = updated.filter(p => p.id.startsWith("user-"))
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(userPosts))
-    } catch {}
+    setPosts(prev => [newPost, ...prev])
+    if (user) {
+      try {
+        await supabase.from("posts").insert({
+          author: me.name,
+          initials: me.initials,
+          station: me.station,
+          content,
+          image_url: imageUrl ?? null,
+        })
+      } catch {}
+    }
   }
 
   const cutoff = Date.now() - SEVEN_DAYS_MS
@@ -421,6 +625,7 @@ export function PostsFeed() {
         post={item.data}
         onUpdate={updatePost}
         onDelete={() => deletePost(item.data.id)}
+        me={me}
       />
     )
   }

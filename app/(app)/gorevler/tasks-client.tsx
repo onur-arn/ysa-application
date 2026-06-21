@@ -2,29 +2,17 @@
 
 import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown } from "lucide-react"
+import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown, Check } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { TASKS, type Task, type TaskStatus, type TaskPriority, type TaskComment } from "@/lib/data/tasks"
-import { getStation, STATIONS, type StationId } from "@/lib/data/stations"
+import { getStation, STATIONS, MEMBERS, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
+import { createClient } from "@/lib/supabase/client"
 
 type CurrentUser = { station: StationId; role: string; name: string; initials: string }
-
-function getCurrentUser(): CurrentUser {
-  const fallback: CurrentUser = { station: "intl", role: "Başkan", name: "Demo", initials: "DM" }
-  if (typeof window === "undefined") return fallback
-  try {
-    const email = localStorage.getItem("ysa-current-user-email")
-    if (!email) return fallback
-    const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-    const found = registered.find((m: { email: string }) => m.email === email)
-    if (found) return { station: found.station ?? "intl", role: found.role ?? "", name: found.name ?? "", initials: found.initials ?? "?" }
-  } catch {}
-  return fallback
-}
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done"]
 
@@ -39,16 +27,22 @@ export function TasksClient() {
   const [myInitials, setMyInitials] = useState("")
 
   useEffect(() => {
-    const u = getCurrentUser()
-    setMyStation(u.station)
-    setMyRole(u.role)
-    setMyName(u.name)
-    setMyInitials(u.initials)
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: profile } = await supabase.from("profiles").select("name,initials,station,role").eq("id", user.id).single()
+      if (profile) {
+        setMyStation((profile.station as StationId) ?? "intl")
+        setMyRole(profile.role ?? "")
+        setMyName(profile.name ?? "")
+        setMyInitials(profile.initials ?? "")
+      }
+    }
+    load()
   }, [])
 
-  const isIntl     = myStation === "intl"
-  const isPresident = myRole === "Başkan"
-  const canCreate  = isIntl || isPresident
+  const isIntl = myStation === "intl"
 
   // Visibility: intl sees all, stations see only their own tasks
   const visibleTasks = useMemo(
@@ -85,7 +79,7 @@ export function TasksClient() {
               ...t,
               comments: [
                 ...t.comments,
-                { id: String(Date.now()), author: "Ben", initials: "BN", text, time: "Şimdi" },
+                { id: String(Date.now()), author: myName, initials: myInitials, text, time: "Şimdi" },
               ],
             }
           : t,
@@ -154,16 +148,14 @@ export function TasksClient() {
         )}
       </div>
 
-      {/* FAB — intl or station president */}
-      {canCreate && (
-        <button
+      {/* FAB — tous les membres peuvent créer une tâche */}
+      <button
           onClick={() => setCreateOpen(true)}
           className="fixed bottom-20 right-4 z-30 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 transition-transform active:scale-90"
           aria-label={t("tasks.newTask")}
         >
           <Plus className="size-6" />
         </button>
-      )}
 
       <CreateTaskModal
         open={createOpen}
@@ -366,6 +358,9 @@ function TaskCard({
   )
 }
 
+// ── Membres par station (annuaire + Supabase profiles) ────────────────────────
+type AssigneeMember = { name: string; initials: string; role: string }
+
 function CreateTaskModal({
   open,
   onClose,
@@ -384,28 +379,51 @@ function CreateTaskModal({
   creatorInitials: string
 }) {
   const { t } = useI18n()
-  const [title, setTitle]             = useState("")
-  const [description, setDescription] = useState("")
-  const [station, setStation]         = useState<string>(isIntl ? "paris" : creatorStation)
-  const [priority, setPriority]       = useState<TaskPriority>("normal")
-  const [assignee, setAssignee]       = useState("")
+  const [title, setTitle]                       = useState("")
+  const [description, setDescription]           = useState("")
+  const [station, setStation]                   = useState<string>(isIntl ? "paris" : creatorStation)
+  const [priority, setPriority]                 = useState<TaskPriority>("normal")
+  const [selectedAssignee, setSelectedAssignee] = useState<AssigneeMember | null>(null)
+  const [stationMembers, setStationMembers]     = useState<AssigneeMember[]>([])
+
+  const targetStation = isIntl ? station : creatorStation
+
+  // Recharge les membres dès que la station cible change
+  useEffect(() => {
+    const base: AssigneeMember[] = MEMBERS
+      .filter(m => m.station === targetStation)
+      .map(m => ({ name: m.name, initials: m.initials, role: m.role }))
+    setStationMembers(base)
+    setSelectedAssignee(null)
+
+    async function loadFromSupabase() {
+      const supabase = createClient()
+      const { data } = await supabase.from("profiles").select("name,initials,role").eq("station", targetStation)
+      if (data && data.length > 0) {
+        const extra: AssigneeMember[] = data.map((p) => ({
+          name: p.name ?? "",
+          initials: p.initials ?? "",
+          role: p.role ?? "",
+        }))
+        setStationMembers([...base, ...extra])
+      }
+    }
+    loadFromSupabase()
+  }, [targetStation])
 
   function submit() {
     if (!title.trim()) return
-    const targetStation = (isIntl ? station : creatorStation) as StationId
-    const assigneeInitials =
-      assignee.trim().split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "NA"
     onCreate({
       id: String(Date.now()),
       title: title.trim(),
       description: description.trim(),
-      station: targetStation,
+      station: targetStation as StationId,
       priority,
       assignedBy: creatorName || "Uluslararası Büro",
       assignedByInitials: creatorInitials || "INT",
       assignedByStation: creatorStation,
-      assignee: assignee.trim() || "Atanmadı",
-      assigneeInitials,
+      assignee: selectedAssignee?.name ?? "Atanmadı",
+      assigneeInitials: selectedAssignee?.initials ?? "NA",
       status: "todo",
       comments: [],
     })
@@ -413,7 +431,7 @@ function CreateTaskModal({
     setDescription("")
     setStation(isIntl ? "paris" : creatorStation)
     setPriority("normal")
-    setAssignee("")
+    setSelectedAssignee(null)
   }
 
   const priorities: { value: TaskPriority; label: string }[] = [
@@ -422,7 +440,7 @@ function CreateTaskModal({
     { value: "low", label: t("tasks.low") },
   ]
 
-  const stationInfo = getStation(creatorStation)
+  const targetStationInfo = getStation(targetStation as StationId)
 
   return (
     <Modal open={open} onClose={onClose} title={t("tasks.newTask")}>
@@ -455,20 +473,64 @@ function CreateTaskModal({
             ))}
           </div>
         </Field>
-        <Field label={t("tasks.assignee")}>
-          <input value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputClass} placeholder="Örn: Lucas Martin" />
-        </Field>
+
+        {/* Station (intl seulement) */}
         {isIntl ? (
           <Field label={t("agenda.station")}>
             <StationSelect value={station} onChange={setStation} />
           </Field>
         ) : (
           <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/50 px-3 py-2.5">
-            <span className="size-2.5 rounded-full" style={{ backgroundColor: `hsl(${stationInfo.color})` }} />
-            <span className="text-sm font-medium text-foreground">{stationInfo.name}</span>
+            <span className="size-2.5 rounded-full" style={{ backgroundColor: `hsl(${targetStationInfo.color})` }} />
+            <span className="text-sm font-medium text-foreground">{targetStationInfo.name}</span>
             <span className="ml-auto text-xs text-muted-foreground">Station fixée</span>
           </div>
         )}
+
+        {/* Atanan — membres de la station cible */}
+        <Field label={t("tasks.assignee")}>
+          <div className="overflow-hidden rounded-xl border border-input">
+            {stationMembers.length === 0 ? (
+              <p className="px-3 py-4 text-center text-sm text-muted-foreground">
+                Bu istasyonda kayıtlı üye yok
+              </p>
+            ) : (
+              <div className="max-h-48 overflow-y-auto">
+                {stationMembers.map((m, i) => {
+                  const selected = selectedAssignee?.name === m.name
+                  return (
+                    <button
+                      key={`${m.name}-${i}`}
+                      type="button"
+                      onClick={() => setSelectedAssignee(selected ? null : m)}
+                      className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                        i < stationMembers.length - 1 ? "border-b border-border" : ""
+                      } ${selected ? "bg-primary/8" : "hover:bg-secondary/60"}`}
+                    >
+                      <span
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                        style={{ backgroundColor: `hsl(${targetStationInfo.color})` }}
+                      >
+                        {m.initials}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{m.role}</p>
+                      </div>
+                      {selected && <Check className="size-4 shrink-0 text-primary" />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          {selectedAssignee && (
+            <p className="mt-1.5 text-xs text-primary">
+              ✓ {selectedAssignee.name} seçildi
+            </p>
+          )}
+        </Field>
+
         <Button onClick={submit} className="mt-1 h-12" disabled={!title.trim()}>
           {t("common.create")}
         </Button>

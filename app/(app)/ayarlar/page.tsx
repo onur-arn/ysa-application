@@ -16,6 +16,7 @@ export default async function SettingsPage() {
   if (url && key) {
     try {
       const { createClient } = await import("@/lib/supabase/server")
+      const { createAdminClient } = await import("@/lib/supabase/admin")
       const { redirect } = await import("next/navigation")
       const supabase = await createClient()
       const { data: { user } } = await supabase.auth.getUser()
@@ -25,14 +26,30 @@ export default async function SettingsPage() {
         return
       }
 
-      const { data: profile } = await supabase
+      let { data: profile } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
         .single()
 
+      // Auto-create profile if missing (account created outside approval flow)
+      if (!profile) {
+        const admin = createAdminClient()
+        const name = user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? ""
+        const initials = name.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || "?"
+        await admin.from("profiles").insert({
+          id: user.id,
+          name,
+          email: user.email ?? "",
+          station: "paris",
+          role: "Üye",
+          initials,
+        })
+        profile = { id: user.id, name, email: user.email ?? "", station: "paris", role: "Üye", initials, phone: null, birthday: null, linkedin: null, memleket: null, photo_url: null, igem_egitimi: null, igem_tarihi: null, initial_password: null }
+      }
+
       email = user.email ?? ""
-      fullName = profile?.full_name ?? ""
+      fullName = profile?.name ?? ""
       stationId = profile?.station ?? "paris"
       phone = profile?.phone ?? ""
       birthday = profile?.birthday ?? ""

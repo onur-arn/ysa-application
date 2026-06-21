@@ -1,11 +1,42 @@
 import { NextRequest, NextResponse } from "next/server"
-import { transporter } from "@/lib/mailer"
+import { getTransporter } from "@/lib/mailer"
+import { createAdminClient } from "@/lib/supabase/admin"
+
+const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { firstName, lastName, email, phone, birthday, linkedin, role, station, memleket, igemEgitimi, igemTarihi, photoBase64 } = body
+  const { firstName, lastName, email, password, phone, birthday, linkedin, role, station, memleket, igemEgitimi, igemTarihi } = body
 
-  const token = Buffer.from(JSON.stringify({ firstName, lastName, email })).toString("base64url")
+  // Store in Supabase pending_members if available
+  let pendingId: string | null = null
+  if (SUPABASE_ENABLED) {
+    try {
+      const admin = createAdminClient()
+
+      // Only block if already an approved member (profiles) — rejected/pending can re-apply
+      const { data: existingProfile } = await admin.from("profiles").select("email").eq("email", email).maybeSingle()
+      if (existingProfile) {
+        return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
+      }
+
+      const { data, error } = await admin.from("pending_members").upsert({
+        first_name: firstName, last_name: lastName, email, password,
+        phone, birthday, linkedin, role, station, memleket,
+        igem_egitimi: igemEgitimi, igem_tarihi: igemTarihi,
+      }, { onConflict: "email" }).select("id").single()
+      if (!error && data) pendingId = data.id
+    } catch (err) {
+      console.error("[signup-request] Supabase insert failed:", err)
+      // Supabase failure must NOT block the notification email — fall through
+    }
+  }
+
+  // Build token — prefer Supabase pending ID, fallback to base64 payload
+  const token = pendingId
+    ? Buffer.from(JSON.stringify({ pendingId, firstName, lastName, email })).toString("base64url")
+    : Buffer.from(JSON.stringify({ firstName, lastName, email })).toString("base64url")
+
   const base = process.env.NEXT_PUBLIC_APP_URL ?? `${req.nextUrl.protocol}//${req.headers.get("host")}`
   const approveUrl = `${base}/api/signup-approve?token=${token}`
   const rejectUrl  = `${base}/api/signup-reject?token=${token}`
@@ -16,32 +47,18 @@ export async function POST(req: NextRequest) {
       <td style="padding:7px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6">${value || "—"}</td>
     </tr>`
 
-  // Build attachment if photo provided
-  const attachments: { filename: string; content: Buffer; cid: string }[] = []
-  let photoHtml = ""
-  if (photoBase64) {
-    const matches = photoBase64.match(/^data:(.+);base64,(.+)$/)
-    if (matches) {
-      const [, mime, data] = matches
-      const ext = mime.split("/")[1] ?? "jpg"
-      attachments.push({ filename: `photo.${ext}`, content: Buffer.from(data, "base64"), cid: "profile-photo" })
-      photoHtml = `<div style="margin-bottom:20px"><img src="cid:profile-photo" alt="Photo" style="width:90px;height:90px;border-radius:50%;object-fit:cover;border:2px solid #e5e7eb" /></div>`
-    }
-  }
-
   try {
+    const transporter = getTransporter()
     await transporter.sendMail({
       from: `"YSA Kayıt" <${process.env.GMAIL_USER}>`,
       to: process.env.ADMIN_EMAIL ?? "secretaire@youthstation.org",
       subject: `[YSA] Nouvelle demande — ${firstName} ${lastName}`,
-      attachments,
       html: `
         <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
           <div style="background:#0e7490;padding:20px 24px">
             <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Nouvelle demande d'inscription YSA</h1>
           </div>
           <div style="padding:24px">
-            ${photoHtml}
             <table style="border-collapse:collapse;width:100%;background:#f9fafb;border-radius:8px;overflow:hidden">
               ${row("Ad Soyad", `${firstName} ${lastName}`)}
               ${row("E-posta", email)}
@@ -63,8 +80,9 @@ export async function POST(req: NextRequest) {
       `,
     })
     return NextResponse.json({ ok: true })
-  } catch (err) {
-    console.error("Email send failed:", err)
-    return NextResponse.json({ ok: false }, { status: 500 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error("[signup-request] Email send failed:", message)
+    return NextResponse.json({ ok: false, error: message }, { status: 500 })
   }
 }

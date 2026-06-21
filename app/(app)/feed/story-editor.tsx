@@ -41,7 +41,7 @@ type Layer = {
   y: number
 }
 
-type Track = { name: string; artist: string }
+type Track = { name: string; artist: string; previewUrl: string }
 
 export function StoryEditor({
   imageUrl,
@@ -50,7 +50,7 @@ export function StoryEditor({
 }: {
   imageUrl: string
   onCancel: () => void
-  onPublish: (flatUrl: string, fitMode: "cover" | "contain") => void
+  onPublish: (flatUrl: string, fitMode: "cover" | "contain", musicPreviewUrl?: string) => void
 }) {
   const [filter, setFilter]         = useState("none")
   const [layers, setLayers]         = useState<Layer[]>([])
@@ -112,7 +112,7 @@ export function StoryEditor({
     if (!pendingTrack) return
     audioRef.current?.pause()
     setPlayingId(null)
-    setMusic({ name: pendingTrack.title, artist: pendingTrack.artist.name })
+    setMusic({ name: pendingTrack.title, artist: pendingTrack.artist.name, previewUrl: pendingTrack.preview })
     setPendingTrack(null)
   }
 
@@ -255,7 +255,7 @@ export function StoryEditor({
       ctx.fillText(badgeText, badgeX + badgePad, badgeY + badgeH / 2)
     }
 
-    onPublish(canvas.toDataURL("image/jpeg", 0.88), fitMode)
+    onPublish(canvas.toDataURL("image/jpeg", 0.88), fitMode, music?.previewUrl)
   }
 
   return (

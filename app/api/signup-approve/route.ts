@@ -1,40 +1,98 @@
 import { NextRequest, NextResponse } from "next/server"
-import { transporter } from "@/lib/mailer"
-import { signature } from "@/lib/email-signature"
+import { getTransporter } from "@/lib/mailer"
+import { createAdminClient } from "@/lib/supabase/admin"
+
+const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token")
   if (!token) return new NextResponse("Token manquant", { status: 400 })
 
-  let firstName = "", lastName = "", email = ""
+  let firstName = "", lastName = "", email = "", pendingId: string | null = null
   try {
     const parsed = JSON.parse(Buffer.from(token, "base64url").toString())
     firstName = parsed.firstName
     lastName  = parsed.lastName
     email     = parsed.email
+    pendingId = parsed.pendingId ?? null
   } catch {
     return new NextResponse("Token invalide", { status: 400 })
+  }
+
+  // Create Supabase auth user + profile if Supabase is enabled
+  if (SUPABASE_ENABLED && pendingId) {
+    try {
+      const admin = createAdminClient()
+
+      // Get pending member data
+      const { data: pending, error: fetchErr } = await admin
+        .from("pending_members")
+        .select("*")
+        .eq("id", pendingId)
+        .single()
+
+      if (fetchErr || !pending) {
+        console.error("[signup-approve] Pending member not found:", fetchErr)
+      } else {
+        // Create auth user
+        const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
+          email: pending.email,
+          password: pending.password,
+          email_confirm: true,
+        })
+
+        if (authErr) {
+          console.error("[signup-approve] Auth user creation failed:", authErr)
+        } else if (authUser.user) {
+          const fullName = `${pending.first_name} ${pending.last_name}`
+          const initials = fullName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+
+          // Create profile
+          await admin.from("profiles").upsert({
+            id: authUser.user.id,
+            name: fullName,
+            email: pending.email,
+            initial_password: pending.password,
+            station: pending.station ?? "paris",
+            role: pending.role ?? "Üye",
+            phone: pending.phone,
+            birthday: pending.birthday,
+            linkedin: pending.linkedin,
+            memleket: pending.memleket,
+            photo_url: pending.photo_url,
+            igem_egitimi: pending.igem_egitimi,
+            igem_tarihi: pending.igem_tarihi,
+            initials,
+          })
+
+          // Clean up pending record
+          await admin.from("pending_members").delete().eq("id", pendingId)
+        }
+      }
+    } catch (err) {
+      console.error("[signup-approve] Supabase error:", err)
+    }
   }
 
   const base = process.env.NEXT_PUBLIC_APP_URL ?? `${req.nextUrl.protocol}//${req.headers.get("host")}`
 
   try {
+    const transporter = getTransporter()
     await transporter.sendMail({
-      from: `"Onur Arslan – YouthStation" <${process.env.GMAIL_USER}>`,
+      from: `"Youth Station Derneği Uygulaması" <${process.env.GMAIL_USER}>`,
       to: email,
-      subject: "YSA üyelik başvurunuz kabul edildi",
+      subject: "Youth Station Derneği Uygulaması – Üyelik başvurunuz kabul edildi",
       html: `
         <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
           <p style="font-size:15px;color:#111827">Merhaba <strong>${firstName} ${lastName}</strong>,</p>
           <p style="font-size:14px;color:#374151;line-height:1.7">
-            YouthStation Derneği'ne üyelik başvurunuz <strong style="color:#16a34a">kabul edilmiştir</strong>.
+            <strong>Youth Station Derneği Uygulaması</strong>'na üyelik başvurunuz <strong style="color:#16a34a">kabul edilmiştir</strong>.
             Artık e-posta adresiniz ve şifrenizle uygulamaya giriş yapabilirsiniz.
           </p>
           <a href="${base}/auth/login"
              style="display:inline-block;margin-top:8px;padding:11px 24px;background:#0e7490;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none">
             Giriş yap &rarr;
           </a>
-          ${signature(base)}
         </div>
       `,
     })

@@ -1,24 +1,14 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { Search, Phone, Mail, Cake, MapPin, ExternalLink, Home, GraduationCap, ChevronDown, Check } from "lucide-react"
+import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { MEMBERS, STATIONS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
+import { createClient } from "@/lib/supabase/client"
 
 type StationFilter = "all" | StationId
-
-function getCurrentUserStation(): { station: StationId; isIntl: boolean } {
-  if (typeof window === "undefined") return { station: "paris", isIntl: false }
-  try {
-    const email = localStorage.getItem("ysa-current-user-email")
-    const registered: (Member & { password?: string })[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-    const found = registered.find((m) => m.email === email)
-    if (found) return { station: found.station, isIntl: found.station === "intl" }
-  } catch {}
-  return { station: "paris", isIntl: false }
-}
 
 export function DirectoryClient() {
   const { t } = useI18n()
@@ -30,14 +20,36 @@ export function DirectoryClient() {
   const [assignOpen, setAssignOpen] = useState(false)
 
   useEffect(() => {
-    const cu = getCurrentUserStation()
-    setCurrentUser(cu)
-    try {
-      const registered: Member[] = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      const overrides: Record<string, Role> = JSON.parse(localStorage.getItem("ysa-role-overrides") ?? "{}")
-      const withOverrides = registered.map((m) => overrides[m.id] ? { ...m, role: overrides[m.id] } : m)
-      if (registered.length > 0) setAllMembers([...MEMBERS, ...withOverrides])
-    } catch {}
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: me } = await supabase.from("profiles").select("station").eq("id", user.id).single()
+        if (me?.station) {
+          setCurrentUser({ station: me.station as StationId, isIntl: me.station === "intl" })
+        }
+      }
+      const { data: profiles } = await supabase.from("profiles").select("*")
+      if (profiles && profiles.length > 0) {
+        const mapped: Member[] = profiles.map((p) => ({
+          id: p.id,
+          name: p.name ?? "",
+          initials: p.initials ?? "",
+          role: p.role ?? "",
+          station: (p.station ?? "paris") as StationId,
+          city: p.station ?? "paris",
+          email: p.email ?? "",
+          phone: p.phone ?? "",
+          birthday: p.birthday ?? "",
+          linkedin: p.linkedin ?? "",
+          memleket: p.memleket ?? "",
+          igemEgitimi: p.igem_egitimi ?? undefined,
+          online: false,
+        }))
+        setAllMembers([...MEMBERS, ...mapped])
+      }
+    }
+    load()
   }, [])
 
   // All stations see all members
@@ -47,12 +59,13 @@ export function DirectoryClient() {
     const q = search.toLowerCase()
     return [...visibleMembers]
       .filter((m) => {
+        if (!m.name) return false
         const matchesSearch =
           !q ||
           m.name.toLowerCase().includes(q) ||
           m.role.toLowerCase().includes(q) ||
           getStation(m.station).name.toLowerCase().includes(q) ||
-          m.city.toLowerCase().includes(q)
+          (m.city ?? "").toLowerCase().includes(q)
         const matchesStation = stationFilter === "all" || m.station === stationFilter
         return matchesSearch && matchesStation
       })
@@ -62,18 +75,17 @@ export function DirectoryClient() {
   const grouped = useMemo(() => {
     const map: Record<string, Member[]> = {}
     filtered.forEach((m) => {
-      const letter = m.name[0].toUpperCase()
+      const letter = (m.name?.[0] ?? "#").toUpperCase()
       map[letter] = map[letter] || []
       map[letter].push(m)
     })
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
   }, [filtered])
 
-  function assignRole(member: Member, role: Role) {
+  async function assignRole(member: Member, role: Role) {
     try {
-      const overrides: Record<string, Role> = JSON.parse(localStorage.getItem("ysa-role-overrides") ?? "{}")
-      overrides[member.id] = role
-      localStorage.setItem("ysa-role-overrides", JSON.stringify(overrides))
+      const supabase = createClient()
+      await supabase.from("profiles").update({ role }).eq("id", member.id)
       setAllMembers((prev) => prev.map((m) => m.id === member.id ? { ...m, role } : m))
       setSelected((prev) => prev?.id === member.id ? { ...prev, role } : prev)
     } catch {}
@@ -226,12 +238,16 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
       className="flex items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors active:bg-secondary"
     >
       <div className="relative shrink-0">
-        <span
-          className="flex size-11 items-center justify-center rounded-full text-sm font-bold text-white"
-          style={{ backgroundColor: `hsl(${station.color})` }}
-        >
-          {member.initials}
-        </span>
+        {member.photoUrl ? (
+          <img src={member.photoUrl} alt={member.name} className="size-11 rounded-full object-cover" />
+        ) : (
+          <span
+            className="flex size-11 items-center justify-center rounded-full text-sm font-bold text-white"
+            style={{ backgroundColor: `hsl(${station.color})` }}
+          >
+            {member.initials}
+          </span>
+        )}
         {member.online && (
           <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-background bg-emerald-500" />
         )}
@@ -239,11 +255,23 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-foreground">{member.name}</p>
         <p className="truncate text-sm text-muted-foreground">
-          {member.role} · {station.city}
+          {member.role}
         </p>
       </div>
     </button>
   )
+}
+
+const TR_MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
+
+function formatBirthday(dateStr?: string): string {
+  if (!dateStr) return "—"
+  const [y, m, d] = dateStr.split("-").map(Number)
+  if (!y || !m || !d) return dateStr
+  const now = new Date()
+  let age = now.getFullYear() - y
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--
+  return `${d} ${TR_MONTHS[m - 1]} ${y} (${age} yaşında)`
 }
 
 function MemberDetail({ member }: { member: Member }) {
@@ -253,16 +281,13 @@ function MemberDetail({ member }: { member: Member }) {
   const rows = [
     { icon: Phone, label: t("directory.phone"), value: member.phone, href: `tel:${member.phone}` },
     { icon: Mail, label: t("directory.email"), value: member.email, href: `mailto:${member.email}` },
-    { icon: Cake, label: t("directory.birthday"), value: member.birthday },
-    { icon: MapPin, label: t("directory.city"), value: member.city },
+    { icon: Cake, label: t("directory.birthday"), value: formatBirthday(member.birthday) },
     ...(member.memleket ? [{ icon: Home, label: t("directory.memleket"), value: member.memleket }] : []),
     ...(member.igemEgitimi
       ? [{
           icon: GraduationCap,
           label: "iGEM Eğitimi",
-          value: member.igemEgitimi === "evet"
-            ? `✅ Evet${member.igemTarihi ? ` — ${member.igemTarihi}` : ""}`
-            : "❌ Hayır",
+          value: member.igemEgitimi === "evet" ? "✅ Evet" : "❌ Hayır",
         }]
       : []),
     ...(member.linkedin ? [{ icon: ExternalLink, label: "LinkedIn", value: "Profili gör", href: member.linkedin }] : []),
@@ -272,12 +297,16 @@ function MemberDetail({ member }: { member: Member }) {
     <div className="flex flex-col gap-5">
       <div className="flex flex-col items-center text-center">
         <div className="relative">
-          <span
-            className="flex size-20 items-center justify-center rounded-full text-2xl font-bold text-white"
-            style={{ backgroundColor: `hsl(${station.color})` }}
-          >
-            {member.initials}
-          </span>
+          {member.photoUrl ? (
+            <img src={member.photoUrl} alt={member.name} className="size-20 rounded-full object-cover" />
+          ) : (
+            <span
+              className="flex size-20 items-center justify-center rounded-full text-2xl font-bold text-white"
+              style={{ backgroundColor: `hsl(${station.color})` }}
+            >
+              {member.initials}
+            </span>
+          )}
           {member.online && (
             <span className="absolute bottom-1 right-1 size-4 rounded-full border-2 border-card bg-emerald-500" />
           )}

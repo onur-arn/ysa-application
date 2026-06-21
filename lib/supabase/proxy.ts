@@ -31,16 +31,18 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const isAuthRoute = request.nextUrl.pathname.startsWith("/auth")
-  const isPublicAsset = request.nextUrl.pathname === "/manifest.json"
+  const { pathname } = request.nextUrl
+  const isAuthRoute    = pathname.startsWith("/auth")
+  const isPublicApi    = pathname.startsWith("/api/signup-") || pathname.startsWith("/api/test-email")
+  const isPublicRoute  = pathname === "/" || pathname === "/manifest.json" || isPublicApi
 
-  if (!user && !isAuthRoute && !isPublicAsset) {
+  if (!user && !isAuthRoute && !isPublicRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/auth/login"
     return NextResponse.redirect(url)
   }
 
-  if (user && isAuthRoute) {
+  if (user && (isAuthRoute || (isPublicRoute && !isPublicApi))) {
     const url = request.nextUrl.clone()
     url.pathname = "/feed"
     return NextResponse.redirect(url)

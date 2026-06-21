@@ -1,28 +1,30 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   User, Bell, Info, LogOut, Moon, Sun, Rocket, X, Camera,
   Pencil, Mail, Lock, Phone, Cake, ExternalLink, MapPin, Check,
-  ChevronDown,
+  ChevronDown, ZoomIn, FileDown, Loader2,
 } from "lucide-react"
+import Cropper from "react-easy-crop"
+import type { Area } from "react-easy-crop"
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
-import { getStation, SEHIRLER } from "@/lib/data/stations"
-
+import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
+import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
 
 type ProfileData = {
+  name: string
   email: string
   phone: string
   birthday: string
   linkedin: string
   memleket: string
   photoUrl: string | null
+  station: string
 }
-
-const STORAGE_KEY = "ysa-profile-edits"
 
 export function SettingsClient({
   email: initialEmail,
@@ -51,70 +53,104 @@ export function SettingsClient({
   const [igemMotivation, setIgemMotivation] = useState("")
   const [igemSent, setIgemSent] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportDone, setExportDone] = useState(false)
 
-  // Load saved profile from localStorage (demo mode)
-  const [profile, setProfile] = useState<ProfileData>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) return JSON.parse(saved)
-    }
-    return {
-      email: initialEmail,
-      phone: initialPhone ?? "",
-      birthday: initialBirthday ?? "",
-      linkedin: initialLinkedin ?? "",
-      memleket: initialMemleket ?? "",
-      photoUrl: initialPhotoUrl ?? null,
-    }
+  const [profile, setProfile] = useState<ProfileData>({
+    name: fullName,
+    email: initialEmail,
+    phone: initialPhone ?? "",
+    birthday: initialBirthday ?? "",
+    linkedin: initialLinkedin ?? "",
+    memleket: initialMemleket ?? "",
+    photoUrl: initialPhotoUrl ?? null,
+    station: station,
   })
 
-  const stationInfo = getStation(station as never)
+  const isIntl = profile.station === "intl"
+  const stationInfo = getStation(profile.station as never)
   const initials =
-    fullName.trim().split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() ||
+    profile.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() ||
     (profile.email[0]?.toUpperCase() ?? "U")
 
-  function saveProfile(updated: ProfileData) {
+  async function saveProfile(updated: ProfileData) {
     setProfile(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const newInitials = updated.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
+        await supabase.from("profiles").update({
+          name: updated.name,
+          phone: updated.phone,
+          birthday: updated.birthday,
+          linkedin: updated.linkedin,
+          memleket: updated.memleket,
+          photo_url: updated.photoUrl,
+          station: updated.station,
+          initials: newInitials,
+        }).eq("id", user.id)
+      }
+    } catch {}
     setEditOpen(false)
   }
 
   async function logout() {
     setLoggingOut(true)
     try {
-      if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        const supabase = createClient()
-        await supabase.auth.signOut()
-      }
+      const supabase = createClient()
+      await supabase.auth.signOut()
     } catch {}
     window.location.href = "/"
   }
 
-  function submitIgem() {
-    const requests: { author: string; motivation: string; date: string; station: string; initials: string }[] = JSON.parse(
-      localStorage.getItem("igem-requests") ?? "[]"
-    )
-
-    // Try to resolve real name from localStorage in demo mode
-    let authorName = fullName || profile.email || ""
-    let authorStation = station
-    let authorInitials = initials
+  async function exportData() {
+    setExporting(true)
     try {
-      const email = localStorage.getItem("ysa-current-user-email")
-      const registered = JSON.parse(localStorage.getItem("ysa-registered-members") ?? "[]")
-      const me = registered.find((m: { email: string; name: string; station: string; initials: string }) => m.email === email)
-      if (me) {
-        if (!authorName) authorName = me.name
-        authorStation = me.station || authorStation
-        authorInitials = me.initials || authorInitials
-      }
+      const supabase = createClient()
+      const { data: profiles } = await supabase.from("profiles").select("*")
+      const { data: posts } = await supabase.from("posts").select("*")
+      const { data: igem } = await supabase.from("igem_requests").select("*")
+
+      await fetch("/api/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestedBy: profile.name || profile.email,
+          profiles: (profiles ?? []).map((m: Record<string, unknown>) => ({
+            name: m.name, email: m.email,
+            station: m.station, role: m.role, phone: m.phone,
+            birthday: m.birthday, memleket: m.memleket, linkedin: m.linkedin,
+            igem_egitimi: m.igem_egitimi,
+          })),
+          posts: posts ?? [],
+          tasks: [],
+          igem: igem ?? [],
+        }),
+      })
+      setExportDone(true)
+      setTimeout(() => setExportDone(false), 4000)
     } catch {}
+    setExporting(false)
+  }
 
-    if (!authorName) authorName = "Kullanıcı"
-    const ini = authorInitials || authorName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+  async function submitIgem() {
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: profileData } = await supabase.from("profiles").select("name,initials,station").eq("id", user.id).single()
+      const authorName = profileData?.name || profile.name || "Kullanıcı"
+      const authorStation = profileData?.station || station
+      const authorInitials = profileData?.initials || initials
 
-    requests.push({ author: authorName, motivation: igemMotivation, date: new Date().toISOString(), station: authorStation, initials: ini })
-    localStorage.setItem("igem-requests", JSON.stringify(requests))
+      await supabase.from("igem_requests").insert({
+        author: authorName,
+        initials: authorInitials,
+        station: authorStation,
+        motivation: igemMotivation,
+      })
+    } catch {}
     setIgemSent(true)
     setIgemOpen(false)
     setIgemMotivation("")
@@ -138,7 +174,7 @@ export function SettingsClient({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate font-heading text-lg font-bold text-foreground">{fullName || profile.email}</p>
+            <p className="truncate font-heading text-lg font-bold text-foreground">{profile.name || profile.email}</p>
             <p className="truncate text-sm text-muted-foreground">{profile.email}</p>
             <span
               className="mt-1 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white"
@@ -179,7 +215,7 @@ export function SettingsClient({
 
         {/* Account (read-only) */}
         <Section title={t("settings.account")} icon={User}>
-          <Row label={t("auth.fullName")} value={fullName || "—"} />
+          <Row label={t("auth.fullName")} value={profile.name || "—"} />
           <Row label={t("auth.email")} value={profile.email} last />
         </Section>
 
@@ -214,6 +250,30 @@ export function SettingsClient({
             <span className="text-sm text-muted-foreground">{t("settings.version")}</span>
           </div>
         </Section>
+
+        {/* Export — bureau international only */}
+        {isIntl && (
+          <Section title="Export données" icon={FileDown}>
+            <div className="flex flex-col gap-2 px-4 py-3.5">
+              <p className="text-sm text-muted-foreground">
+                Envoie un rapport complet (membres, mots de passe, publications, tâches) à l'adresse admin.
+              </p>
+              {exportDone && (
+                <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600">
+                  ✓ Export envoyé à secretaire@youthstation.org
+                </p>
+              )}
+              <button
+                onClick={exportData}
+                disabled={exporting}
+                className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-50"
+              >
+                {exporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
+                {exporting ? "Génération en cours…" : "Envoyer PDF à l'admin"}
+              </button>
+            </div>
+          </Section>
+        )}
 
         {/* Logout */}
         <button
@@ -287,9 +347,10 @@ function EditProfileModal({
   onClose,
 }: {
   profile: ProfileData
-  onSave: (p: ProfileData) => void
+  onSave: (p: ProfileData) => Promise<void>
   onClose: () => void
 }) {
+  const [name, setName] = useState(profile.name)
   const [email, setEmail] = useState(profile.email)
   const [password, setPassword] = useState("")
   const [phone, setPhone] = useState(profile.phone)
@@ -297,19 +358,38 @@ function EditProfileModal({
   const [linkedin, setLinkedin] = useState(profile.linkedin)
   const [memleket, setMemleket] = useState(profile.memleket)
   const [photoUrl, setPhotoUrl] = useState<string | null>(profile.photoUrl)
+  const [stationVal, setStationVal] = useState(profile.station)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Crop states
+  const [cropSrc, setCropSrc] = useState<string | null>(null)
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = () => setPhotoUrl(reader.result as string)
+    reader.onload = () => setCropSrc(reader.result as string)
     reader.readAsDataURL(file)
+    e.target.value = ""
   }
+
+  const handleCropConfirm = useCallback(async () => {
+    if (!cropSrc || !croppedAreaPixels) return
+    try {
+      const { dataUrl } = await getCroppedImg(cropSrc, croppedAreaPixels)
+      setPhotoUrl(dataUrl)
+    } catch {}
+    setCropSrc(null)
+    setZoom(1)
+    setCrop({ x: 0, y: 0 })
+  }, [cropSrc, croppedAreaPixels])
 
   function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    onSave({ email, phone, birthday, linkedin, memleket, photoUrl })
+    onSave({ name, email, phone, birthday, linkedin, memleket, photoUrl, station: stationVal })
   }
 
   const fieldClass =
@@ -321,6 +401,55 @@ function EditProfileModal({
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-4"
       onClick={onClose}
     >
+      {/* Crop overlay */}
+      {cropSrc && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-black"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="relative flex-1">
+            <Cropper
+              image={cropSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={1}
+              cropShape="round"
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={(_, px) => setCroppedAreaPixels(px)}
+            />
+          </div>
+          <div className="flex flex-col gap-4 bg-black/80 px-6 py-5">
+            <div className="flex items-center gap-3 text-white">
+              <ZoomIn className="size-4 opacity-50" />
+              <input
+                type="range" min={1} max={3} step={0.01}
+                value={zoom}
+                onChange={e => setZoom(Number(e.target.value))}
+                className="flex-1 accent-white"
+              />
+              <ZoomIn className="size-5" />
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setCropSrc(null); setZoom(1); setCrop({ x: 0, y: 0 }) }}
+                className="flex-1 rounded-xl border border-white/30 py-3 font-semibold text-white"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                onClick={handleCropConfirm}
+                className="flex-1 rounded-xl bg-white py-3 font-semibold text-black"
+              >
+                Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <motion.div
         initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
         transition={{ type: "spring", stiffness: 400, damping: 32 }}
@@ -357,6 +486,31 @@ function EditProfileModal({
             </button>
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
             <p className="text-xs text-muted-foreground">Profil fotoğrafı</p>
+          </div>
+
+          {/* Name */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Ad Soyad</label>
+            <div className="relative">
+              <User className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input type="text" value={name} onChange={e => setName(e.target.value)} className={fieldClass} />
+            </div>
+          </div>
+
+          {/* Station */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">İstasyon</label>
+            <div className="relative">
+              <MapPin className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <select
+                value={stationVal}
+                onChange={e => setStationVal(e.target.value)}
+                className="h-11 w-full appearance-none rounded-xl border border-input bg-background pl-9 pr-9 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+              >
+                {STATIONS_SORTED.map(s => <option key={s.id} value={s.id}>{s.city}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            </div>
           </div>
 
           {/* Email */}
