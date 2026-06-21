@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getTransporter } from "@/lib/mailer"
+import { sendMail, MAIL_FROM } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -34,9 +34,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const transporter = getTransporter()
-    await transporter.sendMail({
-      from: `"Youth Station Derneği Uygulaması" <${process.env.GMAIL_USER}>`,
+    await sendMail({
+      from: MAIL_FROM,
       to: email,
       subject: "Youth Station Derneği Uygulaması – Üyelik başvurunuz hakkında",
       html: `

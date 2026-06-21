@@ -1,26 +1,21 @@
 import { NextResponse } from "next/server"
-import { getTransporter } from "@/lib/mailer"
+import { sendMail, MAIL_FROM, ADMIN_TO } from "@/lib/mailer"
 
 export async function GET() {
-  const gmailUser = process.env.GMAIL_USER
-  const gmailPass = process.env.GMAIL_APP_PASSWORD
-  const adminEmail = process.env.ADMIN_EMAIL
-
-  if (!gmailUser || !gmailPass) {
-    return NextResponse.json({ ok: false, error: "GMAIL_USER ou GMAIL_APP_PASSWORD manquant dans .env.local" })
+  if (!process.env.RESEND_API_KEY) {
+    return NextResponse.json({ ok: false, error: "RESEND_API_KEY manquant dans les variables d'environnement" })
   }
 
   try {
-    const transporter = getTransporter()
-    const info = await transporter.sendMail({
-      from: `"YSA Test" <${gmailUser}>`,
-      to: adminEmail ?? gmailUser,
+    await sendMail({
+      from: MAIL_FROM,
+      to: ADMIN_TO,
       subject: "[YSA] Test email depuis Next.js",
-      text: `Email envoyé depuis l'API Next.js. GMAIL_USER=${gmailUser} ADMIN_EMAIL=${adminEmail}`,
+      html: `<p>Email envoyé depuis l'API Next.js via Resend. From: ${MAIL_FROM}, To: ${ADMIN_TO}</p>`,
     })
-    return NextResponse.json({ ok: true, messageId: info.messageId, from: gmailUser, to: adminEmail ?? gmailUser })
+    return NextResponse.json({ ok: true, from: MAIL_FROM, to: ADMIN_TO })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ ok: false, error: message, from: gmailUser, to: adminEmail ?? gmailUser })
+    return NextResponse.json({ ok: false, error: message, from: MAIL_FROM, to: ADMIN_TO })
   }
 }
