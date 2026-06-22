@@ -6,7 +6,7 @@ const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { firstName, lastName, email, password, phone, birthday, linkedin, role, station, memleket, igemEgitimi, igemTarihi } = body
+  const { firstName, lastName, email, password, phone, birthday, linkedin, role, station, memleket, igemEgitimi, igemTarihi, photoUrl } = body
 
   // Store in Supabase pending_members if available
   let pendingId: string | null = null
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
         first_name: firstName, last_name: lastName, email, password,
         phone, birthday, linkedin, role, station, memleket,
         igem_egitimi: igemEgitimi, igem_tarihi: igemTarihi,
+        photo_url: photoUrl ?? null,
       }, { onConflict: "email" }).select("id").single()
       if (!error && data) pendingId = data.id
     } catch (err) {

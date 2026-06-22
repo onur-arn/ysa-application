@@ -102,18 +102,29 @@ export default function SignUpPage() {
   async function submit(step3: Partial<FormData> = {}) {
     setLoading(true)
     setError(null)
-    // Merge step3 immediately — setData() is async, can't rely on `data` here
     const finalData: FormData = { ...data, ...step3 }
 
-    // Check duplicate email in pending_members via API
-    // (actual Supabase user is only created when admin approves)
+    // Upload photo to Supabase Storage if provided
+    let photoUrl: string | null = null
+    if (photo) {
+      try {
+        const { createClient } = await import("@/lib/supabase/client")
+        const supabase = createClient()
+        const ext = photo.name.split(".").pop() ?? "jpg"
+        const path = `pending/${Date.now()}.${ext}`
+        const { error: upErr } = await supabase.storage.from("avatars").upload(path, photo, { upsert: true })
+        if (!upErr) {
+          const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path)
+          photoUrl = urlData.publicUrl
+        }
+      } catch {}
+    }
 
-    // Send notification email to secretary
     try {
       const res = await fetch("/api/signup-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...finalData }),
+        body: JSON.stringify({ ...finalData, photoUrl }),
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
