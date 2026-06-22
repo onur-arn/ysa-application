@@ -33,9 +33,9 @@ export default function LoginPage() {
         return
       }
       router.push("/feed")
-      router.refresh()
     } catch {
-      router.push("/feed")
+      setError("Bir hata oluştu. Lütfen tekrar deneyin.")
+      setLoading(false)
     }
   }
 
