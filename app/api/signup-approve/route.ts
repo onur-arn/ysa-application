@@ -18,12 +18,10 @@ export async function GET(req: NextRequest) {
     return new NextResponse("Token invalide", { status: 400 })
   }
 
-  // Create Supabase auth user + profile if Supabase is enabled
   if (SUPABASE_ENABLED && pendingId) {
     try {
       const admin = createAdminClient()
 
-      // Get pending member data
       const { data: pending, error: fetchErr } = await admin
         .from("pending_members")
         .select("*")
@@ -33,7 +31,9 @@ export async function GET(req: NextRequest) {
       if (fetchErr || !pending) {
         console.error("[signup-approve] Pending member not found:", fetchErr)
       } else {
-        // Create auth user
+        // Try to create auth user — if email already exists, fetch the existing user
+        let userId: string | null = null
+
         const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
           email: pending.email,
           password: pending.password,
@@ -41,14 +41,24 @@ export async function GET(req: NextRequest) {
         })
 
         if (authErr) {
-          console.error("[signup-approve] Auth user creation failed:", authErr)
+          if (authErr.code === "email_exists") {
+            // User already in auth — find their ID
+            const { data: list } = await admin.auth.admin.listUsers()
+            const existing = list?.users?.find((u) => u.email === pending.email)
+            if (existing) userId = existing.id
+          } else {
+            console.error("[signup-approve] Auth user creation failed:", authErr)
+          }
         } else if (authUser.user) {
+          userId = authUser.user.id
+        }
+
+        if (userId) {
           const fullName = `${pending.first_name} ${pending.last_name}`
           const initials = fullName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
 
-          // Create profile
           await admin.from("profiles").upsert({
-            id: authUser.user.id,
+            id: userId,
             name: fullName,
             email: pending.email,
             initial_password: pending.password,
@@ -63,10 +73,10 @@ export async function GET(req: NextRequest) {
             igem_tarihi: pending.igem_tarihi,
             initials,
           })
-
-          // Clean up pending record
-          await admin.from("pending_members").delete().eq("id", pendingId)
         }
+
+        // Always clean up pending record
+        await admin.from("pending_members").delete().eq("id", pendingId)
       }
     } catch (err) {
       console.error("[signup-approve] Supabase error:", err)
