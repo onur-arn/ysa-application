@@ -182,3 +182,25 @@ drop policy if exists "Authenticated can read igem"   on igem_requests;
 drop policy if exists "Authenticated can insert igem" on igem_requests;
 create policy "Authenticated can read igem"   on igem_requests for select to authenticated using (true);
 create policy "Authenticated can insert igem" on igem_requests for insert to authenticated with check (true);
+
+-- ── MIGRATIONS — colonnes ajoutées après la création initiale ────────────────
+-- Ces commandes sont idempotentes (ADD COLUMN IF NOT EXISTS).
+-- À exécuter dans : Supabase Dashboard > SQL Editor
+alter table pending_members add column if not exists phone        text;
+alter table pending_members add column if not exists birthday     text;
+alter table pending_members add column if not exists linkedin     text;
+alter table pending_members add column if not exists role         text;
+alter table pending_members add column if not exists station      text;
+alter table pending_members add column if not exists memleket     text;
+alter table pending_members add column if not exists igem_egitimi text;
+alter table pending_members add column if not exists igem_tarihi  text;
+alter table pending_members add column if not exists photo_url    text;
+
+alter table profiles add column if not exists phone            text;
+alter table profiles add column if not exists birthday         text;
+alter table profiles add column if not exists linkedin         text;
+alter table profiles add column if not exists memleket         text;
+alter table profiles add column if not exists photo_url        text;
+alter table profiles add column if not exists igem_egitimi     text;
+alter table profiles add column if not exists igem_tarihi      text;
+alter table profiles add column if not exists initial_password text;

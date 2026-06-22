@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
       if (fetchErr || !pending) {
         console.error("[signup-approve] Pending member not found:", fetchErr)
       } else {
-        // Try to create auth user — if email already exists, fetch the existing user
+        // Create auth user
         let userId: string | null = null
 
         const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
@@ -42,7 +42,6 @@ export async function GET(req: NextRequest) {
 
         if (authErr) {
           if (authErr.code === "email_exists") {
-            // User already in auth — find their ID
             const { data: list } = await admin.auth.admin.listUsers()
             const existing = list?.users?.find((u) => u.email === pending.email)
             if (existing) userId = existing.id
@@ -58,22 +57,40 @@ export async function GET(req: NextRequest) {
           const fullName = `${cap(pending.first_name)} ${cap(pending.last_name)}`
           const initials = fullName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
 
-          await admin.from("profiles").upsert({
+          // Full upsert with all signup fields
+          const { error: upsertErr } = await admin.from("profiles").upsert({
             id: userId,
             name: fullName,
             email: pending.email,
             initial_password: pending.password,
             station: pending.station ?? "paris",
             role: pending.role ?? "Üye",
-            phone: pending.phone,
-            birthday: pending.birthday,
-            linkedin: pending.linkedin,
-            memleket: pending.memleket,
-            photo_url: pending.photo_url,
-            igem_egitimi: pending.igem_egitimi,
-            igem_tarihi: pending.igem_tarihi,
+            phone: pending.phone ?? null,
+            birthday: pending.birthday ?? null,
+            linkedin: pending.linkedin ?? null,
+            memleket: pending.memleket ?? null,
+            photo_url: pending.photo_url ?? null,
+            igem_egitimi: pending.igem_egitimi ?? null,
+            igem_tarihi: pending.igem_tarihi ?? null,
             initials,
           })
+
+          if (upsertErr) {
+            // Columns may be missing from the DB schema — fallback to safe minimal insert
+            console.error("[signup-approve] Full profile upsert failed (likely missing columns):", upsertErr.message)
+            const { error: fallbackErr } = await admin.from("profiles").upsert({
+              id: userId,
+              name: fullName,
+              email: pending.email,
+              initial_password: pending.password,
+              station: pending.station ?? "paris",
+              role: pending.role ?? "Üye",
+              initials,
+            })
+            if (fallbackErr) {
+              console.error("[signup-approve] Fallback profile upsert also failed:", fallbackErr.message)
+            }
+          }
         }
 
         // Always clean up pending record
