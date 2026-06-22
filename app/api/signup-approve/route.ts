@@ -54,7 +54,8 @@ export async function GET(req: NextRequest) {
         }
 
         if (userId) {
-          const fullName = `${pending.first_name} ${pending.last_name}`
+          const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
+          const fullName = `${cap(pending.first_name)} ${cap(pending.last_name)}`
           const initials = fullName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
 
           await admin.from("profiles").upsert({

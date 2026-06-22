@@ -35,7 +35,9 @@ export default async function SettingsPage() {
       // Auto-create profile if missing (account created outside approval flow)
       if (!profile) {
         const admin = createAdminClient()
-        const name = user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? ""
+        const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : ""
+        const raw = user.user_metadata?.full_name ?? ""
+        const name = raw ? raw.split(" ").map(cap).join(" ") : ""
         const initials = name.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || "?"
         await admin.from("profiles").insert({
           id: user.id,
