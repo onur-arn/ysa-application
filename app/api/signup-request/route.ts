@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getTransporter } from "@/lib/mailer"
+import { getTransporter, isEmailConfigured } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -47,9 +47,9 @@ export async function POST(req: NextRequest) {
       <td style="padding:7px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6">${value || "—"}</td>
     </tr>`
 
-  // Guard: Gmail credentials must be configured, otherwise nodemailer fails with an opaque SMTP error
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    console.error("[signup-request] Missing GMAIL_USER or GMAIL_APP_PASSWORD env vars")
+  // Guard: an email provider (Resend or Gmail) must be configured
+  if (!isEmailConfigured()) {
+    console.error("[signup-request] No email provider configured (RESEND_API_KEY or GMAIL_USER/GMAIL_APP_PASSWORD)")
     return NextResponse.json(
       { ok: false, error: "EMAIL_NOT_CONFIGURED" },
       { status: 500 },
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   try {
     const transporter = getTransporter()
     await transporter.sendMail({
-      from: `"YSA Kayıt" <${process.env.GMAIL_USER}>`,
+      from: `YSA Kayıt <${process.env.GMAIL_USER ?? "onboarding@resend.dev"}>`,
       to: process.env.ADMIN_EMAIL ?? "secretaire@youthstation.org",
       subject: `[YSA] Nouvelle demande — ${firstName} ${lastName}`,
       html: `
