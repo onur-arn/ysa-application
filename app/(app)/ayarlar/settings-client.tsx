@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   User, Bell, Info, LogOut, Moon, Sun, Rocket, X, Camera,
@@ -55,6 +56,7 @@ export function SettingsClient({
   igemEgitimi?: string
   igemTarihi?: string
 }) {
+  const router = useRouter()
   const { t } = useI18n()
   const { theme, toggle } = useTheme()
   const [notifs, setNotifs] = useState({ push: true, email: false, events: true })
@@ -87,42 +89,21 @@ export function SettingsClient({
     (profile.email[0]?.toUpperCase() ?? "U")
 
   async function saveProfile(updated: ProfileData): Promise<string | null> {
-    setProfile(updated)
     try {
-      const supabase = createClient()
-      const { data: { user }, error: authErr } = await supabase.auth.getUser()
-      if (authErr || !user) {
-        console.error("[saveProfile] no session:", authErr)
-        return "Session expirée. Reconnectez-vous."
-      }
-      if (updated.password) {
-        const { error: pwErr } = await supabase.auth.updateUser({ password: updated.password })
-        if (pwErr) console.error("[saveProfile] password:", pwErr)
-      }
-      const newInitials = updated.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-      const { error } = await supabase.from("profiles").update({
-        name: updated.name,
-        phone: updated.phone,
-        birthday: updated.birthday,
-        linkedin: updated.linkedin,
-        memleket: updated.memleket,
-        photo_url: updated.photoUrl,
-        station: updated.station,
-        initials: newInitials,
-        role: updated.role || null,
-        igem_egitimi: updated.igemEgitimi || null,
-        igem_tarihi: updated.igemTarihi || null,
-      }).eq("id", user.id)
-      if (error) {
-        console.error("[saveProfile] update:", error)
-        return error.message
-      }
-      return null
-    } catch (err) {
-      console.error("[saveProfile] exception:", err)
-      return "Erreur inattendue."
-    } finally {
+      const res = await fetch("/api/profile-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      })
+      const json = await res.json()
+      if (!res.ok) return json.error ?? "Erreur inconnue."
+      // Confirmed success: update UI, close modal, refresh server data
+      setProfile(updated)
       setEditOpen(false)
+      router.refresh()
+      return null
+    } catch {
+      return "Erreur réseau. Vérifiez votre connexion."
     }
   }
 
@@ -467,8 +448,11 @@ function EditProfileModal({
       igemTarihi: profile.igemTarihi,
       ...(password ? { password } : {}),
     })
-    if (err) setSaveError(err)
-    setSaving(false)
+    // onSave closes the modal on success — only update error state on failure
+    if (err) {
+      setSaveError(err)
+      setSaving(false)
+    }
   }
 
   const fieldClass =
