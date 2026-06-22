@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 
   return new NextResponse(
-    page(`<strong>${firstName} ${lastName}</strong> reddedildi.`),
+    page("Utilisateur refusé."),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }

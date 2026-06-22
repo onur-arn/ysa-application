@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
   }
 
   return new NextResponse(
-    page("success", `<strong>${firstName} ${lastName}</strong> kabul edildi.`),
+    page("success", "Utilisateur créé."),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }
