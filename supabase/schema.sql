@@ -196,6 +196,11 @@ alter table pending_members add column if not exists igem_egitimi text;
 alter table pending_members add column if not exists igem_tarihi  text;
 alter table pending_members add column if not exists photo_url    text;
 
+alter table profiles add column if not exists name             text not null default '';
+alter table profiles add column if not exists email            text not null default '';
+alter table profiles add column if not exists station          text not null default 'paris';
+alter table profiles add column if not exists role             text not null default 'Üye';
+alter table profiles add column if not exists initials         text not null default '';
 alter table profiles add column if not exists phone            text;
 alter table profiles add column if not exists birthday         text;
 alter table profiles add column if not exists linkedin         text;
@@ -204,3 +209,15 @@ alter table profiles add column if not exists photo_url        text;
 alter table profiles add column if not exists igem_egitimi     text;
 alter table profiles add column if not exists igem_tarihi      text;
 alter table profiles add column if not exists initial_password text;
+
+-- Copier full_name → name et email depuis auth.users pour les profils existants
+update profiles p
+set
+  email    = coalesce((select u.email from auth.users u where u.id = p.id), ''),
+  name     = coalesce(p.full_name, ''),
+  initials = case
+    when p.full_name is not null and trim(p.full_name) != ''
+    then upper(left(split_part(trim(p.full_name),' ',1),1) || left(split_part(trim(p.full_name),' ',2),1))
+    else '?'
+  end
+where name = '' or email = '';

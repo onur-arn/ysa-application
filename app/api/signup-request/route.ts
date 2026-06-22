@@ -14,9 +14,10 @@ export async function POST(req: NextRequest) {
     try {
       const admin = createAdminClient()
 
-      // Only block if already an approved member (profiles) — rejected/pending can re-apply
-      const { data: existingProfile } = await admin.from("profiles").select("email").eq("email", email).maybeSingle()
-      if (existingProfile) {
+      // Only block if already an approved member — check auth.users (reliable, no schema dependency)
+      const { data: authList } = await admin.auth.admin.listUsers()
+      const emailTaken = authList?.users?.some((u) => u.email === email)
+      if (emailTaken) {
         return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
       }
 
