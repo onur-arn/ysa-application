@@ -548,6 +548,24 @@ export function PostsFeed() {
           date: r.created_at,
         })))
       }
+
+      const { data: postsData } = await supabase
+        .from("posts")
+        .select("id,author,initials,station,content,image_url,created_at")
+        .order("created_at", { ascending: false })
+      if (postsData) {
+        setPosts(postsData.map((p) => ({
+          id: p.id,
+          author: p.author ?? "",
+          initials: p.initials ?? "?",
+          station: p.station ?? "paris",
+          content: p.content ?? "",
+          imageUrl: p.image_url ?? undefined,
+          createdAt: p.created_at,
+          likedBy: [],
+          comments: [],
+        })))
+      }
     }
     load()
   }, [])
