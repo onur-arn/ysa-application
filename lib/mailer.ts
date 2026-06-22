@@ -1,41 +1,36 @@
 export async function sendMail({
-  from,
-  fromName,
   to,
   subject,
   html,
 }: {
-  from?: string
-  fromName?: string
   to: string
   subject: string
   html: string
 }) {
-  const apiKey = process.env.BREVO_API_KEY
-  if (!apiKey) throw new Error("BREVO_API_KEY manquant")
+  const apiKey = process.env.SENDGRID_API_KEY
+  if (!apiKey) throw new Error("SENDGRID_API_KEY manquant")
 
-  const senderEmail = from ?? process.env.BREVO_FROM_EMAIL ?? "noreply@youthstation.org"
-  const senderName  = fromName ?? "Youth Station Derneği Uygulaması"
+  const from = process.env.SENDGRID_FROM_EMAIL ?? "secretaire@youthstation.org"
 
-  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
     headers: {
-      "api-key": apiKey,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      sender: { name: senderName, email: senderEmail },
-      to: [{ email: to }],
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: from, name: "Youth Station Derneği Uygulaması" },
       subject,
-      htmlContent: html,
+      content: [{ type: "text/html", value: html }],
     }),
   })
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(`Brevo ${res.status}: ${text}`)
+    throw new Error(`SendGrid ${res.status}: ${text}`)
   }
 }
 
-export const MAIL_FROM = process.env.BREVO_FROM_EMAIL ?? "noreply@youthstation.org"
+export const MAIL_FROM = process.env.SENDGRID_FROM_EMAIL ?? "secretaire@youthstation.org"
 export const ADMIN_TO  = process.env.ADMIN_EMAIL ?? "secretaire@youthstation.org"
