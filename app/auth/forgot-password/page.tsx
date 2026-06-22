@@ -21,12 +21,17 @@ export default function ForgotPasswordPage() {
     setError(null)
     const supabase = createClient()
     const redirectTo = `${window.location.origin}/auth/reset-password`
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
-    setLoading(false)
-    if (error) {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+      if (error) {
+        setError("Bir hata oluştu. Lütfen tekrar deneyin.")
+      } else {
+        setSent(true)
+      }
+    } catch {
       setError("Bir hata oluştu. Lütfen tekrar deneyin.")
-    } else {
-      setSent(true)
+    } finally {
+      setLoading(false)
     }
   }
 
