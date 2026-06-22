@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { sendMail, MAIL_FROM, ADMIN_TO } from "@/lib/mailer"
+import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -49,7 +49,6 @@ export async function POST(req: NextRequest) {
 
   try {
     await sendMail({
-      from: MAIL_FROM,
       to: ADMIN_TO,
       subject: `[YSA] Nouvelle demande — ${firstName} ${lastName}`,
       html: `
@@ -73,7 +72,7 @@ export async function POST(req: NextRequest) {
               <a href="${approveUrl}" style="display:inline-block;padding:12px 28px;background:#16a34a;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none">✓ Accepter</a>
               <a href="${rejectUrl}"  style="display:inline-block;padding:12px 28px;background:#dc2626;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none;margin-left:12px">✗ Refuser</a>
             </div>
-            <p style="margin-top:16px;font-size:11px;color:#9ca3af">Ces liens enverront automatiquement un e-mail de confirmation ou de refus à ${email}.</p>
+            <p style="margin-top:16px;font-size:11px;color:#9ca3af">Cliquez sur un bouton ci-dessus pour accepter ou refuser la demande.</p>
           </div>
         </div>
       `,
