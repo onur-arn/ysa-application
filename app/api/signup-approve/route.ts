@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { sendMail, MAIL_FROM } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -74,37 +73,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? `${req.nextUrl.protocol}//${req.headers.get("host")}`
-
-  try {
-    await sendMail({
-      from: MAIL_FROM,
-      to: email,
-      subject: "Youth Station Derneği Uygulaması – Üyelik başvurunuz kabul edildi",
-      html: `
-        <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
-          <p style="font-size:15px;color:#111827">Merhaba <strong>${firstName} ${lastName}</strong>,</p>
-          <p style="font-size:14px;color:#374151;line-height:1.7">
-            <strong>Youth Station Derneği Uygulaması</strong>'na üyelik başvurunuz <strong style="color:#16a34a">kabul edilmiştir</strong>.
-            Artık e-posta adresiniz ve şifrenizle uygulamaya giriş yapabilirsiniz.
-          </p>
-          <a href="${base}/auth/login"
-             style="display:inline-block;margin-top:8px;padding:11px 24px;background:#0e7490;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none">
-            Giriş yap &rarr;
-          </a>
-        </div>
-      `,
-    })
-  } catch (err) {
-    console.error("Approval email failed:", err)
-    return new NextResponse(page("error", "E-posta gönderilirken hata oluştu."), {
-      status: 500,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    })
-  }
-
   return new NextResponse(
-    page("success", `<strong>${firstName} ${lastName}</strong> kabul edildi. Onay e-postası <strong>${email}</strong> adresine gönderildi.`),
+    page("success", `<strong>${firstName} ${lastName}</strong> kabul edildi.`),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }

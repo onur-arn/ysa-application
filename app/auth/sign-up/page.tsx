@@ -670,9 +670,7 @@ function SuccessStep({ email, onLogin }: { email: string; onLogin: () => void })
       </div>
       <h1 className="font-heading text-2xl font-bold text-foreground">Talebiniz alındı!</h1>
       <p className="mt-3 text-sm text-muted-foreground text-pretty">
-        Kayıt talebiniz başarıyla gönderildi.{email && (
-          <> <span className="font-medium text-foreground">{email}</span> adresine bir doğrulama e-postası gönderilecektir.</>
-        )}
+        Kayıt talebiniz başarıyla gönderildi.
       </p>
       <p className="mt-2 text-sm text-muted-foreground text-pretty">
         Hesabınız yöneticiler tarafından onaylandıktan sonra aktif hale gelecektir.

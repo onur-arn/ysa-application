@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { sendMail, MAIL_FROM } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -33,33 +32,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  try {
-    await sendMail({
-      from: MAIL_FROM,
-      to: email,
-      subject: "Youth Station Derneği Uygulaması – Üyelik başvurunuz hakkında",
-      html: `
-        <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
-          <p style="font-size:15px;color:#111827">Merhaba <strong>${firstName} ${lastName}</strong>,</p>
-          <p style="font-size:14px;color:#374151;line-height:1.7">
-            <strong>Youth Station Derneği Uygulaması</strong>'na üyelik başvurunuzu inceledik. Maalesef şu an için başvurunuzu kabul edemiyoruz.
-          </p>
-          <p style="font-size:14px;color:#374151;line-height:1.7">
-            Herhangi bir sorunuz olursa bizimle iletişime geçebilirsiniz.
-          </p>
-        </div>
-      `,
-    })
-  } catch (err) {
-    console.error("Rejection email failed:", err)
-    return new NextResponse(page("E-posta gönderilirken hata oluştu."), {
-      status: 500,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    })
-  }
-
   return new NextResponse(
-    page(`<strong>${firstName} ${lastName}</strong> reddedildi. Bilgilendirme e-postası <strong>${email}</strong> adresine gönderildi.`),
+    page(`<strong>${firstName} ${lastName}</strong> reddedildi.`),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }
