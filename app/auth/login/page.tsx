@@ -104,6 +104,16 @@ export default function LoginPage() {
             </div>
           </div>
 
+          <div className="flex justify-end -mt-1">
+            <button
+              type="button"
+              onClick={() => router.push("/auth/forgot-password")}
+              className="text-xs text-muted-foreground hover:text-primary"
+            >
+              Şifremi unuttum
+            </button>
+          </div>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <Button type="submit" size="lg" disabled={loading} className="mt-2">

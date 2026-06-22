@@ -1,0 +1,88 @@
+"use client"
+
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { motion } from "framer-motion"
+import { Mail, Loader2, ArrowLeft, CheckCircle2 } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
+import { Logo } from "@/components/logo"
+import { Button } from "@/components/ui/button"
+
+export default function ForgotPasswordPage() {
+  const router = useRouter()
+  const [email, setEmail] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    const supabase = createClient()
+    const redirectTo = `${window.location.origin}/auth/reset-password`
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+    setLoading(false)
+    if (error) {
+      setError("Bir hata oluştu. Lütfen tekrar deneyin.")
+    } else {
+      setSent(true)
+    }
+  }
+
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="w-full max-w-sm"
+      >
+        <button
+          onClick={() => router.push("/auth/login")}
+          className="mb-8 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" /> Geri dön
+        </button>
+
+        <div className="mb-8 flex flex-col items-center text-center">
+          <Logo className="h-14 w-14" />
+          <h1 className="mt-4 font-heading text-2xl font-bold text-foreground">Şifremi unuttum</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            E-posta adresinizi girin, şifre sıfırlama bağlantısı gönderelim.
+          </p>
+        </div>
+
+        {sent ? (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <CheckCircle2 className="size-12 text-emerald-500" />
+            <p className="text-sm text-muted-foreground">
+              Şifre sıfırlama bağlantısı <span className="font-medium text-foreground">{email}</span> adresine gönderildi. E-postanızı kontrol edin.
+            </p>
+            <Button variant="outline" className="w-full mt-2" onClick={() => router.push("/auth/login")}>
+              Giriş sayfasına dön
+            </Button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="e-posta adresiniz"
+                className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-3 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button type="submit" size="lg" disabled={loading}>
+              {loading ? <Loader2 className="size-5 animate-spin" /> : "Bağlantı gönder"}
+            </Button>
+          </form>
+        )}
+      </motion.div>
+    </main>
+  )
+}
