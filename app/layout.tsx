@@ -19,8 +19,8 @@ export const metadata: Metadata = {
     title: "YouthStation",
   },
   icons: {
-    icon: "/youthstation-logo.jpg",
-    apple: "/youthstation-logo.jpg",
+    icon: "/icon.png",
+    apple: "/icon.png",
   },
 }
 
