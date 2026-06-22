@@ -86,32 +86,44 @@ export function SettingsClient({
     profile.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() ||
     (profile.email[0]?.toUpperCase() ?? "U")
 
-  async function saveProfile(updated: ProfileData) {
+  async function saveProfile(updated: ProfileData): Promise<string | null> {
     setProfile(updated)
     try {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        if (updated.password) {
-          await supabase.auth.updateUser({ password: updated.password })
-        }
-        const newInitials = updated.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-        await supabase.from("profiles").update({
-          name: updated.name,
-          phone: updated.phone,
-          birthday: updated.birthday,
-          linkedin: updated.linkedin,
-          memleket: updated.memleket,
-          photo_url: updated.photoUrl,
-          station: updated.station,
-          initials: newInitials,
-          role: updated.role || null,
-          igem_egitimi: updated.igemEgitimi || null,
-          igem_tarihi: updated.igemTarihi || null,
-        }).eq("id", user.id)
+      const { data: { user }, error: authErr } = await supabase.auth.getUser()
+      if (authErr || !user) {
+        console.error("[saveProfile] no session:", authErr)
+        return "Session expirée. Reconnectez-vous."
       }
-    } catch {}
-    setEditOpen(false)
+      if (updated.password) {
+        const { error: pwErr } = await supabase.auth.updateUser({ password: updated.password })
+        if (pwErr) console.error("[saveProfile] password:", pwErr)
+      }
+      const newInitials = updated.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
+      const { error } = await supabase.from("profiles").update({
+        name: updated.name,
+        phone: updated.phone,
+        birthday: updated.birthday,
+        linkedin: updated.linkedin,
+        memleket: updated.memleket,
+        photo_url: updated.photoUrl,
+        station: updated.station,
+        initials: newInitials,
+        role: updated.role || null,
+        igem_egitimi: updated.igemEgitimi || null,
+        igem_tarihi: updated.igemTarihi || null,
+      }).eq("id", user.id)
+      if (error) {
+        console.error("[saveProfile] update:", error)
+        return error.message
+      }
+      return null
+    } catch (err) {
+      console.error("[saveProfile] exception:", err)
+      return "Erreur inattendue."
+    } finally {
+      setEditOpen(false)
+    }
   }
 
   async function logout() {
@@ -401,6 +413,7 @@ function EditProfileModal({
   const [role, setRole] = useState(profile.role)
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Crop states
@@ -433,6 +446,7 @@ function EditProfileModal({
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setSaveError(null)
     let finalPhotoUrl = photoUrl
     if (pendingPhotoFile) {
       try {
@@ -446,13 +460,14 @@ function EditProfileModal({
         }
       } catch {}
     }
-    await onSave({
+    const err = await onSave({
       name, email, phone, birthday, linkedin, memleket,
       photoUrl: finalPhotoUrl, station: stationVal, role,
       igemEgitimi: profile.igemEgitimi,
       igemTarihi: profile.igemTarihi,
       ...(password ? { password } : {}),
     })
+    if (err) setSaveError(err)
     setSaving(false)
   }
 
@@ -663,6 +678,9 @@ function EditProfileModal({
             </div>
           </div>
 
+          {saveError && (
+            <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{saveError}</p>
+          )}
           <button
             type="submit"
             disabled={saving}
