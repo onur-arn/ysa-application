@@ -48,17 +48,29 @@ export async function sendMail(options: MailOptions) {
     return data
   }
 
-  // Fallback: Gmail SMTP
+  // Fallback: Gmail SMTP (port 465 / SSL is the most reliable; 587 is often blocked)
   const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
+    port: 465,
+    secure: true,
     auth: {
       user: GMAIL_USER,
-      pass: GMAIL_APP_PASSWORD,
+      // Gmail app passwords are shown with spaces ("abcd efgh ijkl mnop") but must be sent without them
+      pass: GMAIL_APP_PASSWORD?.replace(/\s/g, ""),
     },
   })
-  return transporter.sendMail(options)
+
+  try {
+    return await transporter.sendMail(options)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (message.includes("BadCredentials") || message.includes("535")) {
+      throw new Error(
+        "GMAIL_AUTH_REJECTED: Google a refusé les identifiants. Vérifiez que la validation en 2 étapes est activée sur le compte et que GMAIL_APP_PASSWORD est un mot de passe d'application valide (16 caractères).",
+      )
+    }
+    throw err
+  }
 }
 
 /**
