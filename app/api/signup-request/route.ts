@@ -6,43 +6,64 @@ const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { firstName, lastName, email, password, phone, birthday, linkedin, role, station, memleket, igemEgitimi, igemTarihi, photoUrl } = body
+  const {
+    firstName, lastName, email, password,
+    phone, birthday, linkedin, role, station,
+    memleket, igemEgitimi, igemTarihi, photoUrl,
+  } = body
 
-  // Store in Supabase pending_members if available
-  let pendingId: string | null = null
-  if (SUPABASE_ENABLED) {
-    try {
-      const admin = createAdminClient()
-
-      // Only block if already an approved member — check auth.users (reliable, no schema dependency)
-      const { data: authList } = await admin.auth.admin.listUsers()
-      const emailTaken = authList?.users?.some((u) => u.email === email)
-      if (emailTaken) {
-        return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
-      }
-
-      const { data, error } = await admin.from("pending_members").upsert({
-        first_name: firstName, last_name: lastName, email, password,
-        phone, birthday, linkedin, role, station, memleket,
-        igem_egitimi: igemEgitimi, igem_tarihi: igemTarihi,
-        photo_url: photoUrl ?? null,
-      }, { onConflict: "email" }).select("id").single()
-      if (!error && data) pendingId = data.id
-    } catch (err) {
-      console.error("[signup-request] Supabase insert failed:", err)
-      // Supabase failure must NOT block the notification email — fall through
-    }
+  if (!SUPABASE_ENABLED) {
+    return NextResponse.json({ ok: false, error: "Supabase not configured" }, { status: 500 })
   }
 
-  // Build token — prefer Supabase pending ID, fallback to base64 payload
-  const token = pendingId
-    ? Buffer.from(JSON.stringify({ pendingId, firstName, lastName, email })).toString("base64url")
-    : Buffer.from(JSON.stringify({ firstName, lastName, email })).toString("base64url")
+  const admin = createAdminClient()
 
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? `${req.nextUrl.protocol}//${req.headers.get("host")}`
-  const approveUrl = `${base}/api/signup-approve?token=${token}`
-  const rejectUrl  = `${base}/api/signup-reject?token=${token}`
+  // Check email not already registered
+  const { data: authList } = await admin.auth.admin.listUsers()
+  const emailTaken = authList?.users?.some((u) => u.email === email)
+  if (emailTaken) {
+    return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
+  }
 
+  // Create auth user immediately
+  const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  })
+  if (authErr || !authData?.user) {
+    console.error("[signup-request] createUser failed:", authErr)
+    return NextResponse.json({ ok: false, error: authErr?.message ?? "Création compte échouée" }, { status: 500 })
+  }
+
+  const userId = authData.user.id
+  const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
+  const fullName = `${cap(firstName)} ${cap(lastName)}`
+  const initials = fullName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+
+  // Insert profile with all signup data
+  const { error: profileErr } = await admin.from("profiles").insert({
+    id: userId,
+    name: fullName,
+    email,
+    initial_password: password,
+    station: station ?? "paris",
+    role: role ?? "Üye",
+    phone: phone || null,
+    birthday: birthday || null,
+    linkedin: linkedin || null,
+    memleket: memleket || null,
+    photo_url: photoUrl || null,
+    igem_egitimi: igemEgitimi || null,
+    igem_tarihi: igemTarihi || null,
+    initials,
+  })
+  if (profileErr) {
+    console.error("[signup-request] profile insert failed:", profileErr.message)
+    // Auth user created but profile failed — log and continue (user can fill profile later)
+  }
+
+  // Notify admin (informational only — account already created)
   const row = (label: string, value: string) =>
     `<tr>
       <td style="padding:7px 14px;color:#6b7280;font-size:13px;white-space:nowrap;border-bottom:1px solid #f3f4f6">${label}</td>
@@ -52,15 +73,16 @@ export async function POST(req: NextRequest) {
   try {
     await sendMail({
       to: ADMIN_TO,
-      subject: `[YSA] Nouvelle demande — ${firstName} ${lastName}`,
+      subject: `[YSA] Nouveau membre inscrit — ${fullName}`,
       html: `
         <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
           <div style="background:#0e7490;padding:20px 24px">
-            <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Nouvelle demande d'inscription YSA</h1>
+            <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Nouveau membre YSA inscrit</h1>
           </div>
           <div style="padding:24px">
+            <p style="margin:0 0 16px;font-size:14px;color:#374151">Le compte a été créé automatiquement.</p>
             <table style="border-collapse:collapse;width:100%;background:#f9fafb;border-radius:8px;overflow:hidden">
-              ${row("Ad Soyad", `${firstName} ${lastName}`)}
+              ${row("Ad Soyad", fullName)}
               ${row("E-posta", email)}
               ${row("Telefon", phone)}
               ${row("Doğum tarihi", birthday)}
@@ -70,19 +92,14 @@ export async function POST(req: NextRequest) {
               ${row("Memleket", memleket)}
               ${row("iGEM Eğitimi", igemEgitimi === "evet" ? `✅ Evet${igemTarihi ? ` — ${igemTarihi}` : ""}` : igemEgitimi === "hayır" ? "❌ Hayır" : "—")}
             </table>
-            <div style="margin-top:28px">
-              <a href="${approveUrl}" style="display:inline-block;padding:12px 28px;background:#16a34a;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none">✓ Accepter</a>
-              <a href="${rejectUrl}"  style="display:inline-block;padding:12px 28px;background:#dc2626;color:#fff;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none;margin-left:12px">✗ Refuser</a>
-            </div>
-            <p style="margin-top:16px;font-size:11px;color:#9ca3af">Cliquez sur un bouton ci-dessus pour accepter ou refuser la demande.</p>
           </div>
         </div>
       `,
     })
-    return NextResponse.json({ ok: true })
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error("[signup-request] Email send failed:", message)
-    return NextResponse.json({ ok: false, error: message }, { status: 500 })
+  } catch (err) {
+    console.error("[signup-request] email notification failed:", err)
+    // Don't fail the signup if email fails
   }
+
+  return NextResponse.json({ ok: true })
 }
