@@ -5,13 +5,13 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   User, Bell, Info, LogOut, Moon, Sun, Rocket, X, Camera,
   Pencil, Mail, Lock, Phone, Cake, ExternalLink, MapPin, Check,
-  ChevronDown, ZoomIn, FileDown, Loader2,
+  ChevronDown, ZoomIn, FileDown, Loader2, Briefcase,
 } from "lucide-react"
 import Cropper from "react-easy-crop"
 import type { Area } from "react-easy-crop"
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
-import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
+import { getStation, SEHIRLER, STATIONS_SORTED, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
 
@@ -24,6 +24,10 @@ type ProfileData = {
   memleket: string
   photoUrl: string | null
   station: string
+  role: string
+  igemEgitimi: string
+  igemTarihi: string
+  password?: string
 }
 
 export function SettingsClient({
@@ -35,6 +39,9 @@ export function SettingsClient({
   linkedin: initialLinkedin,
   memleket: initialMemleket,
   photoUrl: initialPhotoUrl,
+  role: initialRole,
+  igemEgitimi: initialIgemEgitimi,
+  igemTarihi: initialIgemTarihi,
 }: {
   email: string
   fullName: string
@@ -44,6 +51,9 @@ export function SettingsClient({
   linkedin?: string
   memleket?: string
   photoUrl?: string | null
+  role?: string
+  igemEgitimi?: string
+  igemTarihi?: string
 }) {
   const { t } = useI18n()
   const { theme, toggle } = useTheme()
@@ -65,6 +75,9 @@ export function SettingsClient({
     memleket: initialMemleket ?? "",
     photoUrl: initialPhotoUrl ?? null,
     station: station,
+    role: initialRole ?? "",
+    igemEgitimi: initialIgemEgitimi ?? "",
+    igemTarihi: initialIgemTarihi ?? "",
   })
 
   const isIntl = profile.station === "intl"
@@ -79,6 +92,9 @@ export function SettingsClient({
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
+        if (updated.password) {
+          await supabase.auth.updateUser({ password: updated.password })
+        }
         const newInitials = updated.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
         await supabase.from("profiles").update({
           name: updated.name,
@@ -89,6 +105,9 @@ export function SettingsClient({
           photo_url: updated.photoUrl,
           station: updated.station,
           initials: newInitials,
+          role: updated.role || null,
+          igem_egitimi: updated.igemEgitimi || null,
+          igem_tarihi: updated.igemTarihi || null,
         }).eq("id", user.id)
       }
     } catch {}
@@ -156,6 +175,13 @@ export function SettingsClient({
     setIgemMotivation("")
   }
 
+  const igemDisplay =
+    profile.igemEgitimi === "evet"
+      ? `Evet${profile.igemTarihi ? ` — ${profile.igemTarihi}` : ""}`
+      : profile.igemEgitimi === "hayır"
+      ? "Hayır"
+      : "—"
+
   return (
     <div>
       <div className="flex flex-col gap-6 px-4 pt-4">
@@ -176,12 +202,19 @@ export function SettingsClient({
           <div className="min-w-0 flex-1">
             <p className="truncate font-heading text-lg font-bold text-foreground">{profile.name || profile.email}</p>
             <p className="truncate text-sm text-muted-foreground">{profile.email}</p>
-            <span
-              className="mt-1 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white"
-              style={{ backgroundColor: `hsl(${stationInfo.color})` }}
-            >
-              {stationInfo.name}
-            </span>
+            <div className="mt-1 flex flex-wrap gap-1">
+              <span
+                className="inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white"
+                style={{ backgroundColor: `hsl(${stationInfo.color})` }}
+              >
+                {stationInfo.name}
+              </span>
+              {profile.role && (
+                <span className="inline-block rounded-full border border-border bg-secondary px-2.5 py-0.5 text-[11px] font-semibold text-foreground">
+                  {profile.role}
+                </span>
+              )}
+            </div>
           </div>
           <button
             onClick={() => setEditOpen(true)}
@@ -213,10 +246,16 @@ export function SettingsClient({
           </div>
         </Section>
 
-        {/* Account (read-only) */}
+        {/* Account — all profile fields */}
         <Section title={t("settings.account")} icon={User}>
-          <Row label={t("auth.fullName")} value={profile.name || "—"} />
-          <Row label={t("auth.email")} value={profile.email} last />
+          <Row label="Ad Soyad" value={profile.name || "—"} />
+          <Row label="E-posta" value={profile.email} />
+          <Row label="Görev" value={profile.role || "—"} />
+          <Row label="İstasyon" value={stationInfo.name} />
+          <Row label="Telefon" value={profile.phone || "—"} />
+          <Row label="Doğum tarihi" value={profile.birthday || "—"} />
+          <Row label="Memleket" value={profile.memleket || "—"} />
+          <Row label="iGEM" value={igemDisplay} last />
         </Section>
 
         {/* Notifications */}
@@ -359,6 +398,9 @@ function EditProfileModal({
   const [memleket, setMemleket] = useState(profile.memleket)
   const [photoUrl, setPhotoUrl] = useState<string | null>(profile.photoUrl)
   const [stationVal, setStationVal] = useState(profile.station)
+  const [role, setRole] = useState(profile.role)
+  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null)
+  const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Crop states
@@ -379,17 +421,39 @@ function EditProfileModal({
   const handleCropConfirm = useCallback(async () => {
     if (!cropSrc || !croppedAreaPixels) return
     try {
-      const { dataUrl } = await getCroppedImg(cropSrc, croppedAreaPixels)
+      const { dataUrl, file } = await getCroppedImg(cropSrc, croppedAreaPixels)
       setPhotoUrl(dataUrl)
+      setPendingPhotoFile(file)
     } catch {}
     setCropSrc(null)
     setZoom(1)
     setCrop({ x: 0, y: 0 })
   }, [cropSrc, croppedAreaPixels])
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    onSave({ name, email, phone, birthday, linkedin, memleket, photoUrl, station: stationVal })
+    setSaving(true)
+    let finalPhotoUrl = photoUrl
+    if (pendingPhotoFile) {
+      try {
+        const supabase = createClient()
+        const ext = pendingPhotoFile.name.split(".").pop() ?? "jpg"
+        const path = `avatars/${Date.now()}.${ext}`
+        const { error } = await supabase.storage.from("avatars").upload(path, pendingPhotoFile, { upsert: true })
+        if (!error) {
+          const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path)
+          finalPhotoUrl = urlData.publicUrl
+        }
+      } catch {}
+    }
+    await onSave({
+      name, email, phone, birthday, linkedin, memleket,
+      photoUrl: finalPhotoUrl, station: stationVal, role,
+      igemEgitimi: profile.igemEgitimi,
+      igemTarihi: profile.igemTarihi,
+      ...(password ? { password } : {}),
+    })
+    setSaving(false)
   }
 
   const fieldClass =
@@ -513,6 +577,28 @@ function EditProfileModal({
             </div>
           </div>
 
+          {/* Role */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Görev</label>
+            <div className="relative">
+              <Briefcase className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <select
+                value={role}
+                onChange={e => setRole(e.target.value)}
+                className="h-11 w-full appearance-none rounded-xl border border-input bg-background pl-9 pr-9 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+              >
+                <option value="">Görev seçin…</option>
+                <optgroup label="Yönetim Kurulu">
+                  {YONETIM_KURULU_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </optgroup>
+                <optgroup label="Yürütme Kurulu">
+                  {YURUTME_KURULU_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </optgroup>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            </div>
+          </div>
+
           {/* Email */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">E-posta</label>
@@ -524,7 +610,7 @@ function EditProfileModal({
 
           {/* Password */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Şifre <span className="text-muted-foreground font-normal">(boş bırakırsanız değişmez)</span></label>
+            <label className="text-sm font-medium text-foreground">Şifre <span className="font-normal text-muted-foreground">(boş bırakırsanız değişmez)</span></label>
             <div className="relative">
               <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" minLength={6} className={fieldClass} />
@@ -579,10 +665,11 @@ function EditProfileModal({
 
           <button
             type="submit"
-            className="flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80"
+            disabled={saving}
+            className="flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-60"
           >
-            <Check className="size-4" />
-            Kaydet
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            {saving ? "Kaydediliyor…" : "Kaydet"}
           </button>
         </form>
       </motion.div>

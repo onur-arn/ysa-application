@@ -44,9 +44,10 @@ export function DirectoryClient() {
           linkedin: p.linkedin ?? "",
           memleket: p.memleket ?? "",
           igemEgitimi: p.igem_egitimi ?? undefined,
+          photoUrl: p.photo_url ?? undefined,
           online: false,
         }))
-        setAllMembers([...MEMBERS, ...mapped])
+        setAllMembers(mapped)
       }
     }
     load()

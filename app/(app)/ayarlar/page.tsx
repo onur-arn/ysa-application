@@ -9,6 +9,9 @@ export default async function SettingsPage() {
   let linkedin = ""
   let memleket = ""
   let photoUrl: string | null = null
+  let role = ""
+  let igemEgitimi = ""
+  let igemTarihi = ""
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -58,6 +61,9 @@ export default async function SettingsPage() {
       linkedin = profile?.linkedin ?? ""
       memleket = profile?.memleket ?? ""
       photoUrl = profile?.photo_url ?? null
+      role = profile?.role ?? ""
+      igemEgitimi = profile?.igem_egitimi ?? ""
+      igemTarihi = profile?.igem_tarihi ?? ""
     } catch {
       // Supabase not configured — show settings with empty profile
     }
@@ -73,6 +79,9 @@ export default async function SettingsPage() {
       linkedin={linkedin}
       memleket={memleket}
       photoUrl={photoUrl}
+      role={role}
+      igemEgitimi={igemEgitimi}
+      igemTarihi={igemTarihi}
     />
   )
 }
