@@ -228,33 +228,6 @@ export function StoryEditor({
       ctx.shadowBlur    = 0
     }
 
-    if (music) {
-      const badgeText = `♪  ${music.name} — ${music.artist}`
-      const badgePad  = 14
-      const badgeH    = 34
-      const badgeY    = h - 52
-      ctx.font        = `bold 13px -apple-system, sans-serif`
-      const textW     = ctx.measureText(badgeText).width
-      const badgeW    = textW + badgePad * 2
-      const badgeX    = 20
-
-      ctx.fillStyle   = "rgba(0,0,0,0.55)"
-      ctx.beginPath()
-      const r = badgeH / 2
-      ctx.moveTo(badgeX + r, badgeY)
-      ctx.arcTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + badgeH, r)
-      ctx.arcTo(badgeX + badgeW, badgeY + badgeH, badgeX, badgeY + badgeH, r)
-      ctx.arcTo(badgeX, badgeY + badgeH, badgeX, badgeY, r)
-      ctx.arcTo(badgeX, badgeY, badgeX + badgeW, badgeY, r)
-      ctx.closePath()
-      ctx.fill()
-
-      ctx.fillStyle   = "white"
-      ctx.textAlign   = "left"
-      ctx.textBaseline = "middle"
-      ctx.fillText(badgeText, badgeX + badgePad, badgeY + badgeH / 2)
-    }
-
     onPublish(
       canvas.toDataURL("image/jpeg", 0.88),
       fitMode,
