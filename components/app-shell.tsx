@@ -2,6 +2,7 @@
 
 import { Logo } from "@/components/logo"
 import { BottomNav } from "@/components/bottom-nav"
+import { PageTransition } from "@/components/page-transition"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Settings } from "lucide-react"
 import Link from "next/link"
@@ -93,10 +94,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <main
-        className="flex-1 pb-28"
+        className="relative flex-1 pb-28"
         style={{ transform: pull > 0 ? `translateY(${pull * 0.3}px)` : undefined, transition: pull === 0 ? "transform 0.25s ease" : "none" }}
       >
-        {children}
+        <PageTransition>{children}</PageTransition>
       </main>
       <BottomNav />
     </div>
