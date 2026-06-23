@@ -275,14 +275,17 @@ create table if not exists conversations (
   type       text not null check (type in ('group', 'dm')),
   name       text,
   initials   text,
+  admin_name text,
   created_at timestamptz default now()
 );
+alter table conversations add column if not exists admin_name text;
 alter table conversations enable row level security;
 drop policy if exists "Authenticated can read conversations"   on conversations;
 drop policy if exists "Authenticated can insert conversations" on conversations;
 drop policy if exists "Authenticated can delete conversations" on conversations;
 create policy "Authenticated can read conversations"   on conversations for select to authenticated using (true);
 create policy "Authenticated can insert conversations" on conversations for insert to authenticated with check (true);
+create policy "Authenticated can update conversations" on conversations for update to authenticated using (true) with check (true);
 create policy "Authenticated can delete conversations" on conversations for delete to authenticated using (true);
 
 -- ── CONVERSATION MEMBERS ─────────────────────────────────────────────────────

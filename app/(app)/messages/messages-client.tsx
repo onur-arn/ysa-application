@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
-  Users, X, ChevronRight, LogOut, UserPlus, Loader2,
+  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
@@ -20,6 +20,7 @@ type CustomGroup = {
   id: string
   name: string
   initials: string
+  adminName: string
   memberNames: string[]
   lastMessage: string
   lastTime: string
@@ -70,7 +71,7 @@ function mapConversations(
       : ""
 
     if ((c.type as string) === "group") {
-      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", memberNames, lastMessage, lastTime, unread: 0, messages: [] })
+      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminName: (c.admin_name as string) ?? "", memberNames, lastMessage, lastTime, unread: 0, messages: [] })
     } else {
       const otherName = memberNames[0] ?? ""
       dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
@@ -119,7 +120,7 @@ export function MessagesClient({
     const supabase = createClient()
     const { data: conv, error } = await supabase
       .from("conversations")
-      .insert({ type: "group", name, initials })
+      .insert({ type: "group", name, initials, admin_name: currentUser.name })
       .select()
       .single()
 
@@ -135,7 +136,7 @@ export function MessagesClient({
     )
 
     const newGroup: CustomGroup = {
-      id: conv.id, name, initials, memberNames,
+      id: conv.id, name, initials, adminName: currentUser.name, memberNames,
       lastMessage: "Grup oluşturuldu", lastTime: time, unread: 0, messages: [],
     }
     setCustomGroups((prev) => [newGroup, ...prev])
@@ -190,6 +191,18 @@ export function MessagesClient({
     await supabase.from("conversations").delete().eq("id", id)
     setCustomGroups((prev) => prev.filter((g) => g.id !== id))
     setOpenId(null)
+  }
+
+  async function renameGroup(id: string, newName: string) {
+    const trimmed = newName.trim()
+    if (!trimmed) return
+    const words = trimmed.replace(/[^a-zA-ZÀ-ÿ\s]/g, "").trim().split(/\s+/).filter(Boolean)
+    const newInitials = (words.length >= 2 ? words[0][0] + words[1][0] : trimmed.slice(0, 2)).toUpperCase()
+    const supabase = createClient()
+    await supabase.from("conversations").update({ name: trimmed, initials: newInitials }).eq("id", id)
+    setCustomGroups((prev) =>
+      prev.map((g) => g.id === id ? { ...g, name: trimmed, initials: newInitials } : g)
+    )
   }
 
   // ── DM actions ────────────────────────────────────────────────────────────
@@ -283,11 +296,13 @@ export function MessagesClient({
         photoMap={photoMap}
         groupSettings={{
           memberNames: activeCustomGroup.memberNames,
-          isAdmin: true,
+          currentUserName: currentUser.name,
+          isAdmin: activeCustomGroup.adminName === currentUser.name,
           onAddMembers: (newNames) => addMembersToGroup(activeCustomGroup.id, newNames),
           onRemoveMember: (name) => removeMemberFromGroup(activeCustomGroup.id, name),
           onLeave: () => leaveGroup(activeCustomGroup.id),
           onDeleteGroup: () => deleteGroup(activeCustomGroup.id),
+          onRename: (newName) => renameGroup(activeCustomGroup.id, newName),
         }}
       />
     )
@@ -448,7 +463,7 @@ export function MessagesClient({
       {/* Modals */}
       <AnimatePresence>
         {createGroupOpen && (
-          <CreateGroupModal onClose={() => setCreateGroupOpen(false)} onCreate={createGroup} />
+          <CreateGroupModal currentUserName={currentUser.name} onClose={() => setCreateGroupOpen(false)} onCreate={createGroup} />
         )}
       </AnimatePresence>
       <AnimatePresence>
@@ -515,19 +530,22 @@ function ConversationRow({
 
 // ── Group settings panel ──────────────────────────────────────────────────────
 function GroupSettingsPanel({
-  title, initials, isAdmin, memberNames, onClose, onAddMembers, onRemoveMember, onLeave, onDeleteGroup,
+  title, initials, isAdmin, currentUserName, memberNames, onClose, onAddMembers, onRemoveMember, onLeave, onDeleteGroup, onRename,
 }: {
-  title: string; initials: string; isAdmin: boolean; memberNames: string[]
+  title: string; initials: string; isAdmin: boolean; currentUserName: string; memberNames: string[]
   onClose: () => void
   onAddMembers: (newNames: string[]) => void
   onRemoveMember: (name: string) => void
   onLeave: () => void
   onDeleteGroup: () => void
+  onRename: (newName: string) => void
 }) {
-  const [allMembers, setAllMembers]     = useState<Member[]>(MEMBERS)
-  const [addOpen, setAddOpen]           = useState(false)
-  const [confirmLeave, setConfirmLeave] = useState(false)
+  const [allMembers, setAllMembers]       = useState<Member[]>(MEMBERS)
+  const [addOpen, setAddOpen]             = useState(false)
+  const [confirmLeave, setConfirmLeave]   = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editingName, setEditingName]     = useState(false)
+  const [newName, setNewName]             = useState(title)
 
   useEffect(() => {
     async function load() {
@@ -548,7 +566,7 @@ function GroupSettingsPanel({
   }, [])
 
   const groupMembers = allMembers.filter((m) => memberNames.includes(m.name))
-  const nonMembers   = allMembers.filter((m) => !memberNames.includes(m.name))
+  const nonMembers   = allMembers.filter((m) => !memberNames.includes(m.name) && m.name !== currentUserName)
 
   return (
     <motion.div
@@ -580,7 +598,37 @@ function GroupSettingsPanel({
           >
             {initials}
           </span>
-          <p className="font-heading text-xl font-bold text-foreground">{title}</p>
+          {isAdmin && editingName ? (
+            <div className="flex items-center gap-2 px-6 w-full">
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="flex-1 rounded-xl border border-input bg-background px-3 py-1.5 text-center text-base font-bold text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+              />
+              <button
+                onClick={() => { onRename(newName); setEditingName(false) }}
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground"
+              >
+                <Check className="size-4" />
+              </button>
+              <button
+                onClick={() => { setNewName(title); setEditingName(false) }}
+                className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              className={`flex items-center gap-1.5 font-heading text-xl font-bold text-foreground ${isAdmin ? "active:opacity-60" : ""}`}
+              onClick={() => isAdmin && setEditingName(true)}
+              disabled={!isAdmin}
+            >
+              {title}
+              {isAdmin && <Pencil className="size-3.5 text-muted-foreground" />}
+            </button>
+          )}
           <p className="text-sm text-muted-foreground">{memberNames.length + 1} üye</p>
         </div>
 
@@ -932,8 +980,9 @@ function NewDMModal({
 
 // ── Create group modal ────────────────────────────────────────────────────────
 function CreateGroupModal({
-  onClose, onCreate,
+  currentUserName, onClose, onCreate,
 }: {
+  currentUserName: string
   onClose: () => void
   onCreate: (name: string, memberNames: string[]) => void
 }) {
@@ -961,7 +1010,7 @@ function CreateGroupModal({
   }, [])
 
   const filtered = allMembers
-    .filter((m) => m.name.toLowerCase().includes(memberSearch.toLowerCase()))
+    .filter((m) => m.name && m.name !== currentUserName && m.name.toLowerCase().includes(memberSearch.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
@@ -1079,11 +1128,13 @@ function ChatView({
   photoMap?: Map<string, string>
   groupSettings?: {
     memberNames: string[]
+    currentUserName: string
     isAdmin: boolean
     onAddMembers: (newNames: string[]) => void
     onRemoveMember: (name: string) => void
     onLeave: () => void
     onDeleteGroup: () => void
+    onRename: (newName: string) => void
   }
 }) {
   const { t } = useI18n()
@@ -1095,8 +1146,11 @@ function ChatView({
   const scrollRef   = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const isFirstScroll = useRef(true)
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
+    const behavior = isFirstScroll.current ? "instant" : "smooth"
+    isFirstScroll.current = false
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: behavior as ScrollBehavior })
   }, [messages])
 
   // Load messages from Supabase + realtime subscription if conversationId is available
@@ -1204,7 +1258,7 @@ function ChatView({
   }
 
   return (
-    <div className="relative flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
+    <div className="relative flex h-[calc(100dvh-10.5rem)] flex-col overflow-hidden">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-2.5">
         <button onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
@@ -1355,12 +1409,14 @@ function ChatView({
             title={title}
             initials={initials}
             isAdmin={groupSettings.isAdmin}
+            currentUserName={groupSettings.currentUserName}
             memberNames={groupSettings.memberNames}
             onClose={() => setShowSettings(false)}
             onAddMembers={groupSettings.onAddMembers}
             onRemoveMember={groupSettings.onRemoveMember}
             onLeave={groupSettings.onLeave}
             onDeleteGroup={groupSettings.onDeleteGroup}
+            onRename={groupSettings.onRename}
           />
         )}
       </AnimatePresence>
