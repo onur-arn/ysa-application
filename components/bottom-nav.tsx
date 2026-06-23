@@ -20,7 +20,7 @@ export function BottomNav() {
   const { t } = useI18n()
 
   return (
-    <nav className="fixed bottom-4 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border bg-card/95 shadow-lg backdrop-blur-lg">
+    <nav className="fixed bottom-8 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border bg-card/95 shadow-lg backdrop-blur-lg">
       <ul className="flex items-stretch justify-around px-2 pt-1.5">
         {items.map((item) => {
           const active = pathname.startsWith(item.href)
