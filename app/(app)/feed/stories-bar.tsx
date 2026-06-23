@@ -2,12 +2,14 @@
 
 import { useState, useRef, useEffect } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Plus, X, ChevronLeft, ChevronRight } from "lucide-react"
+import { Plus, X, ChevronLeft, ChevronRight, Music } from "lucide-react"
 import { STATIONS_SORTED } from "@/lib/data/stations"
 import { STORY_BG } from "@/lib/data/feed"
 import { useI18n } from "@/lib/i18n/context"
 import { StoryEditor } from "./story-editor"
 import { createClient } from "@/lib/supabase/client"
+
+const SEEN_KEY = "ys-seen-story-ids"
 
 function storyTimeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
@@ -26,6 +28,7 @@ type Story = {
   createdAt: string
   fitMode?: "cover" | "contain"
   musicPreviewUrl?: string
+  musicLabel?: string
 }
 
 interface StoriesBarProps {
@@ -43,6 +46,7 @@ function mapStoriesFromRaw(raw: Record<string, unknown>[]): Story[] {
     createdAt: s.created_at as string,
     fitMode: ((s.fit_mode as "cover" | "contain") ?? "cover"),
     musicPreviewUrl: (s.music_preview_url as string) ?? undefined,
+    musicLabel: (s.music_label as string) ?? undefined,
   }))
 }
 
@@ -52,15 +56,33 @@ export function StoriesBar({
 }: StoriesBarProps) {
   const { t } = useI18n()
   const [stories, setStories]         = useState<Story[]>(() => mapStoriesFromRaw(initialStories))
-  const [active, setActive]           = useState<string | null>(null)   // station id
+  const [active, setActive]           = useState<string | null>(null)
   const [storyIdx, setStoryIdx]       = useState(0)
   const [fromMyButton, setFromMyButton] = useState(false)
   const [editingImage, setEditingImage] = useState<string | null>(null)
   const [user, setUser] = useState<{ name: string; station: string; initials: string }>(
     initialUser ?? { name: "", station: "paris", initials: "" }
   )
+  const [seenIds, setSeenIds] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Load seen IDs from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SEEN_KEY)
+      if (raw) setSeenIds(new Set(JSON.parse(raw) as string[]))
+    } catch {}
+  }, [])
+
+  function markStationSeen(stationId: string, currentStories: Story[]) {
+    const ids = currentStories.filter(s => s.station === stationId).map(s => s.id)
+    setSeenIds(prev => {
+      const next = new Set([...prev, ...ids])
+      try { localStorage.setItem(SEEN_KEY, JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }
 
   const myStories = stories.filter((s) => s.station === user.station)
 
@@ -68,6 +90,7 @@ export function StoriesBar({
     setActive(stationId)
     setStoryIdx(startIdx)
     setFromMyButton(myBtn)
+    markStationSeen(stationId, stories)
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -79,7 +102,7 @@ export function StoriesBar({
     e.target.value = ""
   }
 
-  async function publishStory(flatUrl: string, fitMode: "cover" | "contain", musicPreviewUrl?: string) {
+  async function publishStory(flatUrl: string, fitMode: "cover" | "contain", musicPreviewUrl?: string, musicLabel?: string) {
     const newId = `story-${Date.now()}`
     const newStory: Story = {
       id: newId,
@@ -90,6 +113,7 @@ export function StoriesBar({
       createdAt: new Date().toISOString(),
       fitMode,
       musicPreviewUrl,
+      musicLabel,
     }
     const updated = [...stories, newStory]
     setStories(updated)
@@ -104,9 +128,9 @@ export function StoriesBar({
         image_url: flatUrl,
         fit_mode: fitMode,
         music_preview_url: musicPreviewUrl ?? null,
+        music_label: musicLabel ?? null,
       })
     } catch {}
-    // open on the newly added story
     const stationStories = updated.filter((s) => s.station === user.station)
     openStation(user.station, stationStories.length - 1, true)
   }
@@ -128,6 +152,10 @@ export function StoriesBar({
 
   function stationHasStory(stationId: string) {
     return stories.some((s) => s.station === stationId)
+  }
+
+  function hasUnseenStory(stationId: string) {
+    return stories.some(s => s.station === stationId && !seenIds.has(s.id))
   }
 
   // Active station's stories
@@ -161,6 +189,19 @@ export function StoriesBar({
     if (storyIdx > 0) setStoryIdx(storyIdx - 1)
   }
 
+  // Sort stations: unseen first, then seen-with-stories, then no stories
+  const sortedStations = [...STATIONS_SORTED].sort((a, b) => {
+    const aUnseen = hasUnseenStory(a.id)
+    const bUnseen = hasUnseenStory(b.id)
+    const aHas    = stationHasStory(a.id)
+    const bHas    = stationHasStory(b.id)
+    if (aUnseen && !bUnseen) return -1
+    if (!aUnseen && bUnseen) return 1
+    if (aHas && !bHas) return -1
+    if (!aHas && bHas) return 1
+    return 0
+  })
+
   return (
     <>
       <div className="flex gap-3 overflow-x-auto px-4 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -186,7 +227,6 @@ export function StoriesBar({
             ) : (
               <Plus className="h-6 w-6 text-primary" />
             )}
-            {/* Add more button */}
             {myStories.length > 0 && (
               <span
                 role="button"
@@ -205,16 +245,18 @@ export function StoriesBar({
         </button>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
 
-        {/* Station circles — those with stories first */}
-        {[...STATIONS_SORTED].sort((a, b) => {
-          const sa = stationHasStory(a.id)
-          const sb = stationHasStory(b.id)
-          if (sa && !sb) return -1
-          if (!sa && sb) return 1
-          return 0
-        }).map((s) => {
-          const hasStory = stationHasStory(s.id)
-          const count    = stories.filter((x) => x.station === s.id).length
+        {/* Station circles — unseen first, seen after */}
+        {sortedStations.map((s) => {
+          const hasStory  = stationHasStory(s.id)
+          const isUnseen  = hasUnseenStory(s.id)
+          const count     = stories.filter((x) => x.station === s.id).length
+
+          const ringStyle = !hasStory
+            ? "bg-muted"
+            : isUnseen
+              ? "bg-primary"
+              : "bg-border"
+
           return (
             <button
               key={s.id}
@@ -222,7 +264,7 @@ export function StoriesBar({
               disabled={!hasStory}
               className={`flex shrink-0 flex-col items-center gap-1.5 ${!hasStory ? "opacity-40 cursor-default" : ""}`}
             >
-              <span className={`relative rounded-full p-[2.5px] ${hasStory ? "bg-gradient-to-tr from-primary to-chart-3" : "bg-muted"}`}>
+              <span className={`relative rounded-full p-[2.5px] ${ringStyle}`}>
                 <span
                   className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-card font-heading text-[11px] font-bold tracking-wide text-white"
                   style={{ backgroundColor: `hsl(${STORY_BG[s.id]})` }}
@@ -235,7 +277,9 @@ export function StoriesBar({
                   </span>
                 )}
               </span>
-              <span className="max-w-16 truncate text-[11px] font-medium text-foreground">{s.city}</span>
+              <span className={`max-w-16 truncate text-[11px] font-medium ${hasStory ? (isUnseen ? "text-foreground font-semibold" : "text-muted-foreground") : "text-foreground"}`}>
+                {s.city}
+              </span>
             </button>
           )
         })}
@@ -259,7 +303,7 @@ export function StoriesBar({
                       key={`${active}-${storyIdx}`}
                       initial={{ width: "0%" }}
                       animate={{ width: "100%" }}
-                      transition={{ duration: 4, ease: "linear" }}
+                      transition={{ duration: 10, ease: "linear" }}
                       onAnimationComplete={goNext}
                       className="block h-full rounded-full bg-white"
                     />
@@ -318,6 +362,12 @@ export function StoriesBar({
                       <p className="text-xs text-white/70">
                         {activeStation.name} · {storyTimeAgo(currentStory.createdAt)}
                       </p>
+                      {currentStory.musicLabel && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-white/80">
+                          <Music className="size-3 shrink-0" />
+                          {currentStory.musicLabel}
+                        </p>
+                      )}
                     </div>
                     {activeStories.length > 1 && (
                       <span className="ml-auto text-xs text-white/50">

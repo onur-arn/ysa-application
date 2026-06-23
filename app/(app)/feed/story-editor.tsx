@@ -50,7 +50,7 @@ export function StoryEditor({
 }: {
   imageUrl: string
   onCancel: () => void
-  onPublish: (flatUrl: string, fitMode: "cover" | "contain", musicPreviewUrl?: string) => void
+  onPublish: (flatUrl: string, fitMode: "cover" | "contain", musicPreviewUrl?: string, musicLabel?: string) => void
 }) {
   const [filter, setFilter]         = useState("none")
   const [layers, setLayers]         = useState<Layer[]>([])
@@ -255,7 +255,12 @@ export function StoryEditor({
       ctx.fillText(badgeText, badgeX + badgePad, badgeY + badgeH / 2)
     }
 
-    onPublish(canvas.toDataURL("image/jpeg", 0.88), fitMode, music?.previewUrl)
+    onPublish(
+      canvas.toDataURL("image/jpeg", 0.88),
+      fitMode,
+      music?.previewUrl,
+      music ? `${music.name} — ${music.artist}` : undefined,
+    )
   }
 
   return (

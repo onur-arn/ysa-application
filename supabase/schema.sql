@@ -339,6 +339,9 @@ drop policy if exists "Authenticated can insert igem_comments" on igem_comments;
 create policy "Authenticated can read igem_comments"   on igem_comments for select to authenticated using (true);
 create policy "Authenticated can insert igem_comments" on igem_comments for insert to authenticated with check (true);
 
+-- Stories — music label (nom + artiste affiché dans le viewer)
+alter table stories add column if not exists music_label text;
+
 -- ── STORAGE: chat-images bucket ───────────────────────────────────────────────
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('chat-images', 'chat-images', true, 5242880, '{image/jpeg,image/png,image/webp,image/gif}')
