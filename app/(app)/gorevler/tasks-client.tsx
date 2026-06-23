@@ -26,6 +26,7 @@ export function TasksClient() {
   const [myRole, setMyRole]       = useState("")
   const [myName, setMyName]       = useState("")
   const [myInitials, setMyInitials] = useState("")
+  const [photoMap, setPhotoMap]   = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     const supabase = createClient()
@@ -42,11 +43,25 @@ export function TasksClient() {
         setMyInitials(profile.initials ?? "")
       }
 
-      // Load tasks
-      const { data: tasksData } = await supabase
+      // Build photo map: name → photo_url
+      const { data: allProfiles } = await supabase.from("profiles").select("name,photo_url")
+      if (allProfiles) {
+        setPhotoMap(new Map(allProfiles.filter(p => p.photo_url).map(p => [p.name as string, p.photo_url as string])))
+      }
+
+      // Load tasks — try with created_by, fallback without if column missing
+      let { data: tasksData, error: tasksErr } = await supabase
         .from("tasks")
         .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at,created_by")
         .order("created_at", { ascending: false })
+      if (tasksErr) {
+        const { data: fallback } = await supabase
+          .from("tasks")
+          .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at")
+          .order("created_at", { ascending: false })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tasksData = fallback as any
+      }
 
       // Load all task comments
       const { data: commentsData } = await supabase
@@ -176,24 +191,9 @@ export function TasksClient() {
     await supabase.from("tasks").delete().eq("id", id)
   }
 
-  const myStationInfo = getStation(myStation)
-
   return (
     <div>
       <PageHeader title={t("nav.tasks")} />
-
-      {/* Station indicator */}
-      <div className="mx-4 mb-1 mt-2 flex items-center gap-2 rounded-xl bg-secondary px-3 py-2 text-sm text-muted-foreground">
-        <span
-          className="size-2.5 rounded-full"
-          style={{ backgroundColor: `hsl(${myStationInfo.color})` }}
-        />
-        <span>
-          {myStation === "intl"
-            ? "Uluslararası Büro — tüm görevleri görüyorsunuz"
-            : `${myStationInfo.name} — yalnızca istasyonunuzun görevleri`}
-        </span>
-      </div>
 
       {/* Status counters */}
       <div className="grid grid-cols-3 gap-2 px-4 pt-3">
@@ -228,6 +228,7 @@ export function TasksClient() {
               key={task.id}
               task={task}
               currentUserId={myId}
+              photoMap={photoMap}
               onCycle={() => cycleStatus(task.id)}
               onComment={(text) => addComment(task.id, text)}
               onDelete={() => deleteTask(task.id)}
@@ -315,6 +316,23 @@ function CounterCard({
   )
 }
 
+function MiniAvatar({
+  name, initials, photoMap, colorClass, size = "size-5", textSize = "text-[9px]",
+}: {
+  name: string; initials: string; photoMap: Map<string, string>
+  colorClass: string; size?: string; textSize?: string
+}) {
+  const photo = photoMap.get(name)
+  if (photo) {
+    return <img src={photo} alt={initials} className={`${size} shrink-0 rounded-full object-cover`} />
+  }
+  return (
+    <span className={`flex ${size} shrink-0 items-center justify-center rounded-full ${colorClass} font-bold ${textSize}`}>
+      {initials}
+    </span>
+  )
+}
+
 const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
   todo: Circle,
   in_progress: CircleDot,
@@ -337,12 +355,14 @@ function priorityStyle(p: TaskPriority) {
 function TaskCard({
   task,
   currentUserId,
+  photoMap,
   onCycle,
   onComment,
   onDelete,
 }: {
   task: Task
   currentUserId: string
+  photoMap: Map<string, string>
   onCycle: () => void
   onComment: (text: string) => void
   onDelete: () => void
@@ -405,14 +425,10 @@ function TaskCard({
             </span>
             {/* assignedBy → assignee */}
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-[9px] font-bold text-primary">
-                {task.assignedByInitials}
-              </span>
+              <MiniAvatar name={task.assignedBy} initials={task.assignedByInitials} photoMap={photoMap} colorClass="bg-primary/15 text-primary" />
               <span className="max-w-[72px] truncate">{task.assignedBy}</span>
               <span className="text-muted-foreground/50">→</span>
-              <span className="flex size-5 items-center justify-center rounded-full bg-secondary text-[9px] font-bold text-secondary-foreground">
-                {task.assigneeInitials}
-              </span>
+              <MiniAvatar name={task.assignee} initials={task.assigneeInitials} photoMap={photoMap} colorClass="bg-secondary text-secondary-foreground" />
               <span className="max-w-[72px] truncate">{task.assignee}</span>
             </span>
           </div>
@@ -439,9 +455,7 @@ function TaskCard({
             <div className="flex flex-col gap-2 p-3">
               {task.comments.map((c: TaskComment) => (
                 <div key={c.id} className="flex gap-2">
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">
-                    {c.initials}
-                  </span>
+                  <MiniAvatar name={c.author} initials={c.initials} photoMap={photoMap} colorClass="bg-primary/15 text-primary" size="size-7" textSize="text-[10px]" />
                   <div className="min-w-0 flex-1 rounded-xl rounded-tl-sm bg-card px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold text-foreground">{c.author}</span>
