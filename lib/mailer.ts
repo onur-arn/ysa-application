@@ -7,30 +7,28 @@ export async function sendMail({
   subject: string
   html: string
 }) {
-  const apiKey  = process.env.BREVO_API_KEY
-  const from    = process.env.BREVO_FROM_EMAIL ?? "secretaire@youthstation.org"
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) throw new Error("RESEND_API_KEY manquant")
 
-  if (!apiKey) throw new Error("BREVO_API_KEY manquant")
-
-  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      "api-key": apiKey,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      sender: { name: "Youth Station Derneği", email: from },
-      to: [{ email: to }],
+      from: "Youth Station Derneği Uygulaması <onboarding@resend.dev>",
+      to: [to],
       subject,
-      htmlContent: html,
+      html,
     }),
   })
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(`Brevo ${res.status}: ${text}`)
+    throw new Error(`Resend ${res.status}: ${text}`)
   }
 }
 
-export const MAIL_FROM = process.env.BREVO_FROM_EMAIL ?? "secretaire@youthstation.org"
+export const MAIL_FROM = "onboarding@resend.dev"
 export const ADMIN_TO  = process.env.ADMIN_EMAIL ?? "secretaire@youthstation.org"
