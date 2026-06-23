@@ -344,7 +344,7 @@ export function AgendaClient() {
           const supabase = createClient()
           const { data: { user } } = await supabase.auth.getUser()
 
-          const base = {
+          const { data, error } = await supabase.from("events").insert({
             title: e.title,
             date: e.date,
             time: e.time,
@@ -352,15 +352,13 @@ export function AgendaClient() {
             station: e.station,
             description: e.description ?? null,
             link: e.link ?? null,
-          }
+            created_by: user?.id ?? null,
+          }).select().single()
 
-          // Try with created_by first; fall back without if column missing
-          let result = await supabase.from("events").insert({ ...base, created_by: user?.id ?? null }).select().single()
-          if (result.error) {
-            result = await supabase.from("events").insert(base).select().single()
-          }
-          if (!result.error && result.data) {
-            setEvents((prev) => [...prev, { ...e, id: result.data!.id, createdBy: user?.id }])
+          if (!error && data) {
+            setEvents((prev) => [...prev, { ...e, id: data.id, createdBy: user?.id }])
+          } else if (error) {
+            console.error("[agenda] insert event failed:", error.message)
           }
         }}
       />

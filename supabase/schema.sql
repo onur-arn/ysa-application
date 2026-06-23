@@ -183,6 +183,43 @@ drop policy if exists "Authenticated can insert igem" on igem_requests;
 create policy "Authenticated can read igem"   on igem_requests for select to authenticated using (true);
 create policy "Authenticated can insert igem" on igem_requests for insert to authenticated with check (true);
 
+-- ── EVENTS ───────────────────────────────────────────────────────────────────
+create table if not exists events (
+  id          uuid primary key default uuid_generate_v4(),
+  title       text not null,
+  date        date,
+  time        text,
+  place       text,
+  station     text,
+  description text,
+  link        text,
+  created_by  uuid references auth.users(id) on delete set null,
+  created_at  timestamptz default now()
+);
+alter table events enable row level security;
+drop policy if exists "events_select_all" on events;
+drop policy if exists "events_insert_all" on events;
+drop policy if exists "events_delete_own" on events;
+drop policy if exists "events_delete_all" on events;
+create policy "events_select_all" on events for select to authenticated using (true);
+create policy "events_insert_all" on events for insert to authenticated with check (true);
+create policy "events_delete_own" on events for delete to authenticated using (created_by = auth.uid());
+
+-- ── TASK COMMENTS ────────────────────────────────────────────────────────────
+create table if not exists task_comments (
+  id         uuid primary key default uuid_generate_v4(),
+  task_id    uuid references tasks(id) on delete cascade not null,
+  author     text not null,
+  initials   text not null default '',
+  text       text not null,
+  created_at timestamptz default now()
+);
+alter table task_comments enable row level security;
+drop policy if exists "Authenticated can read task_comments"   on task_comments;
+drop policy if exists "Authenticated can insert task_comments" on task_comments;
+create policy "Authenticated can read task_comments"   on task_comments for select to authenticated using (true);
+create policy "Authenticated can insert task_comments" on task_comments for insert to authenticated with check (true);
+
 -- ── MIGRATIONS — colonnes ajoutées après la création initiale ────────────────
 -- Ces commandes sont idempotentes (ADD COLUMN IF NOT EXISTS).
 -- À exécuter dans : Supabase Dashboard > SQL Editor
@@ -209,6 +246,14 @@ alter table profiles add column if not exists photo_url        text;
 alter table profiles add column if not exists igem_egitimi     text;
 alter table profiles add column if not exists igem_tarihi      text;
 alter table profiles add column if not exists initial_password text;
+
+-- Tasks — colonnes ajoutées
+alter table tasks add column if not exists assignee_initials    text;
+alter table tasks add column if not exists assigned_by          text;
+alter table tasks add column if not exists assigned_by_initials text;
+alter table tasks add column if not exists assigned_by_station  text;
+alter table tasks add column if not exists created_by           uuid references auth.users(id) on delete set null;
+alter table tasks add column if not exists due_date             text;
 
 -- Copier full_name → name et email depuis auth.users pour les profils existants
 update profiles p
