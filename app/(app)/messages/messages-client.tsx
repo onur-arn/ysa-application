@@ -12,6 +12,7 @@ import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/sta
 import { PageHeader } from "@/components/app-shell"
 import { createClient } from "@/lib/supabase/client"
 import { useNavVisibility } from "@/lib/nav-visibility"
+import { Modal } from "@/components/ui/modal"
 
 type Tab = "groups" | "dm"
 
@@ -490,11 +491,7 @@ export function MessagesClient({
       </div>
 
       {/* Modals */}
-      <AnimatePresence>
-        {createGroupOpen && (
-          <CreateGroupModal currentUserName={currentUser.name} onClose={() => setCreateGroupOpen(false)} onCreate={createGroup} />
-        )}
-      </AnimatePresence>
+      <CreateGroupModal open={createGroupOpen} currentUserName={currentUser.name} onClose={() => setCreateGroupOpen(false)} onCreate={createGroup} />
       <AnimatePresence>
         {newDMOpen && (
           <NewDMModal
@@ -1029,8 +1026,9 @@ function NewDMModal({
 
 // ── Create group modal ────────────────────────────────────────────────────────
 function CreateGroupModal({
-  currentUserName, onClose, onCreate,
+  open, currentUserName, onClose, onCreate,
 }: {
+  open: boolean
   currentUserName: string
   onClose: () => void
   onCreate: (name: string, memberNames: string[]) => void
@@ -1063,97 +1061,76 @@ function CreateGroupModal({
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 400, damping: 32 }}
-        onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[88vh] w-full max-w-sm flex-col overflow-hidden rounded-t-2xl border border-border bg-card"
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3.5">
-          <div className="flex items-center gap-2">
-            <Users className="size-4 text-primary" />
-            <h2 className="font-heading text-base font-bold">Yeni grup</h2>
-          </div>
-          <button onClick={onClose} className="rounded-full p-1 text-muted-foreground active:bg-secondary">
-            <X className="size-5" />
-          </button>
-        </div>
+    <Modal open={open} onClose={onClose} title="Yeni grup">
+      <div className="flex flex-col gap-3">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Grup adı…"
+          className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+        />
 
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Grup adı…"
-            className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            value={memberSearch}
+            onChange={(e) => setMemberSearch(e.target.value)}
+            placeholder="Üye ara…"
+            className="h-10 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
+        </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={memberSearch}
-              onChange={(e) => setMemberSearch(e.target.value)}
-              placeholder="Üye ara…"
-              className="h-10 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-            />
-          </div>
+        {selected.length > 0 && (
+          <p className="text-xs font-medium text-primary">{selected.length} üye seçildi</p>
+        )}
 
-          {selected.length > 0 && (
-            <p className="text-xs font-medium text-primary">{selected.length} üye seçildi</p>
-          )}
-
-          <div className="overflow-hidden rounded-xl border border-border">
-            {filtered.map((m) => {
-              const s = getStation(m.station)
-              const isSelected = selected.includes(m.name)
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => setSelected((prev) =>
-                    prev.includes(m.name) ? prev.filter((n) => n !== m.name) : [...prev, m.name]
-                  )}
-                  className={`flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors ${
-                    isSelected ? "bg-primary/5" : "active:bg-secondary"
-                  }`}
+        <div className="overflow-hidden rounded-xl border border-border">
+          {filtered.map((m) => {
+            const s = getStation(m.station)
+            const isSelected = selected.includes(m.name)
+            return (
+              <button
+                key={m.id}
+                onClick={() => setSelected((prev) =>
+                  prev.includes(m.name) ? prev.filter((n) => n !== m.name) : [...prev, m.name]
+                )}
+                className={`flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors ${
+                  isSelected ? "bg-primary/5" : "active:bg-secondary"
+                }`}
+              >
+                <span
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                  style={{ backgroundColor: `hsl(${s.color})` }}
                 >
-                  <span
-                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ backgroundColor: `hsl(${s.color})` }}
-                  >
-                    {m.initials}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
-                  </div>
-                  <div className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                    isSelected ? "border-primary bg-primary" : "border-border"
-                  }`}>
-                    {isSelected && <Check className="size-3 text-white" />}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+                  {m.initials}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
+                </div>
+                <div className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                  isSelected ? "border-primary bg-primary" : "border-border"
+                }`}>
+                  {isSelected && <Check className="size-3 text-white" />}
+                </div>
+              </button>
+            )
+          })}
         </div>
+      </div>
 
-        <div className="shrink-0 border-t border-border p-4">
-          <button
-            onClick={() => { if (name.trim() && selected.length > 0) onCreate(name.trim(), selected) }}
-            disabled={!name.trim() || selected.length === 0}
-            className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40"
-          >
-            {selected.length > 0
-              ? `Grup oluştur (${selected.length} üye)`
-              : "Grup oluştur"}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
+      <div className="sticky bottom-0 -mx-5 mt-4 border-t border-border bg-card px-5 pb-0 pt-4">
+        <button
+          onClick={() => { if (name.trim() && selected.length > 0) onCreate(name.trim(), selected) }}
+          disabled={!name.trim() || selected.length === 0}
+          className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40"
+        >
+          {selected.length > 0
+            ? `Grup oluştur (${selected.length} üye)`
+            : "Grup oluştur"}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

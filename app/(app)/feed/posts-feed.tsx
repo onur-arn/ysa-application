@@ -6,6 +6,7 @@ import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive
 import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
 import { getStation, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
+import { Modal } from "@/components/ui/modal"
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -79,9 +80,10 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
     ? (post.poll.options.find(o => o.voters.includes(ME))?.id ?? null)
     : null
 
-  function vote(optionId: string) {
+  async function vote(optionId: string) {
     if (!post.poll) return
     const alreadyMine = post.poll.options.find(o => o.id === optionId)?.voters.includes(ME)
+    const previousVotedId = post.poll.options.find(o => o.voters.includes(ME))?.id
     const newOptions = post.poll.options.map(o => {
       const without = o.voters.filter(v => v !== ME)
       return o.id === optionId && !alreadyMine
@@ -89,6 +91,13 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
         : { ...o, voters: without }
     })
     onUpdate({ ...post, poll: { ...post.poll, options: newOptions } })
+    const supabase = createClient()
+    if (previousVotedId) {
+      await supabase.from("poll_votes").delete().eq("option_id", previousVotedId).eq("voter_name", ME)
+    }
+    if (!alreadyMine) {
+      await supabase.from("poll_votes").insert({ option_id: optionId, voter_name: ME })
+    }
   }
 
   async function toggleLike() {
@@ -279,15 +288,13 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
 }
 
 // ── Compose modal ─────────────────────────────────────────────────────────────
-function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (content: string, imageUrl?: string, poll?: Poll) => void }) {
+function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () => void; onPost: (content: string, imageUrl?: string, poll?: Poll) => void }) {
   const [tab, setTab] = useState<"post" | "poll">("post")
 
-  // Post state
   const [content, setContent] = useState("")
   const [imageUrl, setImageUrl] = useState<string | undefined>()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Poll state
   const [question, setQuestion] = useState("")
   const [options, setOptions] = useState(["", ""])
 
@@ -330,139 +337,116 @@ function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (conte
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-6"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 400, damping: 32 }}
-        onClick={e => e.stopPropagation()}
-        className="w-full max-w-sm overflow-hidden rounded-2xl border border-border bg-card"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3.5">
-          <h2 className="font-heading text-base font-bold text-foreground">Yeni paylaşım</h2>
-          <button onClick={onClose} className="rounded-full p-1 text-muted-foreground active:bg-secondary">
-            <X className="size-5" />
-          </button>
-        </div>
+    <Modal open={open} onClose={onClose} title="Yeni paylaşım">
+      {/* Tabs */}
+      <div className="-mx-5 -mt-5 mb-5 flex gap-2 border-b border-border px-5 pb-3 pt-1">
+        <button
+          onClick={() => setTab("post")}
+          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "post" ? "bg-primary/10 text-primary" : "text-muted-foreground"
+          }`}
+        >
+          <MessageCircle className="size-3.5" /> Paylaşım
+        </button>
+        <button
+          onClick={() => setTab("poll")}
+          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+            tab === "poll" ? "bg-primary/10 text-primary" : "text-muted-foreground"
+          }`}
+        >
+          <BarChart2 className="size-3.5" /> Anket
+        </button>
+      </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2 border-b border-border px-4 py-2.5">
-          <button
-            onClick={() => setTab("post")}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
-              tab === "post" ? "bg-primary/10 text-primary" : "text-muted-foreground"
-            }`}
-          >
-            <MessageCircle className="size-3.5" /> Paylaşım
-          </button>
-          <button
-            onClick={() => setTab("poll")}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
-              tab === "poll" ? "bg-primary/10 text-primary" : "text-muted-foreground"
-            }`}
-          >
-            <BarChart2 className="size-3.5" /> Anket
-          </button>
+      {tab === "post" ? (
+        <div className="flex flex-col gap-4">
+          <textarea
+            value={content}
+            onChange={e => setContent(e.target.value)}
+            placeholder="Ne paylaşmak istiyorsunuz?"
+            rows={4}
+            className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+          />
+          {imageUrl && (
+            <div className="relative">
+              <img src={imageUrl} alt="" className="w-full rounded-xl object-cover" style={{ maxHeight: 220 }} />
+              <button
+                onClick={() => setImageUrl(undefined)}
+                className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/60 text-white"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors active:bg-secondary"
+            >
+              <ImagePlus className="size-4" /> Fotoğraf
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            <button
+              onClick={submitPost}
+              disabled={!canPost}
+              className="ml-auto rounded-xl bg-primary px-6 py-2.5 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
+            >
+              Paylaş
+            </button>
+          </div>
         </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Soru</label>
+            <input
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              placeholder="Sorunuzu yazın…"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            />
+          </div>
 
-        <div className="p-4">
-          {tab === "post" ? (
-            <>
-              <textarea
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                placeholder="Ne paylaşmak istiyorsunuz?"
-                rows={4}
-                className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-              />
-              {imageUrl && (
-                <div className="relative mt-3">
-                  <img src={imageUrl} alt="" className="w-full rounded-xl object-cover" style={{ maxHeight: 200 }} />
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-muted-foreground">Seçenekler</label>
+            {options.map((opt, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  value={opt}
+                  onChange={e => setOption(i, e.target.value)}
+                  placeholder={`Seçenek ${i + 1}`}
+                  className="flex-1 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                />
+                {options.length > 2 && (
                   <button
-                    onClick={() => setImageUrl(undefined)}
-                    className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/60 text-white"
+                    onClick={() => removeOption(i)}
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-secondary"
                   >
                     <X className="size-4" />
                   </button>
-                </div>
-              )}
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors active:bg-secondary"
-                >
-                  <ImagePlus className="size-4" /> Fotoğraf
-                </button>
-                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-                <button
-                  onClick={submitPost}
-                  disabled={!canPost}
-                  className="ml-auto rounded-xl bg-primary px-6 py-2.5 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
-                >
-                  Paylaş
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Question */}
-              <div className="mb-3">
-                <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Soru</label>
-                <input
-                  value={question}
-                  onChange={e => setQuestion(e.target.value)}
-                  placeholder="Sorunuzu yazın…"
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-                />
-              </div>
-
-              {/* Options */}
-              <div className="mb-3 flex flex-col gap-2">
-                <label className="text-xs font-semibold text-muted-foreground">Seçenekler</label>
-                {options.map((opt, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <input
-                      value={opt}
-                      onChange={e => setOption(i, e.target.value)}
-                      placeholder={`Seçenek ${i + 1}`}
-                      className="flex-1 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-                    />
-                    {options.length > 2 && (
-                      <button
-                        onClick={() => removeOption(i)}
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-secondary"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {options.length < 6 && (
-                  <button
-                    onClick={addOption}
-                    className="flex items-center gap-1.5 self-start rounded-xl border border-dashed border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors active:bg-secondary"
-                  >
-                    <Plus className="size-3.5" /> Seçenek ekle
-                  </button>
                 )}
               </div>
-
+            ))}
+            {options.length < 6 && (
               <button
-                onClick={submitPoll}
-                disabled={!canPoll}
-                className="w-full rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
+                onClick={addOption}
+                className="flex items-center gap-1.5 self-start rounded-xl border border-dashed border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors active:bg-secondary"
               >
-                Anketi paylaş
+                <Plus className="size-3.5" /> Seçenek ekle
               </button>
-            </>
-          )}
+            )}
+          </div>
+
+          <button
+            onClick={submitPoll}
+            disabled={!canPoll}
+            className="w-full rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
+          >
+            Anketi paylaş
+          </button>
         </div>
-      </motion.div>
-    </motion.div>
+      )}
+    </Modal>
   )
 }
 
@@ -635,25 +619,41 @@ interface PostsFeedProps {
 }
 
 function mapPostsFromRaw(postsRaw: Record<string, unknown>[]): Post[] {
-  return postsRaw.map((p) => ({
-    id: p.id as string,
-    author: (p.author as string) ?? "",
-    initials: (p.initials as string) ?? "?",
-    station: ((p.station ?? "paris") as StationId),
-    content: (p.content as string) ?? "",
-    imageUrl: (p.image_url as string) ?? undefined,
-    createdAt: p.created_at as string,
-    createdBy: (p.created_by as string) ?? undefined,
-    likedBy: ((p.post_likes as { voter_name: string }[]) ?? []).map((l) => l.voter_name),
-    comments: ((p.post_comments as { id: string; author: string; initials: string; station: string; text: string; created_at: string }[]) ?? []).map((c) => ({
-      id: c.id,
-      author: c.author ?? "",
-      initials: c.initials ?? "?",
-      station: ((c.station ?? "paris") as StationId),
-      text: c.text ?? "",
-      time: timeAgo(c.created_at),
-    })),
-  }))
+  return postsRaw.map((p) => {
+    const rawPolls = (p.polls as { id: string; question: string; poll_options: { id: string; text: string; position: number; poll_votes: { option_id: string; voter_name: string }[] }[] }[]) ?? []
+    const rawPoll = rawPolls[0] ?? null
+    const poll: Poll | undefined = rawPoll ? {
+      question: rawPoll.question,
+      options: (rawPoll.poll_options ?? [])
+        .sort((a, b) => a.position - b.position)
+        .map(opt => ({
+          id: opt.id,
+          text: opt.text,
+          voters: (opt.poll_votes ?? []).map(v => v.voter_name),
+        })),
+    } : undefined
+
+    return {
+      id: p.id as string,
+      author: (p.author as string) ?? "",
+      initials: (p.initials as string) ?? "?",
+      station: ((p.station ?? "paris") as StationId),
+      content: (p.content as string) ?? "",
+      imageUrl: (p.image_url as string) ?? undefined,
+      createdAt: p.created_at as string,
+      createdBy: (p.created_by as string) ?? undefined,
+      likedBy: ((p.post_likes as { voter_name: string }[]) ?? []).map((l) => l.voter_name),
+      poll,
+      comments: ((p.post_comments as { id: string; author: string; initials: string; station: string; text: string; created_at: string }[]) ?? []).map((c) => ({
+        id: c.id,
+        author: c.author ?? "",
+        initials: c.initials ?? "?",
+        station: ((c.station ?? "paris") as StationId),
+        text: c.text ?? "",
+        time: timeAgo(c.created_at),
+      })),
+    }
+  })
 }
 
 export function PostsFeed({
@@ -725,6 +725,19 @@ export function PostsFeed({
             comments: [],
           }, ...prev]
         })
+        // Fetch full post with poll data after a short delay (poll_options inserted after the post)
+        setTimeout(async () => {
+          const sb = createClient()
+          const { data: full } = await sb
+            .from("posts")
+            .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at),polls(id,question,poll_options(id,text,position,poll_votes(option_id,voter_name)))")
+            .eq("id", p.id)
+            .single()
+          if (full && (full.polls as unknown[] | null)?.length) {
+            const mapped = mapPostsFromRaw([full as Record<string, unknown>])[0]
+            setPosts(prev => prev.map(x => x.id === p.id ? mapped : x))
+          }
+        }, 1000)
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "posts" }, (payload) => {
         setPosts((prev) => prev.filter((p) => p.id !== payload.old.id))
@@ -762,6 +775,27 @@ export function PostsFeed({
           return { ...p, likedBy: (p.likedBy ?? []).filter((n) => n !== l.voter_name) }
         }))
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "poll_votes" }, (payload) => {
+        const v = payload.new as { option_id: string; voter_name: string }
+        setPosts(prev => prev.map(p => {
+          if (!p.poll) return p
+          if (!p.poll.options.some(o => o.id === v.option_id)) return p
+          return { ...p, poll: { ...p.poll, options: p.poll.options.map(o =>
+            o.id === v.option_id && !o.voters.includes(v.voter_name)
+              ? { ...o, voters: [...o.voters, v.voter_name] }
+              : o
+          ) } }
+        }))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "poll_votes" }, (payload) => {
+        const v = payload.old as { option_id: string; voter_name: string }
+        setPosts(prev => prev.map(p => {
+          if (!p.poll) return p
+          return { ...p, poll: { ...p.poll, options: p.poll.options.map(o =>
+            o.id === v.option_id ? { ...o, voters: o.voters.filter(n => n !== v.voter_name) } : o
+          ) } }
+        }))
+      })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "igem_requests" }, (payload) => {
         const r = payload.new as { id: string; author: string; initials: string; station: string; motivation: string; created_at: string; created_by?: string }
         setIgemRequests((prev) => {
@@ -793,6 +827,11 @@ export function PostsFeed({
     const { data: { user } } = await supabase.auth.getUser()
     // Pre-generate UUID so the realtime INSERT event matches the optimistic post
     const newId = crypto.randomUUID()
+    // Generate stable option IDs that match what we insert to DB
+    const pollWithIds: Poll | undefined = poll ? {
+      ...poll,
+      options: poll.options.map((opt, i) => ({ ...opt, id: `${newId}-opt-${i}` })),
+    } : undefined
     const newPost: Post = {
       id: newId,
       author: me.name,
@@ -800,7 +839,7 @@ export function PostsFeed({
       station: me.station as never,
       content,
       imageUrl,
-      poll,
+      poll: pollWithIds,
       createdAt: new Date().toISOString(),
       createdBy: user?.id,
       likedBy: [],
@@ -818,6 +857,23 @@ export function PostsFeed({
           image_url: imageUrl ?? null,
           created_by: user.id,
         })
+        if (poll && poll.options.length >= 2) {
+          const { data: pollRow } = await supabase
+            .from("polls")
+            .insert({ post_id: newId, question: poll.question })
+            .select()
+            .single()
+          if (pollRow) {
+            await supabase.from("poll_options").insert(
+              poll.options.map((opt, i) => ({
+                id: `${newId}-opt-${i}`,
+                poll_id: pollRow.id,
+                text: opt.text,
+                position: i,
+              }))
+            )
+          }
+        }
       } catch {}
     }
   }
@@ -947,11 +1003,7 @@ export function PostsFeed({
         <Plus className="h-7 w-7" />
       </button>
 
-      <AnimatePresence>
-        {composeOpen && (
-          <ComposeModal onClose={() => setComposeOpen(false)} onPost={addPost} />
-        )}
-      </AnimatePresence>
+      <ComposeModal open={composeOpen} onClose={() => setComposeOpen(false)} onPost={addPost} />
     </>
   )
 }
