@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Shield, ChevronDown, Trash2, Check, Loader2, Users,
-  CalendarDays, Rocket, ListTodo, FileDown, X, MessageCircle, ChevronRight,
+  Shield, ChevronDown, Trash2, Loader2, Users,
+  CalendarDays, Rocket, ListTodo, FileDown, MessageCircle, ChevronRight,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getStation } from "@/lib/data/stations"
@@ -79,15 +79,6 @@ export function AdminPanel() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ taskId: id }),
-    })
-  }
-
-  async function acceptIgem(req: IgemReq) {
-    setIgemReqs(prev => prev.filter(r => r.id !== req.id))
-    await fetch("/api/admin/igem-accept", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: req.id, authorName: req.author }),
     })
   }
 
@@ -287,33 +278,15 @@ export function AdminPanel() {
                         {igemReqs.map(r => {
                           const s = getStation(r.station as never)
                           return (
-                            <div key={r.id} className="px-4 py-3">
-                              <div className="mb-1.5 flex items-center gap-2">
-                                <span className="flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ backgroundColor: `hsl(${s.color})` }}>
-                                  {r.initials}
-                                </span>
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm font-semibold text-foreground">{r.author}</p>
-                                  <p className="text-xs text-muted-foreground">{s.name}</p>
-                                </div>
+                            <div key={r.id} className="flex items-center gap-3 px-4 py-2.5">
+                              <span className="flex size-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ backgroundColor: `hsl(${s.color})` }}>
+                                {r.initials}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold text-foreground">{r.author}</p>
+                                <p className="truncate text-xs text-muted-foreground">{s.name}</p>
                               </div>
-                              {r.motivation && (
-                                <p className="mb-2 text-xs text-muted-foreground line-clamp-2">{r.motivation}</p>
-                              )}
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => acceptIgem(r)}
-                                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-500 py-1.5 text-xs font-semibold text-white"
-                                >
-                                  <Check className="size-3.5" /> Kabul et
-                                </button>
-                                <button
-                                  onClick={() => rejectIgem(r.id)}
-                                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/5 py-1.5 text-xs font-semibold text-destructive"
-                                >
-                                  <X className="size-3.5" /> Reddet
-                                </button>
-                              </div>
+                              <DeleteButton onConfirm={() => rejectIgem(r.id)} />
                             </div>
                           )
                         })}
