@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/app-shell"
 import { createClient } from "@/lib/supabase/client"
 import { useNavVisibility } from "@/lib/nav-visibility"
 import { Modal } from "@/components/ui/modal"
+import { usePresence } from "@/lib/presence"
 
 type Tab = "groups" | "dm"
 
@@ -95,6 +96,7 @@ export function MessagesClient({
 }: MessagesClientProps) {
   const { t } = useI18n()
   const { setHideNav } = useNavVisibility()
+  const activeUsers = usePresence()
   const [tab, setTab] = useState<Tab>("groups")
   const [search, setSearch] = useState("")
   const [openId, setOpenId] = useState<string | null>(null)
@@ -339,15 +341,17 @@ export function MessagesClient({
   }
 
   if (activeCustomDM) {
+    const dmOnline = activeUsers.has(activeCustomDM.name)
     return (
       <ChatView
         onBack={() => setOpenId(null)}
         title={activeCustomDM.name}
-        subtitle={activeCustomDM.online ? t("messages.online") : t("messages.offline")}
+        subtitle={dmOnline ? t("messages.online") : t("messages.offline")}
         color={activeCustomDM.color}
         initials={activeCustomDM.initials}
+        headerPhotoUrl={photoMap.get(activeCustomDM.name)}
         isPrivate
-        online={activeCustomDM.online}
+        online={dmOnline}
         senderName={currentUser.name}
         senderInitials={senderInitials}
         initialMessages={activeCustomDM.messages}
@@ -366,12 +370,13 @@ export function MessagesClient({
         subtitle={
           activeStationGroup
             ? getStation(activeStationGroup.id).city
-            : activeDM!.online ? t("messages.online") : t("messages.offline")
+            : (activeDM && activeUsers.has(activeDM.name)) ? t("messages.online") : t("messages.offline")
         }
         color={activeStationGroup ? getStation(activeStationGroup.id).color : activeDM!.color}
         initials={activeStationGroup ? getStation(activeStationGroup.id).short : activeDM!.initials}
+        headerPhotoUrl={activeDM ? photoMap.get(activeDM.name) : undefined}
         isPrivate={!!activeDM}
-        online={activeDM?.online}
+        online={activeDM ? activeUsers.has(activeDM.name) : undefined}
         senderName={currentUser.name}
         senderInitials={senderInitials}
         initialMessages={activeStationGroup ? activeStationGroup.messages : activeDM!.messages}
@@ -483,8 +488,9 @@ export function MessagesClient({
               last={d.lastMessage}
               time={d.lastTime}
               unread={d.unread}
-              online={d.online}
+              online={activeUsers.has(d.name)}
               isPrivate
+              photoUrl={photoMap.get(d.name)}
             />
           ))
         )}
@@ -511,11 +517,11 @@ export function MessagesClient({
 
 // ── Conversation row ──────────────────────────────────────────────────────────
 function ConversationRow({
-  onClick, initials, color, title, last, time, unread, online, isPrivate, isCustomGroup,
+  onClick, initials, color, title, last, time, unread, online, isPrivate, isCustomGroup, photoUrl,
 }: {
   onClick: () => void; initials: string; color: string; title: string
   last: string; time: string; unread: number; online?: boolean
-  isPrivate?: boolean; isCustomGroup?: boolean
+  isPrivate?: boolean; isCustomGroup?: boolean; photoUrl?: string
 }) {
   return (
     <button
@@ -523,14 +529,22 @@ function ConversationRow({
       className="flex items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors active:bg-secondary"
     >
       <div className="relative shrink-0">
-        <span
-          className={`flex size-12 items-center justify-center text-sm font-bold text-white ${
-            isCustomGroup ? "rounded-full" : "rounded-2xl"
-          }`}
-          style={{ backgroundColor: `hsl(${color})` }}
-        >
-          {isCustomGroup ? <Users className="size-5" /> : initials}
-        </span>
+        {photoUrl && !isCustomGroup ? (
+          <img
+            src={photoUrl}
+            alt={initials}
+            className={`size-12 object-cover ${isCustomGroup ? "rounded-full" : "rounded-2xl"}`}
+          />
+        ) : (
+          <span
+            className={`flex size-12 items-center justify-center text-sm font-bold text-white ${
+              isCustomGroup ? "rounded-full" : "rounded-2xl"
+            }`}
+            style={{ backgroundColor: `hsl(${color})` }}
+          >
+            {isCustomGroup ? <Users className="size-5" /> : initials}
+          </span>
+        )}
         {online && (
           <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-card bg-emerald-500" />
         )}
@@ -585,6 +599,7 @@ function GroupSettingsPanel({
           city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
           birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
           memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
+          photoUrl: p.photo_url ?? undefined,
         }))
         setAllMembers([...MEMBERS, ...mapped])
       }
@@ -685,12 +700,16 @@ function GroupSettingsPanel({
               const memberIsAdmin = adminNames.includes(m.name)
               return (
                 <div key={m.id} className="flex items-center gap-3 border-b border-border/60 px-3 py-2.5 last:border-0">
-                  <span
-                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ backgroundColor: `hsl(${s.color})` }}
-                  >
-                    {m.initials}
-                  </span>
+                  {m.photoUrl ? (
+                    <img src={m.photoUrl} alt={m.initials} className="size-9 shrink-0 rounded-full object-cover" />
+                  ) : (
+                    <span
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                      style={{ backgroundColor: `hsl(${s.color})` }}
+                    >
+                      {m.initials}
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
                     <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
@@ -884,12 +903,16 @@ function AddMembersModal({
                       isSelected ? "bg-primary/5" : "active:bg-secondary"
                     }`}
                   >
-                    <span
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: `hsl(${s.color})` }}
-                    >
-                      {m.initials}
-                    </span>
+                    {m.photoUrl ? (
+                      <img src={m.photoUrl} alt={m.initials} className="size-9 shrink-0 rounded-full object-cover" />
+                    ) : (
+                      <span
+                        className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                        style={{ backgroundColor: `hsl(${s.color})` }}
+                      >
+                        {m.initials}
+                      </span>
+                    )}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
                       <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
@@ -943,6 +966,7 @@ function NewDMModal({
           city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
           birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
           memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
+          photoUrl: p.photo_url ?? undefined,
         }))
         setAllMembers([...MEMBERS, ...mapped])
       }
@@ -995,12 +1019,16 @@ function NewDMModal({
                   className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors active:bg-secondary"
                 >
                   <div className="relative shrink-0">
-                    <span
-                      className="flex size-10 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: `hsl(${s.color})` }}
-                    >
-                      {m.initials}
-                    </span>
+                    {m.photoUrl ? (
+                      <img src={m.photoUrl} alt={m.initials} className="size-10 rounded-full object-cover" />
+                    ) : (
+                      <span
+                        className="flex size-10 items-center justify-center rounded-full text-xs font-bold text-white"
+                        style={{ backgroundColor: `hsl(${s.color})` }}
+                      >
+                        {m.initials}
+                      </span>
+                    )}
                     {m.online && (
                       <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card bg-emerald-500" />
                     )}
@@ -1049,6 +1077,7 @@ function CreateGroupModal({
           city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
           birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
           memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
+          photoUrl: p.photo_url ?? undefined,
         }))
         setAllMembers([...MEMBERS, ...mapped])
       }
@@ -1098,12 +1127,16 @@ function CreateGroupModal({
                   isSelected ? "bg-primary/5" : "active:bg-secondary"
                 }`}
               >
-                <span
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                  style={{ backgroundColor: `hsl(${s.color})` }}
-                >
-                  {m.initials}
-                </span>
+                {m.photoUrl ? (
+                  <img src={m.photoUrl} alt={m.initials} className="size-9 shrink-0 rounded-full object-cover" />
+                ) : (
+                  <span
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: `hsl(${s.color})` }}
+                  >
+                    {m.initials}
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
                   <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
@@ -1137,7 +1170,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl,
 }: {
   onBack: () => void
   title: string
@@ -1152,6 +1185,7 @@ function ChatView({
   senderInitials: string
   conversationId?: string
   photoMap?: Map<string, string>
+  headerPhotoUrl?: string
   groupSettings?: {
     memberNames: string[]
     adminNames: string[]
@@ -1293,12 +1327,16 @@ function ChatView({
           <ArrowLeft className="size-5" />
         </button>
         <div className="relative">
-          <span
-            className="flex size-10 items-center justify-center rounded-xl text-xs font-bold text-white"
-            style={{ backgroundColor: `hsl(${color})` }}
-          >
-            {initials}
-          </span>
+          {headerPhotoUrl ? (
+            <img src={headerPhotoUrl} alt={initials} className="size-10 rounded-xl object-cover" />
+          ) : (
+            <span
+              className="flex size-10 items-center justify-center rounded-xl text-xs font-bold text-white"
+              style={{ backgroundColor: `hsl(${color})` }}
+            >
+              {initials}
+            </span>
+          )}
           {online && (
             <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card bg-emerald-500" />
           )}

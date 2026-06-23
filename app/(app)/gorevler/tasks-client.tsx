@@ -499,7 +499,7 @@ function TaskCard({
 }
 
 // ── Membres par station (annuaire + Supabase profiles) ────────────────────────
-type AssigneeMember = { name: string; initials: string; role: string }
+type AssigneeMember = { name: string; initials: string; role: string; photoUrl?: string }
 
 function CreateTaskModal({
   open,
@@ -538,12 +538,13 @@ function CreateTaskModal({
 
     async function loadFromSupabase() {
       const supabase = createClient()
-      const { data } = await supabase.from("profiles").select("name,initials,role").eq("station", targetStation)
+      const { data } = await supabase.from("profiles").select("name,initials,role,photo_url").eq("station", targetStation)
       if (data && data.length > 0) {
         const extra: AssigneeMember[] = data.map((p) => ({
           name: p.name ?? "",
           initials: p.initials ?? "",
           role: p.role ?? "",
+          photoUrl: p.photo_url ?? undefined,
         }))
         setStationMembers([...base, ...extra])
       }
@@ -647,12 +648,16 @@ function CreateTaskModal({
                         i < stationMembers.length - 1 ? "border-b border-border" : ""
                       } ${selected ? "bg-primary/8" : "hover:bg-secondary/60"}`}
                     >
-                      <span
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                        style={{ backgroundColor: `hsl(${targetStationInfo.color})` }}
-                      >
-                        {m.initials}
-                      </span>
+                      {m.photoUrl ? (
+                        <img src={m.photoUrl} alt={m.initials} className="size-8 shrink-0 rounded-full object-cover" />
+                      ) : (
+                        <span
+                          className="flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                          style={{ backgroundColor: `hsl(${targetStationInfo.color})` }}
+                        >
+                          {m.initials}
+                        </span>
+                      )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
                         <p className="truncate text-xs text-muted-foreground">{m.role}</p>

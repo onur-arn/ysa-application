@@ -505,21 +505,16 @@ function PollBlock({ poll, myVote, onVote }: { poll: Poll; myVote: string | null
 // ── iGEM card ─────────────────────────────────────────────────────────────────
 type IgemComment = { id: string; author: string; initials: string; station: string; text: string; time: string }
 
-function IgemCard({ id, author, initials, station, motivation, date, photoMap, me, comments, onDelete, onComment }: {
+function IgemCard({ id, author, initials, station, motivation, date, photoMap, me, onDelete }: {
   id: string; author: string; initials: string; station: string; motivation: string; date: string
   photoMap: Map<string, string>
   me: { id: string; name: string; initials: string; station: string }
-  comments: IgemComment[]
   onDelete?: () => void
-  onComment: (text: string) => void
 }) {
   const s = getStation(station as never)
   const photo = photoMap.get(author)
   const isOwn = author === me.name
-  const [showComments, setShowComments] = useState(false)
-  const [commentText, setCommentText] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5">
@@ -556,55 +551,6 @@ function IgemCard({ id, author, initials, station, motivation, date, photoMap, m
         </div>
         {motivation && <p className="mt-3 text-sm leading-relaxed text-foreground/80">{motivation}</p>}
       </div>
-
-      {/* Comment toggle */}
-      <div className="flex items-center gap-1 border-t border-purple-500/20 px-3 py-1.5">
-        <button
-          onClick={() => { setShowComments(v => !v); setTimeout(() => inputRef.current?.focus(), 100) }}
-          className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground"
-        >
-          <MessageCircle className="size-4" />
-          {comments.length > 0 && comments.length}
-        </button>
-      </div>
-
-      <AnimatePresence>
-        {showComments && (
-          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}>
-            <div className="border-t border-purple-500/20 px-4 pb-3 pt-2">
-              {comments.map(c => (
-                <div key={c.id} className="flex gap-2.5 py-2">
-                  <Avatar initials={c.initials} station={c.station} size={7} photoUrl={photoMap.get(c.author)} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-xs font-semibold text-foreground">{c.author}</span>
-                      <span className="text-[10px] text-muted-foreground">{c.time}</span>
-                    </div>
-                    <p className="text-xs text-foreground/80">{c.text}</p>
-                  </div>
-                </div>
-              ))}
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  ref={inputRef}
-                  value={commentText}
-                  onChange={e => setCommentText(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && commentText.trim()) { onComment(commentText.trim()); setCommentText("") } }}
-                  placeholder="Yorum yaz…"
-                  className="h-9 flex-1 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-                />
-                <button
-                  onClick={() => { if (commentText.trim()) { onComment(commentText.trim()); setCommentText("") } }}
-                  disabled={!commentText.trim()}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-40"
-                >
-                  <Send className="size-4" />
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   )
 }
@@ -733,11 +679,11 @@ export function PostsFeed({
             .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at),polls(id,question,poll_options(id,text,position,poll_votes(option_id,voter_name)))")
             .eq("id", p.id)
             .single()
-          if (full && (full.polls as unknown[] | null)?.length) {
+          if (full) {
             const mapped = mapPostsFromRaw([full as Record<string, unknown>])[0]
             setPosts(prev => prev.map(x => x.id === p.id ? mapped : x))
           }
-        }, 1000)
+        }, 2500)
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "posts" }, (payload) => {
         setPosts((prev) => prev.filter((p) => p.id !== payload.old.id))
@@ -759,6 +705,33 @@ export function PostsFeed({
             }],
           }
         }))
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "polls" }, (payload) => {
+        const poll = payload.new as { id: string; post_id: string; question: string }
+        // Wait briefly for poll_options to be inserted, then patch the post
+        setTimeout(async () => {
+          const sb = createClient()
+          const { data } = await sb
+            .from("polls")
+            .select("id,question,poll_options(id,text,position,poll_votes(option_id,voter_name))")
+            .eq("id", poll.id)
+            .single()
+          if (data) {
+            const pollData: Poll = {
+              question: data.question,
+              options: ((data.poll_options as {id:string;text:string;position:number;poll_votes:{option_id:string;voter_name:string}[]}[]) ?? [])
+                .sort((a, b) => a.position - b.position)
+                .map(opt => ({
+                  id: opt.id,
+                  text: opt.text,
+                  voters: (opt.poll_votes ?? []).map((v) => v.voter_name),
+                })),
+            }
+            setPosts(prev => prev.map(p =>
+              p.id === poll.post_id ? { ...p, poll: pollData } : p
+            ))
+          }
+        }, 800)
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, (payload) => {
         const l = payload.new as { post_id: string; voter_name: string }
@@ -940,9 +913,7 @@ export function PostsFeed({
           date={item.data.date}
           photoMap={photoMap}
           me={me}
-          comments={item.data.comments}
           onDelete={() => deleteIgem(item.data.id)}
-          onComment={(text) => addIgemComment(item.data.id, text)}
         />
       )
     }

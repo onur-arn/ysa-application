@@ -10,6 +10,7 @@ import { useState, useEffect, type ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usePullToRefresh } from "@/lib/use-pull-to-refresh"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
+import { PresenceProvider } from "@/lib/presence"
 
 function BottomNavWrapper() {
   const { hideNav } = useNavVisibility()
@@ -34,6 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const onSettings = pathname.startsWith("/ayarlar")
 
   const [avatar, setAvatar] = useState<{ photoUrl?: string | null; initials: string; color: string } | null>(null)
+  const [userName, setUserName] = useState("")
 
   const { pull, refreshing } = usePullToRefresh()
 
@@ -51,6 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         nice: "262 83% 58%", toulouse: "199 89% 48%"
       }
       setAvatar({ photoUrl: p.photo_url, initials: p.initials || "?", color: colors[p.station] || "262 83% 58%" })
+      setUserName(p.name ?? "")
     }
     loadAvatar()
   }, [])
@@ -60,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <NavVisibilityProvider>
+    <PresenceProvider userName={userName}>
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background">
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card/95 px-4 py-2.5 backdrop-blur-lg">
         <Link href="/feed" className="flex items-center gap-2" aria-label="YouthStation">
@@ -115,6 +119,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <MainWrapper pull={pull}>{children}</MainWrapper>
       <BottomNavWrapper />
     </div>
+    </PresenceProvider>
     </NavVisibilityProvider>
   )
 }

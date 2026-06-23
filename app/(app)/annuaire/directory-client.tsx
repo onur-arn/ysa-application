@@ -7,6 +7,7 @@ import { MEMBERS, STATIONS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, Y
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { createClient } from "@/lib/supabase/client"
+import { usePresence } from "@/lib/presence"
 
 type StationFilter = "all" | StationId
 
@@ -42,6 +43,7 @@ export function DirectoryClient({
   initialProfiles = [],
 }: DirectoryClientProps) {
   const { t } = useI18n()
+  const activeUsers = usePresence()
   const [search, setSearch] = useState("")
   const [stationFilter, setStationFilter] = useState<StationFilter>("all")
   const [selected, setSelected] = useState<Member | null>(null)
@@ -140,9 +142,16 @@ export function DirectoryClient({
             <div className="sticky top-14 z-[1] bg-background/95 px-4 py-1 text-xs font-bold text-primary backdrop-blur">
               {letter}
             </div>
-            {members.map((m) => (
-              <MemberRow key={m.id} member={m} onClick={() => setSelected(m)} />
-            ))}
+            {members.map((m) => {
+              const online = activeUsers.has(m.name)
+              return (
+                <MemberRow
+                  key={m.id}
+                  member={{ ...m, online }}
+                  onClick={() => setSelected({ ...m, online })}
+                />
+              )
+            })}
           </div>
         ))}
         {grouped.length === 0 && (
