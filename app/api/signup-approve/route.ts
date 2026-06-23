@@ -47,9 +47,9 @@ export async function GET(req: NextRequest) {
 
   if (authErr) {
     if (authErr.code === "email_exists") {
-      const { data: list } = await admin.auth.admin.listUsers()
-      const existing = list?.users?.find((u) => u.email === pending.email)
-      if (existing) userId = existing.id
+      // Find existing auth user via profiles table
+      const { data: existingProfile } = await admin.from("profiles").select("id").eq("email", pending.email).maybeSingle()
+      if (existingProfile) userId = existingProfile.id
     } else {
       console.error("[signup-approve] Auth user creation failed:", authErr)
       return new NextResponse(
