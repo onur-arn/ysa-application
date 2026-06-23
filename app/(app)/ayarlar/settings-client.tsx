@@ -12,7 +12,7 @@ import Cropper from "react-easy-crop"
 import type { Area } from "react-easy-crop"
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
-import { getStation, SEHIRLER, STATIONS_SORTED, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES } from "@/lib/data/stations"
+import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
 
@@ -96,14 +96,13 @@ export function SettingsClient({
         body: JSON.stringify(updated),
       })
       const json = await res.json()
-      if (!res.ok) return json.error ?? "Erreur inconnue."
-      // Confirmed success: update UI, close modal, refresh server data
+      if (!res.ok) return json.error ?? "Bilinmeyen hata."
       setProfile(updated)
       setEditOpen(false)
       router.refresh()
       return null
     } catch {
-      return "Erreur réseau. Vérifiez votre connexion."
+      return "Ağ hatası. Bağlantınızı kontrol edin."
     }
   }
 
@@ -219,22 +218,22 @@ export function SettingsClient({
 
         {/* Appearance */}
         <Section title={t("settings.appearance")} icon={theme === "dark" ? Moon : Sun}>
-          <div className="flex items-center justify-between px-4 py-3.5">
-            <span className="flex items-center gap-2 text-foreground">
-              {theme === "dark" ? <Moon className="size-5 text-primary" /> : <Sun className="size-5 text-primary" />}
-              {theme === "dark" ? t("settings.darkMode") : t("settings.lightMode")}
-            </span>
+          <div className="flex items-center gap-3 px-4 py-3.5">
             <button
-              role="switch"
-              aria-checked={theme === "dark"}
-              onClick={toggle}
-              className={`relative h-7 w-12 rounded-full transition-colors ${theme === "dark" ? "bg-primary" : "bg-input"}`}
+              onClick={() => theme === "dark" && toggle()}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3 text-sm font-semibold transition-colors ${
+                theme !== "dark" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+              }`}
             >
-              <motion.span
-                animate={{ x: theme === "dark" ? 20 : 0 }}
-                transition={{ type: "spring", stiffness: 500, damping: 32 }}
-                className="absolute left-1 top-1 size-5 rounded-full bg-white shadow"
-              />
+              <Sun className="size-4" /> Aydınlık
+            </button>
+            <button
+              onClick={() => theme !== "dark" && toggle()}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3 text-sm font-semibold transition-colors ${
+                theme === "dark" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+              }`}
+            >
+              <Moon className="size-4" /> Karanlık
             </button>
           </div>
         </Section>
@@ -285,14 +284,14 @@ export function SettingsClient({
 
         {/* Export — bureau international only */}
         {isIntl && (
-          <Section title="Export données" icon={FileDown}>
+          <Section title="Veri dışa aktarımı" icon={FileDown}>
             <div className="flex flex-col gap-2 px-4 py-3.5">
               <p className="text-sm text-muted-foreground">
-                Envoie un rapport complet (membres, mots de passe, publications, tâches) à l'adresse admin.
+                Üyeler, yayınlar ve görevleri içeren tam raporu yöneticiye gönderir.
               </p>
               {exportDone && (
                 <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600">
-                  ✓ Export envoyé à secretaire@youthstation.org
+                  ✓ secretaire@youthstation.org adresine gönderildi
                 </p>
               )}
               <button
@@ -301,7 +300,7 @@ export function SettingsClient({
                 className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-50"
               >
                 {exporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
-                {exporting ? "Génération en cours…" : "Envoyer PDF à l'admin"}
+                {exporting ? "Oluşturuluyor…" : "Yöneticiye PDF gönder"}
               </button>
             </div>
           </Section>
@@ -379,7 +378,7 @@ function EditProfileModal({
   onClose,
 }: {
   profile: ProfileData
-  onSave: (p: ProfileData) => Promise<void>
+  onSave: (p: ProfileData) => Promise<string | null>
   onClose: () => void
 }) {
   const [name, setName] = useState(profile.name)
@@ -560,41 +559,23 @@ function EditProfileModal({
             </div>
           </div>
 
-          {/* Station */}
+          {/* Station — read-only */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">İstasyon</label>
-            <div className="relative">
-              <MapPin className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <select
-                value={stationVal}
-                onChange={e => setStationVal(e.target.value)}
-                className="h-11 w-full appearance-none rounded-xl border border-input bg-background pl-9 pr-9 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-              >
-                {STATIONS_SORTED.map(s => <option key={s.id} value={s.id}>{s.city}</option>)}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="flex h-11 items-center gap-2 rounded-xl border border-input bg-muted px-3 text-sm text-muted-foreground cursor-not-allowed">
+              <MapPin className="size-4 shrink-0" />
+              <span>{STATIONS_SORTED.find(s => s.id === stationVal)?.city ?? stationVal}</span>
+              <span className="ml-auto text-xs">Değiştirilemez</span>
             </div>
           </div>
 
-          {/* Role */}
+          {/* Role — read-only */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">Görev</label>
-            <div className="relative">
-              <Briefcase className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <select
-                value={role}
-                onChange={e => setRole(e.target.value)}
-                className="h-11 w-full appearance-none rounded-xl border border-input bg-background pl-9 pr-9 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-              >
-                <option value="">Görev seçin…</option>
-                <optgroup label="Yönetim Kurulu">
-                  {YONETIM_KURULU_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                </optgroup>
-                <optgroup label="Yürütme Kurulu">
-                  {YURUTME_KURULU_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                </optgroup>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="flex h-11 items-center gap-2 rounded-xl border border-input bg-muted px-3 text-sm text-muted-foreground cursor-not-allowed">
+              <Briefcase className="size-4 shrink-0" />
+              <span>{role || "—"}</span>
+              <span className="ml-auto text-xs">Değiştirilemez</span>
             </div>
           </div>
 

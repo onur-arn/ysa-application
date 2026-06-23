@@ -3,8 +3,8 @@
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users } from "lucide-react"
-import { POSTS, type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
-import { getStation } from "@/lib/data/stations"
+import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
+import { getStation, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
@@ -17,8 +17,17 @@ function timeAgo(iso: string) {
   return `${Math.floor(diff / 86400)}g`
 }
 
-function Avatar({ initials, station, size = 10 }: { initials: string; station: string; size?: number }) {
+function Avatar({ initials, station, size = 10, photoUrl }: { initials: string; station: string; size?: number; photoUrl?: string | null }) {
   const s = getStation(station as never)
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt={initials}
+        className={`size-${size} shrink-0 rounded-full object-cover`}
+      />
+    )
+  }
   return (
     <span
       className={`flex size-${size} shrink-0 items-center justify-center rounded-full text-xs font-bold text-white`}
@@ -29,11 +38,12 @@ function Avatar({ initials, station, size = 10 }: { initials: string; station: s
   )
 }
 
-function PostCard({ post, onUpdate, onDelete, me }: {
+function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
   post: Post
   onUpdate: (p: Post) => void
   onDelete?: () => void
-  me: { name: string; initials: string; station: string }
+  me: { name: string; initials: string; station: string; photoUrl?: string | null }
+  photoMap: Map<string, string>
 }) {
   const ME = me.name
   const isOwn = post.author === ME
@@ -61,32 +71,39 @@ function PostCard({ post, onUpdate, onDelete, me }: {
     onUpdate({ ...post, poll: { ...post.poll, options: newOptions } })
   }
 
-  function toggleLike() {
+  async function toggleLike() {
     const current = post.likedBy ?? []
-    const newLikedBy = liked ? current.filter(n => n !== ME) : [...current, ME]
-    setLiked(!liked)
+    const nowLiked = !liked
+    const newLikedBy = nowLiked ? [...current, ME] : current.filter((n) => n !== ME)
+    setLiked(nowLiked)
     onUpdate({ ...post, likedBy: newLikedBy })
+    const supabase = createClient()
+    if (nowLiked) {
+      await supabase.from("post_likes").insert({ post_id: post.id, voter_name: ME })
+    } else {
+      await supabase.from("post_likes").delete().eq("post_id", post.id).eq("voter_name", ME)
+    }
   }
 
-  function submitComment() {
+  async function submitComment() {
     if (!commentText.trim()) return
-    const newComment: PostComment = {
-      id: `c-${Date.now()}`,
+    const text = commentText.trim()
+    setCommentText("")
+    const supabase = createClient()
+    await supabase.from("post_comments").insert({
+      post_id: post.id,
       author: me.name,
       initials: me.initials,
-      station: me.station as never,
-      text: commentText.trim(),
-      time: "şimdi",
-    }
-    onUpdate({ ...post, comments: [...post.comments, newComment] })
-    setCommentText("")
+      station: me.station,
+      text,
+    })
   }
 
   return (
     <div className="rounded-2xl border border-border bg-card">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-4">
-        <Avatar initials={post.initials} station={post.station} size={10} />
+        <Avatar initials={post.initials} station={post.station} size={10} photoUrl={photoMap.get(post.author)} />
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-foreground">{post.author}</p>
           <div className="flex items-center gap-1.5">
@@ -203,7 +220,7 @@ function PostCard({ post, onUpdate, onDelete, me }: {
             <div className="border-t border-border/60 px-4 pb-3 pt-2">
               {post.comments.map(c => (
                 <div key={c.id} className="flex gap-2.5 py-2">
-                  <Avatar initials={c.initials} station={c.station} size={7} />
+                  <Avatar initials={c.initials} station={c.station} size={7} photoUrl={photoMap.get(c.author)} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-xs font-semibold text-foreground">{c.author}</span>
@@ -519,23 +536,31 @@ export function PostsFeed() {
   const [igemRequests, setIgemRequests] = useState<{ author: string; initials: string; station: string; motivation: string; date: string }[]>([])
   const [showArchive, setShowArchive] = useState(false)
   const [isIntl, setIsIntl] = useState(false)
-  const [me, setMe] = useState<{ name: string; initials: string; station: string }>({
+  const [photoMap, setPhotoMap] = useState<Map<string, string>>(new Map())
+  const [me, setMe] = useState<{ name: string; initials: string; station: string; photoUrl?: string | null }>({
     name: "", initials: "", station: "paris",
   })
 
   useEffect(() => {
+    const supabase = createClient()
+
     async function load() {
-      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: profile } = await supabase.from("profiles").select("name,initials,station").eq("id", user.id).single()
+        const { data: profile } = await supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
         if (profile) {
           const ini = profile.initials || profile.name?.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || ""
-          setMe({ name: profile.name || "", initials: ini, station: profile.station || "paris" })
+          setMe({ name: profile.name || "", initials: ini, station: profile.station || "paris", photoUrl: profile.photo_url })
           setIsIntl(profile.station === "intl")
         }
       } else {
         setIsIntl(true)
+      }
+
+      // Build photo map: authorName → photo_url
+      const { data: allProfiles } = await supabase.from("profiles").select("name,photo_url")
+      if (allProfiles) {
+        setPhotoMap(new Map(allProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url])))
       }
 
       const { data: igem } = await supabase.from("igem_requests").select("author,initials,station,motivation,created_at")
@@ -551,34 +576,103 @@ export function PostsFeed() {
 
       const { data: postsData } = await supabase
         .from("posts")
-        .select("id,author,initials,station,content,image_url,created_at")
+        .select("id,author,initials,station,content,image_url,created_at,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at)")
         .order("created_at", { ascending: false })
       if (postsData) {
         setPosts(postsData.map((p) => ({
           id: p.id,
           author: p.author ?? "",
           initials: p.initials ?? "?",
-          station: p.station ?? "paris",
+          station: (p.station ?? "paris") as StationId,
           content: p.content ?? "",
           imageUrl: p.image_url ?? undefined,
           createdAt: p.created_at,
-          likedBy: [],
-          comments: [],
+          likedBy: (p.post_likes ?? []).map((l: { voter_name: string }) => l.voter_name),
+          comments: (p.post_comments ?? []).map((c: { id: string; author: string; initials: string; station: string; text: string; created_at: string }) => ({
+            id: c.id,
+            author: c.author ?? "",
+            initials: c.initials ?? "?",
+            station: (c.station ?? "paris") as StationId,
+            text: c.text ?? "",
+            time: timeAgo(c.created_at),
+          })),
         })))
       }
     }
     load()
+
+    // Realtime: new posts appear instantly for all users
+    const channel = supabase
+      .channel("posts-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "posts" }, (payload) => {
+        const p = payload.new as { id: string; author?: string; initials?: string; station?: string; content: string; image_url?: string | null; created_at: string }
+        setPosts((prev) => {
+          if (prev.some((x) => x.id === p.id)) return prev
+          return [{
+            id: p.id,
+            author: p.author ?? "",
+            initials: p.initials ?? "?",
+            station: (p.station ?? "paris") as StationId,
+            content: p.content ?? "",
+            imageUrl: p.image_url ?? undefined,
+            createdAt: p.created_at,
+            likedBy: [],
+            comments: [],
+          }, ...prev]
+        })
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "posts" }, (payload) => {
+        setPosts((prev) => prev.filter((p) => p.id !== payload.old.id))
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_comments" }, (payload) => {
+        const c = payload.new as { id: string; post_id: string; author: string; initials: string; station: string; text: string; created_at: string }
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== c.post_id) return p
+          if (p.comments.some((x) => x.id === c.id)) return p
+          return {
+            ...p,
+            comments: [...p.comments, {
+              id: c.id,
+              author: c.author ?? "",
+              initials: c.initials ?? "?",
+              station: (c.station ?? "paris") as never,
+              text: c.text ?? "",
+              time: timeAgo(c.created_at),
+            }],
+          }
+        }))
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, (payload) => {
+        const l = payload.new as { post_id: string; voter_name: string }
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== l.post_id) return p
+          if ((p.likedBy ?? []).includes(l.voter_name)) return p
+          return { ...p, likedBy: [...(p.likedBy ?? []), l.voter_name] }
+        }))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "post_likes" }, (payload) => {
+        const l = payload.old as { post_id: string; voter_name: string }
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== l.post_id) return p
+          return { ...p, likedBy: (p.likedBy ?? []).filter((n) => n !== l.voter_name) }
+        }))
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
-  const [posts, setPosts] = useState<Post[]>(POSTS)
+  const [posts, setPosts] = useState<Post[]>([])
   const [composeOpen, setComposeOpen] = useState(false)
 
   function updatePost(updated: Post) {
     setPosts(prev => prev.map(p => p.id === updated.id ? updated : p))
   }
 
-  function deletePost(id: string) {
-    setPosts(prev => prev.filter(p => p.id !== id))
+  async function deletePost(id: string) {
+    setPosts((prev) => prev.filter((p) => p.id !== id))
+    const supabase = createClient()
+    await supabase.from("posts").delete().eq("id", id)
   }
 
   async function addPost(content: string, imageUrl?: string, poll?: Poll) {
@@ -644,6 +738,7 @@ export function PostsFeed() {
         onUpdate={updatePost}
         onDelete={() => deletePost(item.data.id)}
         me={me}
+        photoMap={photoMap}
       />
     )
   }

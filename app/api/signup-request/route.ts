@@ -3,13 +3,14 @@ import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://youthstation.vercel.app"
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const {
     firstName, lastName, email, password,
     phone, birthday, linkedin, role, station,
-    memleket, igemEgitimi, igemTarihi, photoUrl,
+    memleket, igemEgitimi, igemTarihi, photoBase64, photoExt,
   } = body
 
   if (!SUPABASE_ENABLED) {
@@ -25,45 +26,61 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
   }
 
-  // Create auth user immediately
-  const { data: authData, error: authErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  })
-  if (authErr || !authData?.user) {
-    console.error("[signup-request] createUser failed:", authErr)
-    return NextResponse.json({ ok: false, error: authErr?.message ?? "Création compte échouée" }, { status: 500 })
+  // Check email not already pending
+  const { data: existing } = await admin.from("pending_members").select("id").eq("email", email).maybeSingle()
+  if (existing) {
+    return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
   }
 
-  const userId = authData.user.id
   const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
   const fullName = `${cap(firstName)} ${cap(lastName)}`
-  const initials = fullName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
 
-  // Insert profile with all signup data
-  const { error: profileErr } = await admin.from("profiles").insert({
-    id: userId,
-    name: fullName,
+  // Insert into pending_members
+  const { data: pending, error: insertErr } = await admin.from("pending_members").insert({
+    first_name: firstName,
+    last_name: lastName,
     email,
-    initial_password: password,
-    station: station ?? "paris",
-    role: role ?? "Üye",
+    password,
     phone: phone || null,
     birthday: birthday || null,
     linkedin: linkedin || null,
+    role: role || "Üye",
+    station: station || "paris",
     memleket: memleket || null,
-    photo_url: photoUrl || null,
     igem_egitimi: igemEgitimi || null,
     igem_tarihi: igemTarihi || null,
-    initials,
-  })
-  if (profileErr) {
-    console.error("[signup-request] profile insert failed:", profileErr.message)
-    // Auth user created but profile failed — log and continue (user can fill profile later)
+  }).select().single()
+
+  if (insertErr || !pending) {
+    console.error("[signup-request] pending insert failed:", insertErr)
+    return NextResponse.json({ ok: false, error: "Kayıt oluşturulamadı" }, { status: 500 })
   }
 
-  // Notify admin (informational only — account already created)
+  const pendingId = pending.id
+
+  // Upload photo via admin client
+  if (photoBase64 && photoExt) {
+    try {
+      const buffer = Buffer.from(photoBase64, "base64")
+      const path = `pending/${pendingId}.${photoExt}`
+      const { error: upErr } = await admin.storage.from("avatars").upload(path, buffer, {
+        contentType: `image/${photoExt}`,
+        upsert: true,
+      })
+      if (!upErr) {
+        const { data: urlData } = admin.storage.from("avatars").getPublicUrl(path)
+        await admin.from("pending_members").update({ photo_url: urlData.publicUrl }).eq("id", pendingId)
+      }
+    } catch (err) {
+      console.error("[signup-request] photo upload error:", err)
+    }
+  }
+
+  // Build approve / reject tokens
+  const token = Buffer.from(JSON.stringify({ pendingId, firstName, lastName, email })).toString("base64url")
+  const approveUrl = `${APP_URL}/api/signup-approve?token=${token}`
+  const rejectUrl  = `${APP_URL}/api/signup-reject?token=${token}`
+
   const row = (label: string, value: string) =>
     `<tr>
       <td style="padding:7px 14px;color:#6b7280;font-size:13px;white-space:nowrap;border-bottom:1px solid #f3f4f6">${label}</td>
@@ -73,32 +90,41 @@ export async function POST(req: NextRequest) {
   try {
     await sendMail({
       to: ADMIN_TO,
-      subject: `[YSA] Nouveau membre inscrit — ${fullName}`,
+      subject: `[YSA] Nouvelle demande d'inscription — ${fullName}`,
       html: `
-        <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
+        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
           <div style="background:#0e7490;padding:20px 24px">
-            <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Nouveau membre YSA inscrit</h1>
+            <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Nouvelle demande d'inscription YSA</h1>
+            <p style="margin:4px 0 0;color:#e0f2fe;font-size:13px">En attente de votre approbation</p>
           </div>
           <div style="padding:24px">
-            <p style="margin:0 0 16px;font-size:14px;color:#374151">Le compte a été créé automatiquement.</p>
-            <table style="border-collapse:collapse;width:100%;background:#f9fafb;border-radius:8px;overflow:hidden">
+            <table style="border-collapse:collapse;width:100%;background:#f9fafb;border-radius:8px;overflow:hidden;margin-bottom:24px">
               ${row("Ad Soyad", fullName)}
               ${row("E-posta", email)}
-              ${row("Telefon", phone)}
-              ${row("Doğum tarihi", birthday)}
-              ${row("LinkedIn", linkedin ? `<a href="${linkedin}" style="color:#0e7490">${linkedin}</a>` : "—")}
-              ${row("Görev", role)}
-              ${row("İstasyon", station)}
-              ${row("Memleket", memleket)}
+              ${row("Telefon", phone || "—")}
+              ${row("Doğum tarihi", birthday || "—")}
+              ${row("LinkedIn", linkedin ? linkedin : "—")}
+              ${row("Görev", role || "—")}
+              ${row("İstasyon", station || "—")}
+              ${row("Memleket", memleket || "—")}
               ${row("iGEM Eğitimi", igemEgitimi === "evet" ? `✅ Evet${igemTarihi ? ` — ${igemTarihi}` : ""}` : igemEgitimi === "hayır" ? "❌ Hayır" : "—")}
             </table>
+            <div style="display:flex;gap:12px;justify-content:center">
+              <a href="${approveUrl}" style="display:inline-block;padding:12px 32px;background:#16a34a;color:#fff;font-weight:700;font-size:15px;border-radius:10px;text-decoration:none">
+                ✅ Kabul et
+              </a>
+              <a href="${rejectUrl}" style="display:inline-block;padding:12px 32px;background:#dc2626;color:#fff;font-weight:700;font-size:15px;border-radius:10px;text-decoration:none">
+                ❌ Reddet
+              </a>
+            </div>
+            <p style="margin-top:20px;font-size:11px;color:#9ca3af;text-align:center">Ces liens sont à usage unique. Le compte ne sera créé qu'après approbation.</p>
           </div>
         </div>
       `,
     })
   } catch (err) {
     console.error("[signup-request] email notification failed:", err)
-    // Don't fail the signup if email fails
+    // Don't fail the signup if email fails — admin can check pending_members manually
   }
 
   return NextResponse.json({ ok: true })

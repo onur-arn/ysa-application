@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText } from "lucide-react"
+import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { EVENTS, type EventItem } from "@/lib/data/feed"
+import { createClient } from "@/lib/supabase/client"
+import { type EventItem } from "@/lib/data/feed"
 import { STATIONS_SORTED, getStation, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
@@ -26,9 +27,83 @@ export function AgendaClient() {
   const [view, setView] = useState<View>("calendar")
   const [filter, setFilter] = useState<Filter>("all")
   const [cursor, setCursor] = useState(new Date(2026, 5, 1))
-  const [events, setEvents] = useState<EventItem[]>(EVENTS)
+  const [events, setEvents] = useState<EventItem[]>([])
   const [selected, setSelected] = useState<EventItem | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [userStation, setUserStation] = useState<string>("paris")
+  const [isIntl, setIsIntl] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function loadUser() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      setCurrentUserId(user.id)
+      const { data: p } = await supabase.from("profiles").select("station").eq("id", user.id).single()
+      if (p?.station) {
+        setUserStation(p.station)
+        setIsIntl(p.station === "intl")
+      }
+    }
+    loadUser()
+  }, [])
+
+  useEffect(() => {
+    const supabase = createClient()
+
+    async function loadEvents() {
+      const { data } = await supabase
+        .from("events")
+        .select("id,title,date,time,place,station,description,link,created_by")
+        .order("date", { ascending: true })
+      if (data) {
+        setEvents(data.map((e) => ({
+          id: e.id,
+          title: e.title ?? "",
+          date: e.date ?? "",
+          time: e.time ?? "18:00",
+          place: e.place ?? "—",
+          station: (e.station as StationId) ?? "paris",
+          description: e.description ?? undefined,
+          link: e.link ?? undefined,
+          likes: 0,
+          participantsCount: 0,
+          notAttendingCount: 0,
+          comments: [],
+          createdBy: e.created_by ?? undefined,
+        })))
+      }
+    }
+    loadEvents()
+
+    const channel = supabase
+      .channel("events-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "events" }, (payload) => {
+        const e = payload.new as Record<string, unknown>
+        setEvents((prev) => {
+          if (prev.some((x) => x.id === (e.id as string))) return prev
+          return [...prev, {
+            id: e.id as string,
+            title: (e.title as string) ?? "",
+            date: (e.date as string) ?? "",
+            time: (e.time as string) ?? "18:00",
+            place: (e.place as string) ?? "—",
+            station: ((e.station as StationId) ?? "paris"),
+            description: (e.description as string) ?? undefined,
+            link: (e.link as string) ?? undefined,
+            likes: 0, participantsCount: 0, notAttendingCount: 0, comments: [],
+            createdBy: (e.created_by as string) ?? undefined,
+          }]
+        })
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "events" }, (payload) => {
+        setEvents((prev) => prev.filter((e) => e.id !== (payload.old as Record<string, unknown>).id))
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const filtered = useMemo(
     () => events.filter((e) => filter === "all" || e.station === filter),
@@ -200,6 +275,19 @@ export function AgendaClient() {
       <Modal open={!!selected} onClose={() => setSelected(null)} title={t("agenda.eventDetail")}>
         {selected && (
           <div className="flex flex-col gap-4">
+            {selected.createdBy && selected.createdBy === currentUserId && (
+              <button
+                onClick={async () => {
+                  const supabase = createClient()
+                  await supabase.from("events").delete().eq("id", selected.id)
+                  setEvents((prev) => prev.filter((e) => e.id !== selected.id))
+                  setSelected(null)
+                }}
+                className="flex items-center gap-2 self-end rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-semibold text-destructive transition-colors active:bg-destructive/10"
+              >
+                <Trash2 className="size-4" /> Sil
+              </button>
+            )}
             <div
               className="rounded-2xl p-4 text-white"
               style={{
@@ -249,9 +337,25 @@ export function AgendaClient() {
       <CreateEventModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreate={(e) => {
-          setEvents((prev) => [...prev, e])
+        userStation={userStation}
+        isIntl={isIntl}
+        onCreate={async (e) => {
           setCreateOpen(false)
+          const supabase = createClient()
+          const { data: { user } } = await supabase.auth.getUser()
+          const { data, error } = await supabase.from("events").insert({
+            title: e.title,
+            date: e.date,
+            time: e.time,
+            place: e.place !== "—" ? e.place : null,
+            station: e.station,
+            description: e.description ?? null,
+            link: e.link ?? null,
+            created_by: user?.id ?? null,
+          }).select().single()
+          if (!error && data) {
+            setEvents((prev) => [...prev, { ...e, id: data.id, createdBy: user?.id }])
+          }
         }}
       />
     </div>
@@ -326,10 +430,14 @@ function CreateEventModal({
   open,
   onClose,
   onCreate,
+  userStation = "paris",
+  isIntl = false,
 }: {
   open: boolean
   onClose: () => void
-  onCreate: (e: EventItem) => void
+  onCreate: (e: EventItem) => void | Promise<void>
+  userStation?: string
+  isIntl?: boolean
 }) {
   const { t } = useI18n()
   const [title, setTitle] = useState("")
@@ -338,15 +446,17 @@ function CreateEventModal({
   const [place, setPlace] = useState("")
   const [description, setDescription] = useState("")
   const [link, setLink] = useState("")
-  const [station, setStation] = useState<string>("paris")
+  const [station, setStation] = useState<string>(userStation)
+
+  useEffect(() => { setStation(userStation) }, [userStation])
 
   function submit() {
-    if (!title.trim() || !day) return
+    if (!title.trim() || !day || !time) return
     onCreate({
       id: String(Date.now()),
       title: title.trim(),
       date: day,
-      time: time || "18:00",
+      time: time,
       place: place || "—",
       station: station as StationId,
       description: description.trim() || undefined,
@@ -362,7 +472,7 @@ function CreateEventModal({
     setPlace("")
     setDescription("")
     setLink("")
-    setStation("paris")
+    setStation(userStation)
   }
 
   return (
@@ -372,12 +482,16 @@ function CreateEventModal({
           <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder={t("agenda.eventTitlePlaceholder")} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label={t("agenda.day")}>
-            <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass} />
-          </Field>
-          <Field label={t("agenda.time")}>
-            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} />
-          </Field>
+          <div className="min-w-0 overflow-hidden">
+            <Field label={t("agenda.day")}>
+              <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " w-full min-w-0 max-w-full text-sm px-2"} />
+            </Field>
+          </div>
+          <div className="min-w-0 overflow-hidden">
+            <Field label={t("agenda.time")}>
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " w-full min-w-0 max-w-full text-sm px-2"} />
+            </Field>
+          </div>
         </div>
         <Field label={t("agenda.place")}>
           <input value={place} onChange={(e) => setPlace(e.target.value)} className={inputClass} placeholder={t("agenda.placePlaceholder")} />
@@ -394,10 +508,21 @@ function CreateEventModal({
         <Field label="Bağlantı (Zoom vb.)">
           <input value={link} onChange={(e) => setLink(e.target.value)} className={inputClass} placeholder="https://zoom.us/..." />
         </Field>
-        <Field label={t("agenda.station")}>
-          <StationSelect value={station} onChange={setStation} />
-        </Field>
-        <Button onClick={submit} className="mt-1 h-12">
+        {isIntl ? (
+          <Field label={t("agenda.station")}>
+            <StationSelect value={station} onChange={setStation} />
+          </Field>
+        ) : (
+          <Field label={t("agenda.station")}>
+            <div className={inputClass + " flex items-center gap-2 bg-muted cursor-not-allowed"}>
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white" style={{ backgroundColor: `hsl(${getStation(station as StationId).color})` }}>
+                {getStation(station as StationId).short}
+              </span>
+              <span className="font-medium text-foreground">{getStation(station as StationId).city}</span>
+            </div>
+          </Field>
+        )}
+        <Button onClick={submit} disabled={!title.trim() || !day || !time} className="mt-1 h-12">
           {t("agenda.create")}
         </Button>
       </div>

@@ -2,9 +2,9 @@
 
 import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown, Check } from "lucide-react"
+import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown, Check, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { TASKS, type Task, type TaskStatus, type TaskPriority, type TaskComment } from "@/lib/data/tasks"
+import { type Task, type TaskStatus, type TaskPriority, type TaskComment } from "@/lib/data/tasks"
 import { getStation, STATIONS, MEMBERS, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
@@ -12,25 +12,28 @@ import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 
-type CurrentUser = { station: StationId; role: string; name: string; initials: string }
+type CurrentUser = { id: string; station: StationId; role: string; name: string; initials: string }
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done"]
 
 export function TasksClient() {
   const { t } = useI18n()
-  const [tasks, setTasks] = useState<Task[]>(TASKS)
+  const [tasks, setTasks] = useState<Task[]>([])
   const [filter, setFilter] = useState<TaskStatus | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [myId, setMyId]             = useState("")
   const [myStation, setMyStation] = useState<StationId>("intl")
   const [myRole, setMyRole]       = useState("")
   const [myName, setMyName]       = useState("")
   const [myInitials, setMyInitials] = useState("")
 
   useEffect(() => {
+    const supabase = createClient()
+
     async function load() {
-      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      setMyId(user.id)
       const { data: profile } = await supabase.from("profiles").select("name,initials,station,role").eq("id", user.id).single()
       if (profile) {
         setMyStation((profile.station as StationId) ?? "intl")
@@ -38,8 +41,100 @@ export function TasksClient() {
         setMyName(profile.name ?? "")
         setMyInitials(profile.initials ?? "")
       }
+
+      // Load tasks
+      const { data: tasksData } = await supabase
+        .from("tasks")
+        .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at,created_by")
+        .order("created_at", { ascending: false })
+
+      // Load all task comments
+      const { data: commentsData } = await supabase
+        .from("task_comments")
+        .select("id,task_id,author,initials,text,created_at")
+        .order("created_at", { ascending: true })
+
+      const commentsByTask: Record<string, TaskComment[]> = {}
+      for (const c of commentsData ?? []) {
+        commentsByTask[c.task_id] = commentsByTask[c.task_id] || []
+        commentsByTask[c.task_id].push({
+          id: c.id,
+          author: c.author ?? "",
+          initials: c.initials ?? "",
+          text: c.text ?? "",
+          time: new Date(c.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+        })
+      }
+      if (tasksData) {
+        setTasks(tasksData.map((t) => ({
+          id: t.id,
+          title: t.title ?? "",
+          description: t.description ?? "",
+          status: (t.status as TaskStatus) ?? "todo",
+          priority: (t.priority as TaskPriority) ?? "normal",
+          station: (t.station as StationId) ?? "paris",
+          assignee: t.assignee ?? "Atanmadı",
+          assigneeInitials: t.assignee_initials ?? "NA",
+          assignedBy: t.assigned_by ?? "",
+          assignedByInitials: t.assigned_by_initials ?? "",
+          assignedByStation: (t.assigned_by_station as StationId) ?? "paris",
+          comments: commentsByTask[t.id] ?? [],
+          createdById: t.created_by ?? undefined,
+        })))
+      }
     }
     load()
+
+    const channel = supabase
+      .channel("tasks-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, (payload) => {
+        const t = payload.new as Record<string, unknown>
+        setTasks((prev) => {
+          if (prev.some((x) => x.id === (t.id as string))) return prev
+          return [{
+            id: t.id as string,
+            title: (t.title as string) ?? "",
+            description: (t.description as string) ?? "",
+            status: ((t.status as TaskStatus) ?? "todo"),
+            priority: ((t.priority as TaskPriority) ?? "normal"),
+            station: ((t.station as StationId) ?? "paris"),
+            assignee: (t.assignee as string) ?? "Atanmadı",
+            assigneeInitials: (t.assignee_initials as string) ?? "NA",
+            assignedBy: (t.assigned_by as string) ?? "",
+            assignedByInitials: (t.assigned_by_initials as string) ?? "",
+            assignedByStation: ((t.assigned_by_station as StationId) ?? "paris"),
+            comments: [],
+            createdById: (t.created_by as string) ?? undefined,
+          }, ...prev]
+        })
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, (payload) => {
+        const t = payload.new as Record<string, unknown>
+        setTasks((prev) => prev.map((x) => x.id === (t.id as string) ? { ...x, status: (t.status as TaskStatus) ?? x.status } : x))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, (payload) => {
+        setTasks((prev) => prev.filter((x) => x.id !== (payload.old as Record<string, unknown>).id))
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_comments" }, (payload) => {
+        const c = payload.new as Record<string, unknown>
+        setTasks((prev) => prev.map((t) => {
+          if (t.id !== (c.task_id as string)) return t
+          if (t.comments.some((x) => x.id === (c.id as string))) return t
+          return {
+            ...t,
+            comments: [...t.comments, {
+              id: c.id as string,
+              author: (c.author as string) ?? "",
+              initials: (c.initials as string) ?? "",
+              text: (c.text as string) ?? "",
+              time: new Date(c.created_at as string).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+            }],
+          }
+        }))
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   const isIntl = myStation === "intl"
@@ -61,30 +156,24 @@ export function TasksClient() {
     [visibleTasks],
   )
 
-  function cycleStatus(id: string) {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t
-        const next = STATUS_ORDER[(STATUS_ORDER.indexOf(t.status) + 1) % STATUS_ORDER.length]
-        return { ...t, status: next }
-      }),
-    )
+  async function cycleStatus(id: string) {
+    const task = tasks.find((t) => t.id === id)
+    if (!task) return
+    const next = STATUS_ORDER[(STATUS_ORDER.indexOf(task.status) + 1) % STATUS_ORDER.length]
+    setTasks((prev) => prev.map((t) => t.id === id ? { ...t, status: next } : t))
+    const supabase = createClient()
+    await supabase.from("tasks").update({ status: next }).eq("id", id)
   }
 
-  function addComment(taskId: string, text: string) {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === taskId
-          ? {
-              ...t,
-              comments: [
-                ...t.comments,
-                { id: String(Date.now()), author: myName, initials: myInitials, text, time: "Şimdi" },
-              ],
-            }
-          : t,
-      ),
-    )
+  async function addComment(taskId: string, text: string) {
+    const supabase = createClient()
+    await supabase.from("task_comments").insert({ task_id: taskId, author: myName, initials: myInitials, text })
+  }
+
+  async function deleteTask(id: string) {
+    setTasks((prev) => prev.filter((t) => t.id !== id))
+    const supabase = createClient()
+    await supabase.from("tasks").delete().eq("id", id)
   }
 
   const myStationInfo = getStation(myStation)
@@ -138,8 +227,10 @@ export function TasksClient() {
             <TaskCard
               key={task.id}
               task={task}
+              currentUserId={myId}
               onCycle={() => cycleStatus(task.id)}
               onComment={(text) => addComment(task.id, text)}
+              onDelete={() => deleteTask(task.id)}
             />
           ))}
         </AnimatePresence>
@@ -164,9 +255,31 @@ export function TasksClient() {
         creatorStation={myStation}
         creatorName={myName}
         creatorInitials={myInitials}
-        onCreate={(task) => {
+        onCreate={async (task) => {
           setTasks((prev) => [task, ...prev])
           setCreateOpen(false)
+          const supabase = createClient()
+          const { data: { user: u } } = await supabase.auth.getUser()
+          const { data, error } = await supabase.from("tasks").insert({
+            title: task.title,
+            description: task.description || null,
+            status: task.status,
+            priority: task.priority,
+            station: task.station,
+            assignee: task.assignee || null,
+            assignee_initials: task.assigneeInitials || null,
+            assigned_by: task.assignedBy || null,
+            assigned_by_initials: task.assignedByInitials || null,
+            assigned_by_station: task.assignedByStation || null,
+            created_by: u?.id ?? null,
+          }).select().single()
+          if (!error && data) {
+            // Replace temp ID with real UUID, and set createdById
+            setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, id: data.id, createdById: u?.id ?? undefined } : t))
+          } else if (error) {
+            // Rollback
+            setTasks((prev) => prev.filter((t) => t.id !== task.id))
+          }
         }}
       />
     </div>
@@ -223,12 +336,16 @@ function priorityStyle(p: TaskPriority) {
 
 function TaskCard({
   task,
+  currentUserId,
   onCycle,
   onComment,
+  onDelete,
 }: {
   task: Task
+  currentUserId: string
   onCycle: () => void
   onComment: (text: string) => void
+  onDelete: () => void
 }) {
   const { t } = useI18n()
   const [showComments, setShowComments] = useState(false)
@@ -263,9 +380,20 @@ function TaskCard({
             <p className={`font-semibold text-foreground ${task.status === "done" ? "text-muted-foreground line-through" : ""}`}>
               {task.title}
             </p>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${priorityStyle(task.priority)}`}>
-              {priorityLabel[task.priority]}
-            </span>
+            <div className="flex shrink-0 items-center gap-1">
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${priorityStyle(task.priority)}`}>
+                {priorityLabel[task.priority]}
+              </span>
+              {task.createdById && task.createdById === currentUserId && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDelete() }}
+                  className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-destructive/10 active:text-destructive"
+                  aria-label="Görevi sil"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              )}
+            </div>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{task.description}</p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -372,7 +500,7 @@ function CreateTaskModal({
 }: {
   open: boolean
   onClose: () => void
-  onCreate: (t: Task) => void
+  onCreate: (t: Task) => void | Promise<void>
   isIntl: boolean
   creatorStation: StationId
   creatorName: string

@@ -14,9 +14,7 @@ import { createClient } from "@/lib/supabase/client"
 
 type Tab = "groups" | "dm"
 
-const CUSTOM_GROUPS_KEY = "ysa-custom-groups"
-const CUSTOM_DMS_KEY    = "ysa-custom-dms"
-const CUSTOM_COLOR      = "262 83% 58%"
+const CUSTOM_COLOR = "262 83% 58%"
 
 type CustomGroup = {
   id: string
@@ -59,9 +57,11 @@ export function MessagesClient() {
     async function load() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
+      let userName = ""
       if (user) {
         const { data: profile } = await supabase.from("profiles").select("name,station").eq("id", user.id).single()
         if (profile) {
+          userName = profile.name ?? ""
           setCurrentUser({
             station: (profile.station as StationId) ?? "intl",
             name: profile.name ?? "",
@@ -69,144 +69,186 @@ export function MessagesClient() {
           })
         }
       }
+
+      if (!userName) return
+
+      // Load groups from Supabase where current user is a member
+      const { data: memberRows } = await supabase
+        .from("conversation_members")
+        .select("conversation_id")
+        .eq("member_name", userName)
+
+      const convIds = memberRows?.map((r: { conversation_id: string }) => r.conversation_id) ?? []
+
+      if (convIds.length > 0) {
+        const { data: convRows } = await supabase
+          .from("conversations")
+          .select("id,type,name,initials,created_at,conversation_members(member_name)")
+          .in("id", convIds)
+          .order("created_at", { ascending: false })
+
+        if (convRows) {
+          const groups: CustomGroup[] = []
+          const dms: CustomDM[] = []
+
+          for (const c of convRows) {
+            const memberNames = (c.conversation_members ?? [])
+              .map((m: { member_name: string }) => m.member_name)
+              .filter((n: string) => n !== userName)
+
+            const { data: lastMsg } = await supabase
+              .from("chat_messages")
+              .select("text,created_at")
+              .eq("conversation_id", c.id)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .single()
+
+            const lastMessage = lastMsg?.text ?? (c.type === "group" ? "Grup oluşturuldu" : "")
+            const lastTime = lastMsg?.created_at
+              ? new Date(lastMsg.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+              : ""
+
+            if (c.type === "group") {
+              groups.push({ id: c.id, name: c.name ?? "", initials: c.initials ?? "", memberNames, lastMessage, lastTime, unread: 0, messages: [] })
+            } else {
+              const otherName = memberNames[0] ?? ""
+              groups // DMs are handled separately
+              dms.push({ id: c.id, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
+            }
+          }
+          setCustomGroups(groups)
+          setCustomDMs(dms)
+        }
+      }
     }
     load()
-    try {
-      const saved: CustomGroup[] = JSON.parse(localStorage.getItem(CUSTOM_GROUPS_KEY) ?? "[]")
-      setCustomGroups(saved)
-    } catch {}
-    try {
-      const saved: CustomDM[] = JSON.parse(localStorage.getItem(CUSTOM_DMS_KEY) ?? "[]")
-      setCustomDMs(saved)
-    } catch {}
   }, [])
 
   // ── Group actions ─────────────────────────────────────────────────────────
-  function createGroup(name: string, memberNames: string[]) {
+  async function createGroup(name: string, memberNames: string[]) {
     const words = name.replace(/[^a-zA-ZÀ-ÿ\s]/g, "").trim().split(/\s+/).filter(Boolean)
     const initials = (words.length >= 2 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase()
-    const newGroup: CustomGroup = {
-      id: `custom-${Date.now()}`,
-      name,
-      initials,
-      memberNames,
-      lastMessage: "Grup oluşturuldu",
-      lastTime: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-      unread: 0,
-      messages: [],
+    const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+
+    const supabase = createClient()
+    const { data: conv, error } = await supabase
+      .from("conversations")
+      .insert({ type: "group", name, initials })
+      .select()
+      .single()
+
+    if (error || !conv) {
+      console.error("[createGroup] failed:", error?.message)
+      return
     }
-    const updated = [newGroup, ...customGroups]
-    setCustomGroups(updated)
-    try { localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify(updated)) } catch {}
+
+    // Add all members (including current user)
+    const allMembers = [...new Set([currentUser.name, ...memberNames])]
+    await supabase.from("conversation_members").insert(
+      allMembers.map((member_name) => ({ conversation_id: conv.id, member_name }))
+    )
+
+    const newGroup: CustomGroup = {
+      id: conv.id, name, initials, memberNames,
+      lastMessage: "Grup oluşturuldu", lastTime: time, unread: 0, messages: [],
+    }
+    setCustomGroups((prev) => [newGroup, ...prev])
     setCreateGroupOpen(false)
   }
 
   function updateCustomGroupMessages(id: string, messages: ChatMessage[]) {
     setCustomGroups((prev) => {
       const last = messages[messages.length - 1]
-      const updated = prev.map((g) =>
+      return prev.map((g) =>
         g.id === id
           ? { ...g, messages, lastMessage: last?.text || g.lastMessage, lastTime: last?.time || g.lastTime }
           : g
       )
-      try { localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify(updated)) } catch {}
-      return updated
     })
   }
 
-  function addMembersToGroup(id: string, newNames: string[]) {
-    setCustomGroups((prev) => {
-      const updated = prev.map((g) =>
-        g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g
-      )
-      try { localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify(updated)) } catch {}
-      return updated
-    })
+  async function addMembersToGroup(id: string, newNames: string[]) {
+    const supabase = createClient()
+    await supabase.from("conversation_members").insert(
+      newNames.map((member_name) => ({ conversation_id: id, member_name }))
+    )
+    setCustomGroups((prev) =>
+      prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g)
+    )
   }
 
-  function removeMemberFromGroup(id: string, memberName: string) {
+  async function removeMemberFromGroup(id: string, memberName: string) {
     const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-    const systemMsg: ChatMessage = {
-      id: `sys-${Date.now()}`,
-      author: "", initials: "",
-      text: `Yönetici ${memberName} kişisini gruptan çıkardı`,
-      time,
-      system: true,
-    }
-    setCustomGroups((prev) => {
-      const updated = prev.map((g) =>
-        g.id === id
-          ? {
-              ...g,
-              memberNames: g.memberNames.filter((n) => n !== memberName),
-              messages: [...g.messages, systemMsg],
-              lastMessage: systemMsg.text,
-              lastTime: time,
-            }
-          : g
-      )
-      try { localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify(updated)) } catch {}
-      return updated
+    const supabase = createClient()
+    await supabase.from("conversation_members").delete()
+      .eq("conversation_id", id).eq("member_name", memberName)
+    await supabase.from("chat_messages").insert({
+      conversation_id: id, sender_name: "", sender_initials: "",
+      text: `Yönetici ${memberName} kişisini gruptan çıkardı`, is_system: true,
     })
+    setCustomGroups((prev) =>
+      prev.map((g) => g.id === id ? { ...g, memberNames: g.memberNames.filter((n) => n !== memberName) } : g)
+    )
   }
 
-  function leaveGroup(id: string) {
-    setCustomGroups((prev) => {
-      const updated = prev.filter((g) => g.id !== id)
-      try { localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify(updated)) } catch {}
-      return updated
-    })
+  async function leaveGroup(id: string) {
+    const supabase = createClient()
+    await supabase.from("conversation_members").delete()
+      .eq("conversation_id", id).eq("member_name", currentUser.name)
+    setCustomGroups((prev) => prev.filter((g) => g.id !== id))
     setOpenId(null)
   }
 
-  function deleteGroup(id: string) {
-    setCustomGroups((prev) => {
-      const updated = prev.filter((g) => g.id !== id)
-      try { localStorage.setItem(CUSTOM_GROUPS_KEY, JSON.stringify(updated)) } catch {}
-      return updated
-    })
+  async function deleteGroup(id: string) {
+    const supabase = createClient()
+    await supabase.from("conversations").delete().eq("id", id)
+    setCustomGroups((prev) => prev.filter((g) => g.id !== id))
     setOpenId(null)
   }
 
   // ── DM actions ────────────────────────────────────────────────────────────
-  function openOrCreateDM(member: Member) {
-    // check existing static DM
+  async function openOrCreateDM(member: Member) {
     const existingStatic = DM_CHATS.find((d) => d.name === member.name)
     if (existingStatic) { setOpenId(existingStatic.id); setNewDMOpen(false); return }
-    // check existing custom DM
     const existingCustom = customDMs.find((d) => d.name === member.name)
     if (existingCustom) { setOpenId(existingCustom.id); setNewDMOpen(false); return }
-    // create new
+
     const s = getStation(member.station)
-    const newDM: CustomDM = {
-      id: `cdm-${Date.now()}`,
-      name: member.name,
-      initials: member.initials,
-      color: s.color,
-      station: member.station,
-      online: member.online ?? false,
-      lastMessage: "",
-      lastTime: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-      unread: 0,
-      messages: [],
+    const supabase = createClient()
+    const { data: conv, error } = await supabase
+      .from("conversations")
+      .insert({ type: "dm", name: member.name, initials: member.initials })
+      .select()
+      .single()
+
+    if (error || !conv) {
+      console.error("[openOrCreateDM] failed:", error?.message)
+      return
     }
-    const updated = [newDM, ...customDMs]
-    setCustomDMs(updated)
-    try { localStorage.setItem(CUSTOM_DMS_KEY, JSON.stringify(updated)) } catch {}
-    setOpenId(newDM.id)
+    await supabase.from("conversation_members").insert([
+      { conversation_id: conv.id, member_name: currentUser.name },
+      { conversation_id: conv.id, member_name: member.name },
+    ])
+
+    const newDM: CustomDM = {
+      id: conv.id, name: member.name, initials: member.initials,
+      color: s.color, station: member.station, online: member.online ?? false,
+      lastMessage: "", lastTime: "", unread: 0, messages: [],
+    }
+    setCustomDMs((prev) => [newDM, ...prev])
+    setOpenId(conv.id)
     setNewDMOpen(false)
   }
 
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
     setCustomDMs((prev) => {
       const last = messages[messages.length - 1]
-      const updated = prev.map((d) =>
+      return prev.map((d) =>
         d.id === id
           ? { ...d, messages, lastMessage: last?.text || d.lastMessage, lastTime: last?.time || d.lastTime }
           : d
       )
-      try { localStorage.setItem(CUSTOM_DMS_KEY, JSON.stringify(updated)) } catch {}
-      return updated
     })
   }
 
@@ -219,9 +261,7 @@ export function MessagesClient() {
   ).map((g) => ({ ...g, title: getStation(g.id).name }))
 
   // Custom groups: intl created them (sees all), others see groups they're named in
-  const visibleCustomGroups = customGroups.filter(
-    (g) => currentUser.isIntl || g.memberNames.includes(currentUser.name)
-  )
+  const visibleCustomGroups = customGroups
 
   const filteredStationGroups = visibleStationGroups.filter((g) =>
     g.title.toLowerCase().includes(search.toLowerCase())
@@ -254,9 +294,10 @@ export function MessagesClient() {
         senderInitials={senderInitials}
         initialMessages={activeCustomGroup.messages}
         onMessagesChange={(msgs) => updateCustomGroupMessages(activeCustomGroup.id, msgs)}
+        conversationId={activeCustomGroup.id}
         groupSettings={{
           memberNames: activeCustomGroup.memberNames,
-          isAdmin: currentUser.isIntl,
+          isAdmin: true,
           onAddMembers: (newNames) => addMembersToGroup(activeCustomGroup.id, newNames),
           onRemoveMember: (name) => removeMemberFromGroup(activeCustomGroup.id, name),
           onLeave: () => leaveGroup(activeCustomGroup.id),
@@ -280,6 +321,7 @@ export function MessagesClient() {
         senderInitials={senderInitials}
         initialMessages={activeCustomDM.messages}
         onMessagesChange={(msgs) => updateCustomDMMessages(activeCustomDM.id, msgs)}
+        conversationId={activeCustomDM.id}
       />
     )
   }
@@ -347,9 +389,9 @@ export function MessagesClient() {
         </div>
 
         {/* Action buttons */}
-        {tab === "groups" && currentUser.isIntl && (
+        {tab === "groups" && (
           <button
-            onClick={() => setCreateGroupOpen(true)}
+            onClick={() => { window.scrollTo({ top: 0, behavior: "smooth" }); setCreateGroupOpen(true) }}
             className="mb-3 flex w-full items-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary transition-colors active:bg-primary/10"
           >
             <Plus className="size-4" />
@@ -358,7 +400,7 @@ export function MessagesClient() {
         )}
         {tab === "dm" && (
           <button
-            onClick={() => setNewDMOpen(true)}
+            onClick={() => { window.scrollTo({ top: 0, behavior: "smooth" }); setNewDMOpen(true) }}
             className="mb-3 flex w-full items-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary transition-colors active:bg-primary/10"
           >
             <Plus className="size-4" />
@@ -428,6 +470,7 @@ export function MessagesClient() {
               ...DM_CHATS.map((d) => d.name),
               ...customDMs.map((d) => d.name),
             ]}
+            currentUserName={currentUser.name}
             onClose={() => setNewDMOpen(false)}
             onSelect={openOrCreateDM}
           />
@@ -797,9 +840,10 @@ function AddMembersModal({
 
 // ── New DM modal ──────────────────────────────────────────────────────────────
 function NewDMModal({
-  existingNames, onClose, onSelect,
+  existingNames, currentUserName, onClose, onSelect,
 }: {
   existingNames: string[]
+  currentUserName: string
   onClose: () => void
   onSelect: (member: Member) => void
 }) {
@@ -825,7 +869,7 @@ function NewDMModal({
   }, [])
 
   const filtered = allMembers
-    .filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
+    .filter((m) => m.name && m.name !== currentUserName && m.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
@@ -1032,7 +1076,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId,
 }: {
   onBack: () => void
   title: string
@@ -1045,6 +1089,7 @@ function ChatView({
   onMessagesChange?: (messages: ChatMessage[]) => void
   senderName: string
   senderInitials: string
+  conversationId?: string
   groupSettings?: {
     memberNames: string[]
     isAdmin: boolean
@@ -1066,30 +1111,106 @@ function ChatView({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
   }, [messages])
 
-  // Sync external messages (e.g. system messages added from GroupSettingsPanel)
+  // Load messages from Supabase + realtime subscription if conversationId is available
   useEffect(() => {
-    setMessages((prev) => {
-      const localIds = new Set(prev.map((m) => m.id))
-      const incoming = initialMessages.filter((m) => !localIds.has(m.id))
-      if (incoming.length === 0) return prev
-      return [...prev, ...incoming]
-    })
-  }, [initialMessages])
+    if (!conversationId) {
+      // Fall back to initialMessages for static/mock conversations
+      setMessages(initialMessages)
+      return
+    }
 
-  function send() {
+    const supabase = createClient()
+
+    async function loadMessages() {
+      const { data } = await supabase
+        .from("chat_messages")
+        .select("id,sender_name,sender_initials,text,image_url,is_system,created_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true })
+
+      if (data) {
+        setMessages(data.map((m) => ({
+          id: m.id,
+          author: m.sender_name,
+          initials: m.sender_initials,
+          text: m.text ?? "",
+          time: new Date(m.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+          self: m.sender_name === senderName,
+          image: m.image_url ?? undefined,
+          system: m.is_system,
+        })))
+      }
+    }
+    loadMessages()
+
+    const channel = supabase
+      .channel(`chat-${conversationId}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "chat_messages",
+      }, (payload) => {
+        const m = payload.new as { id: string; conversation_id: string; sender_name: string; sender_initials: string; text: string; image_url: string | null; is_system: boolean; created_at: string }
+        // Filter client-side — avoids server-side filter instability
+        if (m.conversation_id !== conversationId) return
+        setMessages((prev) => {
+          if (prev.some((x) => x.id === m.id)) return prev
+          return [...prev, {
+            id: m.id,
+            author: m.sender_name,
+            initials: m.sender_initials,
+            text: m.text ?? "",
+            time: new Date(m.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+            self: m.sender_name === senderName,
+            image: m.image_url ?? undefined,
+            system: m.is_system,
+          }]
+        })
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId])
+
+  async function send() {
     if (!draft.trim() && !attached) return
-    const newMsg = {
-      id: String(Date.now()),
-      author: senderName,
-      initials: senderInitials,
-      text: draft.trim(),
-      time: new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-      self: true,
-      image: attached ?? undefined,
-    } as ChatMessage & { image?: string }
-    const newMessages = [...messages, newMsg]
-    setMessages(newMessages)
-    onMessagesChange?.(newMessages)
+    const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+
+    if (conversationId) {
+      const supabase = createClient()
+      const { data: inserted } = await supabase.from("chat_messages").insert({
+        conversation_id: conversationId,
+        sender_name: senderName,
+        sender_initials: senderInitials,
+        text: draft.trim() || null,
+        image_url: attached ?? null,
+      }).select().single()
+
+      // Realtime will add it, but we also add optimistically for instant feedback
+      if (inserted) {
+        const newMsg: ChatMessage = {
+          id: inserted.id,
+          author: senderName,
+          initials: senderInitials,
+          text: draft.trim(),
+          time,
+          self: true,
+          image: attached ?? undefined,
+        }
+        setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
+        onMessagesChange?.([...messages, newMsg])
+      }
+    } else {
+      // Static/mock conversation — local only
+      const newMsg: ChatMessage & { image?: string } = {
+        id: String(Date.now()),
+        author: senderName, initials: senderInitials,
+        text: draft.trim(), time, self: true,
+        image: attached ?? undefined,
+      }
+      const newMessages = [...messages, newMsg]
+      setMessages(newMessages)
+      onMessagesChange?.(newMessages)
+    }
     setDraft("")
     setAttached(null)
   }

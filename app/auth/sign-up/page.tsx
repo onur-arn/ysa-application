@@ -104,27 +104,24 @@ export default function SignUpPage() {
     setError(null)
     const finalData: FormData = { ...data, ...step3 }
 
-    // Upload photo to Supabase Storage if provided
-    let photoUrl: string | null = null
+    // Convert photo to base64 — upload will happen server-side via admin client (bypasses RLS)
+    let photoBase64: string | null = null
+    let photoExt: string | null = null
     if (photo) {
-      try {
-        const { createClient } = await import("@/lib/supabase/client")
-        const supabase = createClient()
-        const ext = photo.name.split(".").pop() ?? "jpg"
-        const path = `pending/${Date.now()}.${ext}`
-        const { error: upErr } = await supabase.storage.from("avatars").upload(path, photo, { upsert: true })
-        if (!upErr) {
-          const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path)
-          photoUrl = urlData.publicUrl
-        }
-      } catch {}
+      photoBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve((reader.result as string).split(",")[1])
+        reader.onerror = reject
+        reader.readAsDataURL(photo)
+      })
+      photoExt = photo.name.split(".").pop() ?? "jpg"
     }
 
     try {
       const res = await fetch("/api/signup-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...finalData, photoUrl }),
+        body: JSON.stringify({ ...finalData, photoBase64, photoExt }),
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
@@ -132,7 +129,7 @@ export default function SignUpPage() {
           setError("Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.")
         } else {
           console.error("signup-request failed:", json)
-          setError("L'e-mail de notification n'a pas pu être envoyé. Veuillez réessayer.")
+          setError("Bir hata oluştu. Lütfen tekrar deneyin.")
         }
         setLoading(false)
         return
@@ -284,11 +281,28 @@ function Step1({
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [emailChecking, setEmailChecking] = useState(false)
+
   const canProceed = !!photo && !!firstName && !!lastName && !!email && password.length >= 6 && !!phone && !!birthday
 
-  function handleNext(e: React.FormEvent) {
+  async function handleNext(e: React.FormEvent) {
     e.preventDefault()
     if (!canProceed) return
+    setEmailError(null)
+    setEmailChecking(true)
+    try {
+      const res = await fetch(`/api/check-email?email=${encodeURIComponent(email)}`)
+      const json = await res.json()
+      if (json.taken) {
+        setEmailError("Bu e-posta adresi zaten kullanımda. Giriş yapmayı deneyin.")
+        setEmailChecking(false)
+        return
+      }
+    } catch {
+      // network error — let it through, server will catch it
+    }
+    setEmailChecking(false)
     onNext({ firstName, lastName, email, password, phone, birthday, linkedin })
   }
 
@@ -408,11 +422,14 @@ function Step1({
             <Field label="E-posta" icon={Mail}>
               <input
                 type="email" required value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={e => { setEmail(e.target.value); setEmailError(null) }}
                 placeholder="uye@youthstation.org"
                 className={fieldClass}
               />
             </Field>
+            {emailError && (
+              <p className="text-xs text-destructive">{emailError}</p>
+            )}
           </div>
 
           {/* Password with eye toggle */}
@@ -461,8 +478,8 @@ function Step1({
               placeholder="https://linkedin.com/in/…" className={fieldClass}
             />
           </Field>
-          <Button type="submit" size="lg" className="mt-2" disabled={!canProceed}>
-            Devam et
+          <Button type="submit" size="lg" className="mt-2" disabled={!canProceed || emailChecking}>
+            {emailChecking ? "Kontrol ediliyor…" : "Devam et"}
           </Button>
         </form>
         <p className="mt-6 text-center text-sm text-muted-foreground">

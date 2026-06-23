@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { sendMail } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -7,43 +8,86 @@ export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token")
   if (!token) return new NextResponse("Token manquant", { status: 400 })
 
-  let firstName = "", lastName = "", email = "", pendingId: string | null = null
+  let pendingId: string | null = null
+  let email = ""
+  let firstName = ""
+  let lastName = ""
   try {
     const parsed = JSON.parse(Buffer.from(token, "base64url").toString())
-    firstName = parsed.firstName
-    lastName  = parsed.lastName
-    email     = parsed.email
     pendingId = parsed.pendingId ?? null
+    email     = parsed.email ?? ""
+    firstName = parsed.firstName ?? ""
+    lastName  = parsed.lastName ?? ""
   } catch {
     return new NextResponse("Token invalide", { status: 400 })
   }
 
-  // Delete from pending_members so the person can re-apply later
   if (SUPABASE_ENABLED) {
     try {
       const admin = createAdminClient()
+
+      // Get pending record for full name before deleting
       if (pendingId) {
+        const { data: pending } = await admin.from("pending_members").select("photo_url,email,first_name,last_name").eq("id", pendingId).single()
+
+        // Remove pending photo from storage
+        if (pending?.photo_url) {
+          const path = pending.photo_url.split("/avatars/").pop()
+          if (path) await admin.storage.from("avatars").remove([path])
+        }
+
+        if (pending) {
+          email     = pending.email || email
+          firstName = pending.first_name || firstName
+          lastName  = pending.last_name || lastName
+        }
+
         await admin.from("pending_members").delete().eq("id", pendingId)
-      } else {
-        await admin.from("pending_members").delete().eq("email", email)
       }
     } catch (err) {
-      console.error("[signup-reject] Supabase delete failed:", err)
+      console.error("[signup-reject] Supabase error:", err)
+    }
+  }
+
+  const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
+  const fullName = `${cap(firstName)} ${cap(lastName)}`
+
+  // Notify the user of rejection
+  if (email) {
+    try {
+      await sendMail({
+        to: email,
+        subject: "YSA Uygulaması — Üyelik talebiniz hakkında",
+        html: `
+          <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
+            <div style="background:#6b7280;padding:20px 24px">
+              <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Üyelik talebi</h1>
+            </div>
+            <div style="padding:24px">
+              <p style="font-size:14px;color:#374151">Merhaba${fullName ? ` <strong>${fullName}</strong>` : ""},</p>
+              <p style="font-size:14px;color:#374151">Üyelik talebiniz şu an için onaylanamamıştır. Daha fazla bilgi için dernek yönetimiyle iletişime geçebilirsiniz.</p>
+              <p style="font-size:13px;color:#9ca3af;margin-top:24px">Youth Station Derneği</p>
+            </div>
+          </div>
+        `,
+      })
+    } catch (err) {
+      console.error("[signup-reject] Rejection email failed:", err)
     }
   }
 
   return new NextResponse(
-    page("Utilisateur refusé."),
+    page(`La demande de <strong>${fullName || email}</strong> a été refusée. Un e-mail de notification lui a été envoyé.`),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }
 
 function page(message: string) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
   <body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb">
-    <div style="text-align:center;padding:40px;background:#fff;border-radius:16px;border:1px solid #e5e7eb;max-width:400px">
-      <div style="font-size:48px;color:#6b7280">&#10007;</div>
-      <p style="font-size:15px;color:#374151;margin-top:16px">${message}</p>
+    <div style="text-align:center;padding:40px;background:#fff;border-radius:16px;border:1px solid #e5e7eb;max-width:420px;width:90%">
+      <div style="font-size:52px;color:#6b7280">&#10007;</div>
+      <p style="font-size:15px;color:#374151;margin-top:16px;line-height:1.6">${message}</p>
     </div>
   </body></html>`
 }

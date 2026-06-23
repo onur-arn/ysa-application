@@ -23,6 +23,7 @@ export type EventItem = {
   participantsCount: number
   notAttendingCount: number
   comments: EventComment[]
+  createdBy?: string
 }
 
 export const EVENTS: EventItem[] = []

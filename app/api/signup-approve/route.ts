@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { sendMail } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -7,102 +8,136 @@ export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token")
   if (!token) return new NextResponse("Token manquant", { status: 400 })
 
-  let firstName = "", lastName = "", email = "", pendingId: string | null = null
+  let pendingId: string | null = null
   try {
     const parsed = JSON.parse(Buffer.from(token, "base64url").toString())
-    firstName = parsed.firstName
-    lastName  = parsed.lastName
-    email     = parsed.email
     pendingId = parsed.pendingId ?? null
   } catch {
     return new NextResponse("Token invalide", { status: 400 })
   }
 
-  if (SUPABASE_ENABLED && pendingId) {
-    try {
-      const admin = createAdminClient()
+  if (!pendingId) return new NextResponse("Token invalide", { status: 400 })
 
-      const { data: pending, error: fetchErr } = await admin
-        .from("pending_members")
-        .select("*")
-        .eq("id", pendingId)
-        .single()
+  if (!SUPABASE_ENABLED) {
+    return new NextResponse(page("error", "Supabase non configuré."), { headers: { "Content-Type": "text/html; charset=utf-8" } })
+  }
 
-      if (fetchErr || !pending) {
-        console.error("[signup-approve] Pending member not found:", fetchErr)
-      } else {
-        // Create auth user
-        let userId: string | null = null
+  const admin = createAdminClient()
 
-        const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
-          email: pending.email,
-          password: pending.password,
-          email_confirm: true,
-        })
+  const { data: pending, error: fetchErr } = await admin
+    .from("pending_members")
+    .select("*")
+    .eq("id", pendingId)
+    .single()
 
-        if (authErr) {
-          if (authErr.code === "email_exists") {
-            const { data: list } = await admin.auth.admin.listUsers()
-            const existing = list?.users?.find((u) => u.email === pending.email)
-            if (existing) userId = existing.id
-          } else {
-            console.error("[signup-approve] Auth user creation failed:", authErr)
-          }
-        } else if (authUser.user) {
-          userId = authUser.user.id
-        }
+  if (fetchErr || !pending) {
+    return new NextResponse(
+      page("error", "Demande introuvable. Elle a peut-être déjà été traitée."),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } }
+    )
+  }
 
-        if (userId) {
-          const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
-          const fullName = `${cap(pending.first_name)} ${cap(pending.last_name)}`
-          const initials = fullName.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+  // Create auth user
+  let userId: string | null = null
+  const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
+    email: pending.email,
+    password: pending.password,
+    email_confirm: true,
+  })
 
-          // Full upsert with all signup fields
-          const { error: upsertErr } = await admin.from("profiles").upsert({
-            id: userId,
-            name: fullName,
-            email: pending.email,
-            initial_password: pending.password,
-            station: pending.station ?? "paris",
-            role: pending.role ?? "Üye",
-            phone: pending.phone ?? null,
-            birthday: pending.birthday ?? null,
-            linkedin: pending.linkedin ?? null,
-            memleket: pending.memleket ?? null,
-            photo_url: pending.photo_url ?? null,
-            igem_egitimi: pending.igem_egitimi ?? null,
-            igem_tarihi: pending.igem_tarihi ?? null,
-            initials,
-          })
+  if (authErr) {
+    if (authErr.code === "email_exists") {
+      const { data: list } = await admin.auth.admin.listUsers()
+      const existing = list?.users?.find((u) => u.email === pending.email)
+      if (existing) userId = existing.id
+    } else {
+      console.error("[signup-approve] Auth user creation failed:", authErr)
+      return new NextResponse(
+        page("error", "Erreur lors de la création du compte."),
+        { headers: { "Content-Type": "text/html; charset=utf-8" } }
+      )
+    }
+  } else if (authUser.user) {
+    userId = authUser.user.id
+  }
 
-          if (upsertErr) {
-            // Columns may be missing from the DB schema — fallback to safe minimal insert
-            console.error("[signup-approve] Full profile upsert failed (likely missing columns):", upsertErr.message)
-            const { error: fallbackErr } = await admin.from("profiles").upsert({
-              id: userId,
-              name: fullName,
-              email: pending.email,
-              initial_password: pending.password,
-              station: pending.station ?? "paris",
-              role: pending.role ?? "Üye",
-              initials,
-            })
-            if (fallbackErr) {
-              console.error("[signup-approve] Fallback profile upsert also failed:", fallbackErr.message)
-            }
-          }
-        }
+  if (!userId) {
+    return new NextResponse(page("error", "Impossible de créer le compte."), { headers: { "Content-Type": "text/html; charset=utf-8" } })
+  }
 
-        // Always clean up pending record
-        await admin.from("pending_members").delete().eq("id", pendingId)
-      }
-    } catch (err) {
-      console.error("[signup-approve] Supabase error:", err)
+  const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
+  const fullName = `${cap(pending.first_name)} ${cap(pending.last_name)}`
+  const initials = fullName.trim().split(" ").filter(Boolean).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+
+  // Move photo from pending/ to avatars/ if exists
+  let photoUrl = pending.photo_url ?? null
+  if (photoUrl && photoUrl.includes("/pending/")) {
+    const ext = photoUrl.split(".").pop()
+    const newPath = `avatars/${userId}.${ext}`
+    const oldPath = `pending/${pendingId}.${ext}`
+    const { error: copyErr } = await admin.storage.from("avatars").copy(oldPath, newPath)
+    if (!copyErr) {
+      const { data: urlData } = admin.storage.from("avatars").getPublicUrl(newPath)
+      photoUrl = urlData.publicUrl
+      await admin.storage.from("avatars").remove([oldPath])
     }
   }
 
+  // Create profile
+  const { error: profileErr } = await admin.from("profiles").upsert({
+    id: userId,
+    name: fullName,
+    email: pending.email,
+    initial_password: pending.password,
+    station: pending.station ?? "paris",
+    role: pending.role ?? "Üye",
+    phone: pending.phone ?? null,
+    birthday: pending.birthday ?? null,
+    linkedin: pending.linkedin ?? null,
+    memleket: pending.memleket ?? null,
+    photo_url: photoUrl,
+    igem_egitimi: pending.igem_egitimi ?? null,
+    igem_tarihi: pending.igem_tarihi ?? null,
+    initials,
+  })
+
+  if (profileErr) {
+    console.error("[signup-approve] Profile upsert failed:", profileErr.message)
+  }
+
+  // Delete pending record
+  await admin.from("pending_members").delete().eq("id", pendingId)
+
+  // Notify the user
+  try {
+    await sendMail({
+      to: pending.email,
+      subject: "YSA Uygulaması — Üyeliğiniz onaylandı 🎉",
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
+          <div style="background:#0e7490;padding:20px 24px">
+            <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700">Üyeliğiniz onaylandı!</h1>
+          </div>
+          <div style="padding:24px">
+            <p style="font-size:14px;color:#374151">Merhaba <strong>${fullName}</strong>,</p>
+            <p style="font-size:14px;color:#374151">YSA uygulamasına üyeliğiniz onaylandı. Aşağıdaki bilgilerle giriş yapabilirsiniz:</p>
+            <div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">
+              <p style="margin:4px 0;font-size:13px;color:#6b7280">E-posta: <strong style="color:#111827">${pending.email}</strong></p>
+              <p style="margin:4px 0;font-size:13px;color:#6b7280">Şifre: <strong style="color:#111827">${pending.password}</strong></p>
+            </div>
+            <a href="https://youthstation.vercel.app/auth/login" style="display:inline-block;padding:12px 28px;background:#0e7490;color:#fff;font-weight:700;font-size:14px;border-radius:10px;text-decoration:none">
+              Giriş yap →
+            </a>
+          </div>
+        </div>
+      `,
+    })
+  } catch (err) {
+    console.error("[signup-approve] Welcome email failed:", err)
+  }
+
   return new NextResponse(
-    page("success", "Utilisateur créé."),
+    page("success", `Le compte de <strong>${fullName}</strong> a été créé avec succès. Un e-mail de confirmation lui a été envoyé.`),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }
@@ -110,11 +145,11 @@ export async function GET(req: NextRequest) {
 function page(type: "success" | "error", message: string) {
   const color = type === "success" ? "#16a34a" : "#dc2626"
   const icon  = type === "success" ? "&#10003;" : "&#10007;"
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
   <body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb">
-    <div style="text-align:center;padding:40px;background:#fff;border-radius:16px;border:1px solid #e5e7eb;max-width:400px">
-      <div style="font-size:48px;color:${color}">${icon}</div>
-      <p style="font-size:15px;color:#374151;margin-top:16px">${message}</p>
+    <div style="text-align:center;padding:40px;background:#fff;border-radius:16px;border:1px solid #e5e7eb;max-width:420px;width:90%">
+      <div style="font-size:52px;color:${color}">${icon}</div>
+      <p style="font-size:15px;color:#374151;margin-top:16px;line-height:1.6">${message}</p>
     </div>
   </body></html>`
 }

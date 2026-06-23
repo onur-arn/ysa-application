@@ -24,6 +24,7 @@ export type Task = {
   assigneeInitials: string
   status: TaskStatus
   comments: TaskComment[]
+  createdById?: string
 }
 
 export const TASKS: Task[] = []
