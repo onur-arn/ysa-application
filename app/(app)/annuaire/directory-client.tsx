@@ -256,7 +256,7 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-foreground">{member.name}</p>
         <p className="truncate text-sm text-muted-foreground">
-          {member.role}
+          {member.role ? `${member.role} · ` : ""}{station.name}
         </p>
       </div>
     </button>

@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   User, Bell, Info, LogOut, Moon, Sun, Rocket, X, Camera,
   Pencil, Mail, Lock, Phone, Cake, ExternalLink, MapPin, Check,
-  ChevronDown, ZoomIn, FileDown, Loader2, Briefcase,
+  ChevronDown, ZoomIn, Loader2, Briefcase,
 } from "lucide-react"
 import Cropper from "react-easy-crop"
 import type { Area } from "react-easy-crop"
@@ -15,6 +15,9 @@ import { useTheme } from "@/lib/theme/context"
 import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
+import { AdminPanel } from "./admin-panel"
+
+const ADMIN_EMAIL = "admin@youthstation.org"
 
 type ProfileData = {
   name: string
@@ -65,8 +68,7 @@ export function SettingsClient({
   const [igemMotivation, setIgemMotivation] = useState("")
   const [igemSent, setIgemSent] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [exportDone, setExportDone] = useState(false)
+
 
   const [profile, setProfile] = useState<ProfileData>({
     name: fullName,
@@ -115,35 +117,6 @@ export function SettingsClient({
     window.location.href = "/"
   }
 
-  async function exportData() {
-    setExporting(true)
-    try {
-      const supabase = createClient()
-      const { data: profiles } = await supabase.from("profiles").select("*")
-      const { data: posts } = await supabase.from("posts").select("*")
-      const { data: igem } = await supabase.from("igem_requests").select("*")
-
-      await fetch("/api/export-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requestedBy: profile.name || profile.email,
-          profiles: (profiles ?? []).map((m: Record<string, unknown>) => ({
-            name: m.name, email: m.email,
-            station: m.station, role: m.role, phone: m.phone,
-            birthday: m.birthday, memleket: m.memleket, linkedin: m.linkedin,
-            igem_egitimi: m.igem_egitimi,
-          })),
-          posts: posts ?? [],
-          tasks: [],
-          igem: igem ?? [],
-        }),
-      })
-      setExportDone(true)
-      setTimeout(() => setExportDone(false), 4000)
-    } catch {}
-    setExporting(false)
-  }
 
   async function submitIgem() {
     try {
@@ -282,29 +255,9 @@ export function SettingsClient({
           </div>
         </Section>
 
-        {/* Export — bureau international only */}
-        {isIntl && (
-          <Section title="Veri dışa aktarımı" icon={FileDown}>
-            <div className="flex flex-col gap-2 px-4 py-3.5">
-              <p className="text-sm text-muted-foreground">
-                Üyeler, yayınlar ve görevleri içeren tam raporu yöneticiye gönderir.
-              </p>
-              {exportDone && (
-                <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600">
-                  ✓ secretaire@youthstation.org adresine gönderildi
-                </p>
-              )}
-              <button
-                onClick={exportData}
-                disabled={exporting}
-                className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-50"
-              >
-                {exporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
-                {exporting ? "Oluşturuluyor…" : "Yöneticiye PDF gönder"}
-              </button>
-            </div>
-          </Section>
-        )}
+
+        {/* Admin panel — admin@youthstation.org only */}
+        {initialEmail === ADMIN_EMAIL && <AdminPanel />}
 
         {/* Logout */}
         <button

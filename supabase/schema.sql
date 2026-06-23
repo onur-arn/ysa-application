@@ -221,3 +221,67 @@ set
     else '?'
   end
 where name = '' or email = '';
+
+-- ── CONVERSATIONS (messagerie) ────────────────────────────────────────────────
+create table if not exists conversations (
+  id         uuid primary key default uuid_generate_v4(),
+  type       text not null check (type in ('group', 'dm')),
+  name       text,
+  initials   text,
+  created_at timestamptz default now()
+);
+alter table conversations enable row level security;
+drop policy if exists "Authenticated can read conversations"   on conversations;
+drop policy if exists "Authenticated can insert conversations" on conversations;
+drop policy if exists "Authenticated can delete conversations" on conversations;
+create policy "Authenticated can read conversations"   on conversations for select to authenticated using (true);
+create policy "Authenticated can insert conversations" on conversations for insert to authenticated with check (true);
+create policy "Authenticated can delete conversations" on conversations for delete to authenticated using (true);
+
+-- ── CONVERSATION MEMBERS ─────────────────────────────────────────────────────
+create table if not exists conversation_members (
+  conversation_id uuid references conversations(id) on delete cascade not null,
+  member_name     text not null,
+  primary key (conversation_id, member_name)
+);
+alter table conversation_members enable row level security;
+drop policy if exists "Authenticated can manage conv members" on conversation_members;
+create policy "Authenticated can manage conv members" on conversation_members for all to authenticated using (true) with check (true);
+
+-- ── CHAT MESSAGES ─────────────────────────────────────────────────────────────
+create table if not exists chat_messages (
+  id              uuid primary key default uuid_generate_v4(),
+  conversation_id uuid references conversations(id) on delete cascade not null,
+  sender_name     text not null,
+  sender_initials text not null,
+  text            text,
+  image_url       text,
+  is_system       boolean default false,
+  created_at      timestamptz default now()
+);
+alter table chat_messages enable row level security;
+drop policy if exists "Authenticated can read chat messages"   on chat_messages;
+drop policy if exists "Authenticated can insert chat messages" on chat_messages;
+create policy "Authenticated can read chat messages"   on chat_messages for select to authenticated using (true);
+create policy "Authenticated can insert chat messages" on chat_messages for insert to authenticated with check (true);
+
+-- ── STORAGE: chat-images bucket ───────────────────────────────────────────────
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('chat-images', 'chat-images', true, 5242880, '{image/jpeg,image/png,image/webp,image/gif}')
+on conflict (id) do nothing;
+
+drop policy if exists "Public read chat images"          on storage.objects;
+drop policy if exists "Auth users upload chat images"    on storage.objects;
+drop policy if exists "Auth users delete own chat image" on storage.objects;
+
+create policy "Public read chat images"
+  on storage.objects for select to public
+  using (bucket_id = 'chat-images');
+
+create policy "Auth users upload chat images"
+  on storage.objects for insert to authenticated
+  with check (bucket_id = 'chat-images');
+
+create policy "Auth users delete own chat image"
+  on storage.objects for delete to authenticated
+  using (bucket_id = 'chat-images');

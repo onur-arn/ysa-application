@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
-  Users, X, ChevronRight, LogOut, UserPlus,
+  Users, X, ChevronRight, LogOut, UserPlus, Loader2,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
@@ -909,7 +909,6 @@ function NewDMModal({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="İsim ara…"
-              autoFocus
               className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
             />
           </div>
@@ -1015,7 +1014,6 @@ function CreateGroupModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Grup adı…"
-            autoFocus
             className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
 
@@ -1115,6 +1113,7 @@ function ChatView({
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [draft, setDraft]       = useState("")
   const [attached, setAttached] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const scrollRef   = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1310,13 +1309,17 @@ function ChatView({
 
       {/* Composer */}
       <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-        {attached && (
+        {(attached || uploading) && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-xs text-secondary-foreground">
-            <Check className="size-3.5 text-primary" />
-            {t("messages.imageAttached")}
-            <button onClick={() => setAttached(null)} className="ml-auto font-semibold text-destructive">
-              {t("common.remove")}
-            </button>
+            {uploading
+              ? <><Loader2 className="size-3.5 animate-spin text-primary" /> Fotoğraf yükleniyor…</>
+              : <><Check className="size-3.5 text-primary" /> {t("messages.imageAttached")}</>
+            }
+            {!uploading && (
+              <button onClick={() => setAttached(null)} className="ml-auto font-semibold text-destructive">
+                {t("common.remove")}
+              </button>
+            )}
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -1325,11 +1328,23 @@ function ChatView({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => {
+            onChange={async (e) => {
               const file = e.target.files?.[0]
-              if (file) {
-                setAttached(URL.createObjectURL(file))
-                e.target.value = ""
+              if (!file) return
+              e.target.value = ""
+              setUploading(true)
+              try {
+                const supabase = createClient()
+                const ext = file.name.split(".").pop() ?? "jpg"
+                const path = `chat/${conversationId ?? "general"}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+                const { error: upErr } = await supabase.storage.from("chat-images").upload(path, file, { upsert: true })
+                if (upErr) throw upErr
+                const { data: { publicUrl } } = supabase.storage.from("chat-images").getPublicUrl(path)
+                setAttached(publicUrl)
+              } catch (err) {
+                console.error("[chat] image upload failed:", err)
+              } finally {
+                setUploading(false)
               }
             }}
           />
@@ -1348,10 +1363,10 @@ function ChatView({
           />
           <button
             onClick={send}
-            disabled={!draft.trim() && !attached}
+            disabled={(!draft.trim() && !attached) || uploading}
             className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
           >
-            <Send className="size-5" />
+            {uploading ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
           </button>
         </div>
       </div>

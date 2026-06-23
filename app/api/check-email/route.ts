@@ -7,11 +7,19 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient()
 
-  const { data: authList } = await admin.auth.admin.listUsers()
-  if (authList?.users?.some((u) => u.email === email)) {
-    return NextResponse.json({ taken: true })
-  }
+  // Check profiles table — covers all approved accounts
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle()
+  if (profile) return NextResponse.json({ taken: true })
 
-  const { data: pending } = await admin.from("pending_members").select("id").eq("email", email).maybeSingle()
+  // Check pending_members — covers accounts awaiting approval
+  const { data: pending } = await admin
+    .from("pending_members")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle()
   return NextResponse.json({ taken: !!pending })
 }

@@ -19,10 +19,9 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient()
 
-  // Check email not already registered
-  const { data: authList } = await admin.auth.admin.listUsers()
-  const emailTaken = authList?.users?.some((u) => u.email === email)
-  if (emailTaken) {
+  // Check email not already registered (query profiles table — avoids listUsers() 50-user limit)
+  const { data: existingProfile } = await admin.from("profiles").select("id").eq("email", email).maybeSingle()
+  if (existingProfile) {
     return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
   }
 

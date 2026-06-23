@@ -117,7 +117,7 @@ export function AgendaClient() {
     () =>
       filtered
         .filter((e) => {
-          const d = new Date(e.date)
+          const d = localDate(e.date)
           return d.getFullYear() === year && d.getMonth() === month
         })
         .sort((a, b) => a.date.localeCompare(b.date)),
@@ -127,7 +127,7 @@ export function AgendaClient() {
   const eventsByDay = useMemo(() => {
     const map: Record<number, EventItem[]> = {}
     monthEvents.forEach((e) => {
-      const day = new Date(e.date).getDate()
+      const day = localDate(e.date).getDate()
       map[day] = map[day] || []
       map[day].push(e)
     })
@@ -343,7 +343,8 @@ export function AgendaClient() {
           setCreateOpen(false)
           const supabase = createClient()
           const { data: { user } } = await supabase.auth.getUser()
-          const { data, error } = await supabase.from("events").insert({
+
+          const base = {
             title: e.title,
             date: e.date,
             time: e.time,
@@ -351,10 +352,15 @@ export function AgendaClient() {
             station: e.station,
             description: e.description ?? null,
             link: e.link ?? null,
-            created_by: user?.id ?? null,
-          }).select().single()
-          if (!error && data) {
-            setEvents((prev) => [...prev, { ...e, id: data.id, createdBy: user?.id }])
+          }
+
+          // Try with created_by first; fall back without if column missing
+          let result = await supabase.from("events").insert({ ...base, created_by: user?.id ?? null }).select().single()
+          if (result.error) {
+            result = await supabase.from("events").insert(base).select().single()
+          }
+          if (!result.error && result.data) {
+            setEvents((prev) => [...prev, { ...e, id: result.data!.id, createdBy: user?.id }])
           }
         }}
       />
@@ -396,7 +402,7 @@ function EventRow({
   showMonth?: boolean
 }) {
   const station = getStation(event.station)
-  const d = new Date(event.date)
+  const d = localDate(event.date)
   return (
     <button
       onClick={onClick}
@@ -481,15 +487,15 @@ function CreateEventModal({
         <Field label={t("agenda.eventTitle")}>
           <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder={t("agenda.eventTitlePlaceholder")} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="min-w-0 overflow-hidden">
+        <div className="flex gap-3">
+          <div className="min-w-0 flex-1 overflow-hidden">
             <Field label={t("agenda.day")}>
-              <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " w-full min-w-0 max-w-full text-sm px-2"} />
+              <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " w-full text-sm px-2"} />
             </Field>
           </div>
-          <div className="min-w-0 overflow-hidden">
+          <div className="w-28 shrink-0 overflow-hidden">
             <Field label={t("agenda.time")}>
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " w-full min-w-0 max-w-full text-sm px-2"} />
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " w-full text-sm px-2"} />
             </Field>
           </div>
         </div>
@@ -530,7 +536,12 @@ function CreateEventModal({
   )
 }
 
+// Parse date string as local time (avoids UTC→local offset shifting the day)
+function localDate(dateStr: string) {
+  return new Date(dateStr + "T00:00:00")
+}
+
 function formatLongDate(iso: string) {
-  const d = new Date(iso)
+  const d = localDate(iso)
   return `${WEEKDAYS_FULL[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS_TR[d.getMonth()]} ${d.getFullYear()}`
 }
