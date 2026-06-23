@@ -199,10 +199,12 @@ create table if not exists events (
 alter table events enable row level security;
 drop policy if exists "events_select_all" on events;
 drop policy if exists "events_insert_all" on events;
+drop policy if exists "events_update_own" on events;
 drop policy if exists "events_delete_own" on events;
 drop policy if exists "events_delete_all" on events;
 create policy "events_select_all" on events for select to authenticated using (true);
 create policy "events_insert_all" on events for insert to authenticated with check (true);
+create policy "events_update_own" on events for update to authenticated using (created_by = auth.uid()) with check (true);
 create policy "events_delete_own" on events for delete to authenticated using (created_by = auth.uid());
 
 -- ── TASK COMMENTS ────────────────────────────────────────────────────────────

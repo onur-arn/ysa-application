@@ -741,6 +741,17 @@ export function PostsFeed({
           return { ...p, likedBy: (p.likedBy ?? []).filter((n) => n !== l.voter_name) }
         }))
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "igem_requests" }, (payload) => {
+        const r = payload.new as { id: string; author: string; initials: string; station: string; motivation: string; created_at: string; created_by?: string }
+        setIgemRequests((prev) => {
+          if (prev.some((x) => x.id === r.id)) return prev
+          return [{ id: r.id, author: r.author ?? "", initials: r.initials ?? "?", station: r.station ?? "intl", motivation: r.motivation ?? "", date: r.created_at, createdBy: r.created_by, comments: [] }, ...prev]
+        })
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "igem_requests" }, (payload) => {
+        const old = payload.old as { id: string }
+        setIgemRequests((prev) => prev.filter((r) => r.id !== old.id))
+      })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }

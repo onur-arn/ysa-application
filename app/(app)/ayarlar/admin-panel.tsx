@@ -93,8 +93,11 @@ export function AdminPanel() {
 
   async function rejectIgem(id: string) {
     setIgemReqs(prev => prev.filter(r => r.id !== id))
-    const supabase = createClient()
-    await supabase.from("igem_requests").delete().eq("id", id)
+    await fetch("/api/admin/delete-igem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: id }),
+    })
   }
 
   async function exportPdf() {
