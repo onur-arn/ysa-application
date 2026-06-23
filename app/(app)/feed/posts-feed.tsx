@@ -500,10 +500,12 @@ function PollBlock({ poll, myVote, onVote }: { poll: Poll; myVote: string | null
 }
 
 // ── iGEM card ─────────────────────────────────────────────────────────────────
-function IgemCard({ author, initials, station, motivation, date }: {
+function IgemCard({ author, initials, station, motivation, date, photoMap }: {
   author: string; initials: string; station: string; motivation: string; date: string
+  photoMap: Map<string, string>
 }) {
   const s = getStation(station as never)
+  const photo = photoMap.get(author)
   return (
     <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-4">
       <div className="mb-2 flex items-center gap-2">
@@ -512,12 +514,16 @@ function IgemCard({ author, initials, station, motivation, date }: {
         </span>
       </div>
       <div className="flex items-center gap-3">
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-          style={{ backgroundColor: `hsl(${s.color})` }}
-        >
-          {initials}
-        </span>
+        {photo ? (
+          <img src={photo} alt={initials} className="size-10 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+            style={{ backgroundColor: `hsl(${s.color})` }}
+          >
+            {initials}
+          </span>
+        )}
         <div>
           <p className="font-semibold text-foreground">{author}</p>
           <p className="text-xs font-medium" style={{ color: `hsl(${s.color})` }}>{s.name}</p>
@@ -728,6 +734,7 @@ export function PostsFeed() {
           station={item.data.station ?? "intl"}
           motivation={item.data.motivation}
           date={item.data.date}
+          photoMap={photoMap}
         />
       )
     }

@@ -52,11 +52,19 @@ export function MessagesClient() {
   const [customDMs, setCustomDMs]       = useState<CustomDM[]>([])
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [newDMOpen, setNewDMOpen]             = useState(false)
+  const [photoMap, setPhotoMap]               = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     async function load() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
+
+      // Build photo map: name → photo_url
+      const { data: allProfiles } = await supabase.from("profiles").select("name,photo_url")
+      if (allProfiles) {
+        setPhotoMap(new Map(allProfiles.filter(p => p.photo_url).map(p => [p.name as string, p.photo_url as string])))
+      }
+
       let userName = ""
       if (user) {
         const { data: profile } = await supabase.from("profiles").select("name,station").eq("id", user.id).single()
@@ -295,6 +303,7 @@ export function MessagesClient() {
         initialMessages={activeCustomGroup.messages}
         onMessagesChange={(msgs) => updateCustomGroupMessages(activeCustomGroup.id, msgs)}
         conversationId={activeCustomGroup.id}
+        photoMap={photoMap}
         groupSettings={{
           memberNames: activeCustomGroup.memberNames,
           isAdmin: true,
@@ -322,6 +331,7 @@ export function MessagesClient() {
         initialMessages={activeCustomDM.messages}
         onMessagesChange={(msgs) => updateCustomDMMessages(activeCustomDM.id, msgs)}
         conversationId={activeCustomDM.id}
+        photoMap={photoMap}
       />
     )
   }
@@ -343,6 +353,7 @@ export function MessagesClient() {
         senderName={currentUser.name}
         senderInitials={senderInitials}
         initialMessages={activeStationGroup ? activeStationGroup.messages : activeDM!.messages}
+        photoMap={photoMap}
       />
     )
   }
@@ -1076,7 +1087,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap,
 }: {
   onBack: () => void
   title: string
@@ -1090,6 +1101,7 @@ function ChatView({
   senderName: string
   senderInitials: string
   conversationId?: string
+  photoMap?: Map<string, string>
   groupSettings?: {
     memberNames: string[]
     isAdmin: boolean
@@ -1265,11 +1277,12 @@ function ChatView({
           return (
             <div key={m.id} className={`flex ${m.self ? "justify-end" : "justify-start"}`}>
               <div className={`flex max-w-[78%] gap-2 ${m.self ? "flex-row-reverse" : ""}`}>
-                {!m.self && (
-                  <span className="mt-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">
-                    {m.initials}
-                  </span>
-                )}
+                {!m.self && (() => {
+                  const photo = photoMap?.get(m.author)
+                  return photo
+                    ? <img src={photo} alt={m.initials} className="mt-auto size-7 shrink-0 rounded-full object-cover" />
+                    : <span className="mt-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{m.initials}</span>
+                })()}
                 <div
                   className={`rounded-2xl px-3 py-2 ${
                     m.self
