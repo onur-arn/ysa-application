@@ -17,7 +17,7 @@ import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
 import { AdminPanel } from "./admin-panel"
 
-const ADMIN_EMAIL = "admin@youthstation.org"
+const ADMIN_EMAIL = "secretaire@youthstation.org"
 
 type ProfileData = {
   name: string

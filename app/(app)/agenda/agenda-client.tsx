@@ -37,6 +37,7 @@ export function AgendaClient() {
   const [userStation, setUserStation] = useState<string>("paris")
   const [isIntl, setIsIntl] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [insertError, setInsertError] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadUser() {
@@ -390,6 +391,14 @@ export function AgendaClient() {
         )}
       </Modal>
 
+      {/* Insert error banner */}
+      {insertError && (
+        <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
+          <span>{insertError}</span>
+          <button onClick={() => setInsertError(null)} className="shrink-0 font-bold">✕</button>
+        </div>
+      )}
+
       {/* Create event */}
       <EventFormModal
         open={createOpen}
@@ -398,6 +407,7 @@ export function AgendaClient() {
         isIntl={isIntl}
         onSubmit={async (e) => {
           setCreateOpen(false)
+          setInsertError(null)
           const supabase = createClient()
           const { data: { user } } = await supabase.auth.getUser()
           const { data, error } = await supabase.from("events").insert({
@@ -412,9 +422,17 @@ export function AgendaClient() {
           }).select().single()
 
           if (!error && data) {
-            setEvents((prev) => [...prev, { ...e, id: data.id, createdBy: user?.id }])
+            const newEvent = { ...e, id: data.id, createdBy: user?.id }
+            setEvents((prev) => [...prev, newEvent])
+            // Navigate to the event's month and show detail
+            if (e.date) {
+              const d = new Date(e.date + "T00:00:00")
+              setCursor(new Date(d.getFullYear(), d.getMonth(), 1))
+            }
+            setSelected(newEvent)
           } else if (error) {
             console.error("[agenda] insert event failed:", error.message)
+            setInsertError(`Etkinlik kaydedilemedi: ${error.message}`)
           }
         }}
       />

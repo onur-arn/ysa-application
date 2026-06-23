@@ -29,6 +29,7 @@ export type Post = {
   imageUrl?: string
   poll?: Poll
   createdAt: string
+  createdBy?: string
   likedBy: string[]
   comments: PostComment[]
 }

@@ -120,10 +120,9 @@ export async function GET(req: NextRequest) {
           </div>
           <div style="padding:24px">
             <p style="font-size:14px;color:#374151">Merhaba <strong>${fullName}</strong>,</p>
-            <p style="font-size:14px;color:#374151">YSA uygulamasına üyeliğiniz onaylandı. Aşağıdaki bilgilerle giriş yapabilirsiniz:</p>
+            <p style="font-size:14px;color:#374151">YSA uygulamasına üyeliğiniz onaylandı. Kayıt sırasında belirlediğiniz şifrenizle giriş yapabilirsiniz:</p>
             <div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">
               <p style="margin:4px 0;font-size:13px;color:#6b7280">E-posta: <strong style="color:#111827">${pending.email}</strong></p>
-              <p style="margin:4px 0;font-size:13px;color:#6b7280">Şifre: <strong style="color:#111827">${pending.password}</strong></p>
             </div>
             <a href="https://youthstation.vercel.app/auth/login" style="display:inline-block;padding:12px 28px;background:#0e7490;color:#fff;font-weight:700;font-size:14px;border-radius:10px;text-decoration:none">
               Giriş yap →

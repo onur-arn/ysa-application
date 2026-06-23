@@ -42,11 +42,11 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
   post: Post
   onUpdate: (p: Post) => void
   onDelete?: () => void
-  me: { name: string; initials: string; station: string; photoUrl?: string | null }
+  me: { id: string; name: string; initials: string; station: string; photoUrl?: string | null }
   photoMap: Map<string, string>
 }) {
   const ME = me.name
-  const isOwn = post.author === ME
+  const isOwn = !!post.createdBy && post.createdBy === me.id
   const [liked, setLiked] = useState(() => (post.likedBy ?? []).includes(ME))
   const [showComments, setShowComments] = useState(false)
   const [showLikers, setShowLikers] = useState(false)
@@ -103,7 +103,7 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
     <div className="rounded-2xl border border-border bg-card">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-4">
-        <Avatar initials={post.initials} station={post.station} size={10} photoUrl={photoMap.get(post.author)} />
+        <Avatar initials={post.initials} station={post.station} size={10} photoUrl={photoMap.get(post.createdBy ?? post.author)} />
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-foreground">{post.author}</p>
           <div className="flex items-center gap-1.5">
@@ -541,8 +541,8 @@ export function PostsFeed() {
   const [showArchive, setShowArchive] = useState(false)
   const [isIntl, setIsIntl] = useState(false)
   const [photoMap, setPhotoMap] = useState<Map<string, string>>(new Map())
-  const [me, setMe] = useState<{ name: string; initials: string; station: string; photoUrl?: string | null }>({
-    name: "", initials: "", station: "paris",
+  const [me, setMe] = useState<{ id: string; name: string; initials: string; station: string; photoUrl?: string | null }>({
+    id: "", name: "", initials: "", station: "paris",
   })
 
   useEffect(() => {
@@ -554,17 +554,24 @@ export function PostsFeed() {
         const { data: profile } = await supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
         if (profile) {
           const ini = profile.initials || profile.name?.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || ""
-          setMe({ name: profile.name || "", initials: ini, station: profile.station || "paris", photoUrl: profile.photo_url })
+          setMe({ id: user.id, name: profile.name || "", initials: ini, station: profile.station || "paris", photoUrl: profile.photo_url })
           setIsIntl(profile.station === "intl")
         }
       } else {
         setIsIntl(true)
       }
 
-      // Build photo map: authorName → photo_url
-      const { data: allProfiles } = await supabase.from("profiles").select("name,photo_url")
+      // Build photo map: UUID → photo_url (primary) + name → photo_url (fallback for comments/igem)
+      const { data: allProfiles } = await supabase.from("profiles").select("id,name,photo_url")
       if (allProfiles) {
-        setPhotoMap(new Map(allProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url])))
+        const map = new Map<string, string>()
+        allProfiles.forEach(p => {
+          if (p.photo_url) {
+            map.set(p.id, p.photo_url)   // UUID key — collision-free, used for posts
+            map.set(p.name, p.photo_url) // name key — fallback for comments/igem
+          }
+        })
+        setPhotoMap(map)
       }
 
       const { data: igem } = await supabase.from("igem_requests").select("author,initials,station,motivation,created_at")
@@ -580,7 +587,7 @@ export function PostsFeed() {
 
       const { data: postsData } = await supabase
         .from("posts")
-        .select("id,author,initials,station,content,image_url,created_at,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at)")
+        .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at)")
         .order("created_at", { ascending: false })
       if (postsData) {
         setPosts(postsData.map((p) => ({
@@ -591,6 +598,7 @@ export function PostsFeed() {
           content: p.content ?? "",
           imageUrl: p.image_url ?? undefined,
           createdAt: p.created_at,
+          createdBy: p.created_by ?? undefined,
           likedBy: (p.post_likes ?? []).map((l: { voter_name: string }) => l.voter_name),
           comments: (p.post_comments ?? []).map((c: { id: string; author: string; initials: string; station: string; text: string; created_at: string }) => ({
             id: c.id,
@@ -691,6 +699,7 @@ export function PostsFeed() {
       imageUrl,
       poll,
       createdAt: new Date().toISOString(),
+      createdBy: user?.id,
       likedBy: [],
       comments: [],
     }
@@ -703,6 +712,7 @@ export function PostsFeed() {
           station: me.station,
           content,
           image_url: imageUrl ?? null,
+          created_by: user.id,
         })
       } catch {}
     }

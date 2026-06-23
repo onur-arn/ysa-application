@@ -310,6 +310,9 @@ drop policy if exists "Authenticated can insert chat messages" on chat_messages;
 create policy "Authenticated can read chat messages"   on chat_messages for select to authenticated using (true);
 create policy "Authenticated can insert chat messages" on chat_messages for insert to authenticated with check (true);
 
+-- Posts — created_by pour identifier l'auteur par UUID (fix bug noms dupliqués)
+alter table posts add column if not exists created_by uuid references auth.users(id) on delete set null;
+
 -- ── STORAGE: chat-images bucket ───────────────────────────────────────────────
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('chat-images', 'chat-images', true, 5242880, '{image/jpeg,image/png,image/webp,image/gif}')
