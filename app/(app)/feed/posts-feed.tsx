@@ -814,8 +814,19 @@ export function PostsFeed({
 
   async function deleteIgem(id: string) {
     setIgemRequests(prev => prev.filter(r => r.id !== id))
-    const supabase = createClient()
-    await supabase.from("igem_requests").delete().eq("id", id)
+    const res = await fetch("/api/igem/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: id }),
+    })
+    if (!res.ok) {
+      // Restore if delete failed
+      const supabase = createClient()
+      const { data } = await supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at,created_by").eq("id", id).single()
+      if (data) {
+        setIgemRequests(prev => [{ id: data.id, author: data.author, initials: data.initials ?? "?", station: data.station ?? "intl", motivation: data.motivation ?? "", date: data.created_at, createdBy: data.created_by ?? undefined, comments: [] }, ...prev])
+      }
+    }
   }
 
   async function addIgemComment(igemId: string, text: string) {
