@@ -11,7 +11,6 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "YouthStation",
   description: "Gençlik topluluğunun uygulaması — iletişim, organizasyon ve üye yönetimi.",
-  generator: "v0.app",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -19,8 +18,8 @@ export const metadata: Metadata = {
     title: "YouthStation",
   },
   icons: {
-    icon: "/icon.png",
-    apple: "/icon.png",
+    icon: [{ url: "/icon.png", sizes: "512x512", type: "image/png" }],
+    apple: [{ url: "/apple-icon.png", sizes: "512x512", type: "image/png" }],
   },
 }
 
