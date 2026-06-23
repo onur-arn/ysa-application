@@ -770,8 +770,10 @@ export function PostsFeed({
   async function addPost(content: string, imageUrl?: string, poll?: Poll) {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
+    // Pre-generate UUID so the realtime INSERT event matches the optimistic post
+    const newId = crypto.randomUUID()
     const newPost: Post = {
-      id: `user-${Date.now()}`,
+      id: newId,
       author: me.name,
       initials: me.initials,
       station: me.station as never,
@@ -787,6 +789,7 @@ export function PostsFeed({
     if (user) {
       try {
         await supabase.from("posts").insert({
+          id: newId,
           author: me.name,
           initials: me.initials,
           station: me.station,
