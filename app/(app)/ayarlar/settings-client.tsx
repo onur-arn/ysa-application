@@ -384,15 +384,26 @@ function EditProfileModal({
     let finalPhotoUrl = photoUrl
     if (pendingPhotoFile) {
       try {
-        const supabase = createClient()
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve((reader.result as string).split(",")[1])
+          reader.onerror = reject
+          reader.readAsDataURL(pendingPhotoFile)
+        })
         const ext = pendingPhotoFile.name.split(".").pop() ?? "jpg"
-        const path = `avatars/${Date.now()}.${ext}`
-        const { error } = await supabase.storage.from("avatars").upload(path, pendingPhotoFile, { upsert: true })
-        if (!error) {
-          const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path)
-          finalPhotoUrl = urlData.publicUrl
-        }
-      } catch {}
+        const res = await fetch("/api/profile-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ photoBase64: base64, photoExt: ext }),
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? "Upload failed")
+        finalPhotoUrl = json.url
+      } catch {
+        setSaveError("Fotoğraf yüklenemedi. Lütfen tekrar deneyin.")
+        setSaving(false)
+        return
+      }
     }
     const err = await onSave({
       name, email, phone, birthday, linkedin, memleket,
