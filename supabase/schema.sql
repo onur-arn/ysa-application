@@ -292,8 +292,10 @@ create policy "Authenticated can delete conversations" on conversations for dele
 create table if not exists conversation_members (
   conversation_id uuid references conversations(id) on delete cascade not null,
   member_name     text not null,
+  is_admin        boolean not null default false,
   primary key (conversation_id, member_name)
 );
+alter table conversation_members add column if not exists is_admin boolean not null default false;
 alter table conversation_members enable row level security;
 drop policy if exists "Authenticated can manage conv members" on conversation_members;
 create policy "Authenticated can manage conv members" on conversation_members for all to authenticated using (true) with check (true);

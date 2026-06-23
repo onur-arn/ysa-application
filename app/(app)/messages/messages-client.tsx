@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
-  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil,
+  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
@@ -21,7 +21,7 @@ type CustomGroup = {
   id: string
   name: string
   initials: string
-  adminName: string
+  adminNames: string[]
   memberNames: string[]
   lastMessage: string
   lastTime: string
@@ -59,9 +59,13 @@ function mapConversations(
   const dms: CustomDM[] = []
 
   for (const c of convRows) {
-    const memberNames = ((c.conversation_members as { member_name: string }[]) ?? [])
-      .map((m) => m.member_name)
-      .filter((n) => n !== userName)
+    const memberRows = ((c.conversation_members as { member_name: string; is_admin?: boolean }[]) ?? [])
+    const adminNames = memberRows.filter((m) => m.is_admin).map((m) => m.member_name)
+    // Backward compat: if no is_admin flags set yet, fall back to legacy admin_name column
+    const effectiveAdminNames = adminNames.length > 0
+      ? adminNames
+      : (c.admin_name ? [(c.admin_name as string)] : [])
+    const memberNames = memberRows.map((m) => m.member_name).filter((n) => n !== userName)
 
     // Derive last message from embedded chat_messages (sorted asc, last is the latest)
     const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; is_system: boolean; created_at: string }[]) ?? []
@@ -72,7 +76,7 @@ function mapConversations(
       : ""
 
     if ((c.type as string) === "group") {
-      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminName: (c.admin_name as string) ?? "", memberNames, lastMessage, lastTime, unread: 0, messages: [] })
+      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminNames: effectiveAdminNames, memberNames, lastMessage, lastTime, unread: 0, messages: [] })
     } else {
       const otherName = memberNames[0] ?? ""
       dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
@@ -137,14 +141,18 @@ export function MessagesClient({
       return
     }
 
-    // Add all members (including current user)
+    // Add all members (creator gets is_admin = true)
     const allMembers = [...new Set([currentUser.name, ...memberNames])]
     await supabase.from("conversation_members").insert(
-      allMembers.map((member_name) => ({ conversation_id: conv.id, member_name }))
+      allMembers.map((member_name) => ({
+        conversation_id: conv.id,
+        member_name,
+        is_admin: member_name === currentUser.name,
+      }))
     )
 
     const newGroup: CustomGroup = {
-      id: conv.id, name, initials, adminName: currentUser.name, memberNames,
+      id: conv.id, name, initials, adminNames: [currentUser.name], memberNames,
       lastMessage: "Grup oluşturuldu", lastTime: time, unread: 0, messages: [],
     }
     setCustomGroups((prev) => [newGroup, ...prev])
@@ -162,10 +170,21 @@ export function MessagesClient({
     })
   }
 
+  async function promoteToAdmin(id: string, memberName: string) {
+    const supabase = createClient()
+    await supabase.from("conversation_members")
+      .update({ is_admin: true })
+      .eq("conversation_id", id)
+      .eq("member_name", memberName)
+    setCustomGroups((prev) =>
+      prev.map((g) => g.id === id ? { ...g, adminNames: [...new Set([...g.adminNames, memberName])] } : g)
+    )
+  }
+
   async function addMembersToGroup(id: string, newNames: string[]) {
     const supabase = createClient()
     await supabase.from("conversation_members").insert(
-      newNames.map((member_name) => ({ conversation_id: id, member_name }))
+      newNames.map((member_name) => ({ conversation_id: id, member_name, is_admin: false }))
     )
     setCustomGroups((prev) =>
       prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g)
@@ -304,13 +323,15 @@ export function MessagesClient({
         photoMap={photoMap}
         groupSettings={{
           memberNames: activeCustomGroup.memberNames,
+          adminNames: activeCustomGroup.adminNames,
           currentUserName: currentUser.name,
-          isAdmin: activeCustomGroup.adminName === currentUser.name,
+          isAdmin: activeCustomGroup.adminNames.includes(currentUser.name),
           onAddMembers: (newNames) => addMembersToGroup(activeCustomGroup.id, newNames),
           onRemoveMember: (name) => removeMemberFromGroup(activeCustomGroup.id, name),
           onLeave: () => leaveGroup(activeCustomGroup.id),
           onDeleteGroup: () => deleteGroup(activeCustomGroup.id),
           onRename: (newName) => renameGroup(activeCustomGroup.id, newName),
+          onPromoteToAdmin: (name) => promoteToAdmin(activeCustomGroup.id, name),
         }}
       />
     )
@@ -538,15 +559,16 @@ function ConversationRow({
 
 // ── Group settings panel ──────────────────────────────────────────────────────
 function GroupSettingsPanel({
-  title, initials, isAdmin, currentUserName, memberNames, onClose, onAddMembers, onRemoveMember, onLeave, onDeleteGroup, onRename,
+  title, initials, isAdmin, adminNames, currentUserName, memberNames, onClose, onAddMembers, onRemoveMember, onLeave, onDeleteGroup, onRename, onPromoteToAdmin,
 }: {
-  title: string; initials: string; isAdmin: boolean; currentUserName: string; memberNames: string[]
+  title: string; initials: string; isAdmin: boolean; adminNames: string[]; currentUserName: string; memberNames: string[]
   onClose: () => void
   onAddMembers: (newNames: string[]) => void
   onRemoveMember: (name: string) => void
   onLeave: () => void
   onDeleteGroup: () => void
   onRename: (newName: string) => void
+  onPromoteToAdmin: (name: string) => void
 }) {
   const [allMembers, setAllMembers]       = useState<Member[]>(MEMBERS)
   const [addOpen, setAddOpen]             = useState(false)
@@ -646,18 +668,24 @@ function GroupSettingsPanel({
             Üyeler ({memberNames.length + 1})
           </p>
           <div className="overflow-hidden rounded-xl border border-border">
-            {/* Self row — always shown, cannot be removed */}
+            {/* Self row */}
             <div className="flex items-center gap-3 border-b border-border/60 px-3 py-2.5">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
                 Sen
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-foreground">Siz (yönetici)</p>
+                <p className="text-sm font-semibold text-foreground">{currentUserName}</p>
               </div>
+              {isAdmin && (
+                <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  <ShieldCheck className="size-3" /> Yönetici
+                </span>
+              )}
             </div>
 
             {groupMembers.map((m) => {
               const s = getStation(m.station)
+              const memberIsAdmin = adminNames.includes(m.name)
               return (
                 <div key={m.id} className="flex items-center gap-3 border-b border-border/60 px-3 py-2.5 last:border-0">
                   <span
@@ -670,6 +698,21 @@ function GroupSettingsPanel({
                     <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
                     <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
                   </div>
+                  {memberIsAdmin && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                      <ShieldCheck className="size-3" /> Yönetici
+                    </span>
+                  )}
+                  {isAdmin && !memberIsAdmin && (
+                    <button
+                      onClick={() => onPromoteToAdmin(m.name)}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-primary/10 active:text-primary"
+                      aria-label={`${m.name} yönetici yap`}
+                      title="Yönetici yap"
+                    >
+                      <ShieldCheck className="size-4" />
+                    </button>
+                  )}
                   {isAdmin && (
                     <button
                       onClick={() => onRemoveMember(m.name)}
@@ -701,35 +744,33 @@ function GroupSettingsPanel({
 
         {/* Actions */}
         <div className="flex flex-col gap-3 px-4 pb-8 pt-6">
-          {/* Leave group — non-admin only */}
-          {!isAdmin && (
-            !confirmLeave ? (
-              <button
-                onClick={() => setConfirmLeave(true)}
-                className="flex w-full items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm font-medium text-destructive transition-colors active:bg-destructive/10"
-              >
-                <LogOut className="size-4" />
-                Gruptan çık
-              </button>
-            ) : (
-              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-                <p className="mb-3 text-sm font-medium text-destructive">Bu gruptan çıkmak istediğinizden emin misiniz?</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setConfirmLeave(false)}
-                    className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
-                  >
-                    İptal
-                  </button>
-                  <button
-                    onClick={onLeave}
-                    className="flex-1 rounded-lg bg-destructive py-2 text-sm font-semibold text-white"
-                  >
-                    Çık
-                  </button>
-                </div>
+          {/* Leave group — everyone can leave */}
+          {!confirmLeave ? (
+            <button
+              onClick={() => setConfirmLeave(true)}
+              className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-muted-foreground transition-colors active:bg-secondary"
+            >
+              <LogOut className="size-4" />
+              Gruptan çık
+            </button>
+          ) : (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              <p className="mb-3 text-sm font-medium text-destructive">Bu gruptan çıkmak istediğinizden emin misiniz?</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmLeave(false)}
+                  className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
+                >
+                  İptal
+                </button>
+                <button
+                  onClick={onLeave}
+                  className="flex-1 rounded-lg bg-destructive py-2 text-sm font-semibold text-white"
+                >
+                  Çık
+                </button>
               </div>
-            )
+            </div>
           )}
 
           {/* Delete group — admin only */}
@@ -1136,6 +1177,7 @@ function ChatView({
   photoMap?: Map<string, string>
   groupSettings?: {
     memberNames: string[]
+    adminNames: string[]
     currentUserName: string
     isAdmin: boolean
     onAddMembers: (newNames: string[]) => void
@@ -1143,6 +1185,7 @@ function ChatView({
     onLeave: () => void
     onDeleteGroup: () => void
     onRename: (newName: string) => void
+    onPromoteToAdmin: (name: string) => void
   }
 }) {
   const { t } = useI18n()
@@ -1347,7 +1390,7 @@ function ChatView({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {(attached || uploading) && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-xs text-secondary-foreground">
             {uploading
@@ -1417,6 +1460,7 @@ function ChatView({
             title={title}
             initials={initials}
             isAdmin={groupSettings.isAdmin}
+            adminNames={groupSettings.adminNames}
             currentUserName={groupSettings.currentUserName}
             memberNames={groupSettings.memberNames}
             onClose={() => setShowSettings(false)}
@@ -1425,6 +1469,7 @@ function ChatView({
             onLeave={groupSettings.onLeave}
             onDeleteGroup={groupSettings.onDeleteGroup}
             onRename={groupSettings.onRename}
+            onPromoteToAdmin={groupSettings.onPromoteToAdmin}
           />
         )}
       </AnimatePresence>
