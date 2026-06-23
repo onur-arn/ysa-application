@@ -17,6 +17,18 @@ function BottomNavWrapper() {
   return <BottomNav />
 }
 
+function MainWrapper({ children, pull }: { children: ReactNode; pull: number }) {
+  const { hideNav } = useNavVisibility()
+  return (
+    <main
+      className={`relative flex-1 ${hideNav ? "" : "pb-28"}`}
+      style={{ transform: pull > 0 ? `translateY(${pull * 0.3}px)` : undefined, transition: pull === 0 ? "transform 0.25s ease" : "none" }}
+    >
+      {children}
+    </main>
+  )
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const onSettings = pathname.startsWith("/ayarlar")
@@ -100,12 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </svg>
       </div>
 
-      <main
-        className="relative flex-1 pb-28"
-        style={{ transform: pull > 0 ? `translateY(${pull * 0.3}px)` : undefined, transition: pull === 0 ? "transform 0.25s ease" : "none" }}
-      >
-        {children}
-      </main>
+      <MainWrapper pull={pull}>{children}</MainWrapper>
       <BottomNavWrapper />
     </div>
     </NavVisibilityProvider>

@@ -1266,7 +1266,7 @@ function ChatView({
   }
 
   return (
-    <div className="relative flex h-[calc(100dvh-10.5rem)] flex-col overflow-hidden">
+    <div className="relative flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-2.5">
         <button onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">

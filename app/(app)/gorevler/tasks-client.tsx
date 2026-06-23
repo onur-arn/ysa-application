@@ -350,6 +350,7 @@ function TaskCard({
   const { t } = useI18n()
   const [showComments, setShowComments] = useState(false)
   const [draft, setDraft] = useState("")
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const station = getStation(task.station)
   const StatusIcon = STATUS_ICON[task.status]
 
@@ -385,13 +386,30 @@ function TaskCard({
                 {priorityLabel[task.priority]}
               </span>
               {task.createdById && task.createdById === currentUserId && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onDelete() }}
-                  className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-destructive/10 active:text-destructive"
-                  aria-label="Görevi sil"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
+                confirmDelete ? (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => onDelete()}
+                      className="rounded-lg bg-destructive px-2 py-0.5 text-[11px] font-bold text-white"
+                    >
+                      Sil
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="rounded-lg border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                    >
+                      İptal
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete(true) }}
+                    className="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-destructive/10 active:text-destructive"
+                    aria-label="Görevi sil"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )
               )}
             </div>
           </div>
