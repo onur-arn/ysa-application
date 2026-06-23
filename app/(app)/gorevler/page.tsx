@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { createClient } from "@/lib/supabase/server"
 import { TasksClient } from "./tasks-client"
 import type { StationId } from "@/lib/data/stations"
