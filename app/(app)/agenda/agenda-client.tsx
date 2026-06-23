@@ -62,6 +62,7 @@ export function AgendaClient({
   })
   const [events, setEvents] = useState<EventItem[]>(() => mapEventsFromRaw(initialEvents))
   const [selected, setSelected] = useState<EventItem | null>(null)
+  const [selectedDayEvents, setSelectedDayEvents] = useState<EventItem[] | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null)
   const [userStation, setUserStation] = useState<string>(initialUserStation)
@@ -262,7 +263,11 @@ export function AgendaClient({
               return (
                 <button
                   key={day}
-                  onClick={() => hasEvents && setSelected(dayEvents[0])}
+                  onClick={() => {
+                    if (!hasEvents) return
+                    if (dayEvents.length === 1) setSelected(dayEvents[0])
+                    else setSelectedDayEvents(dayEvents)
+                  }}
                   className={`flex aspect-square flex-col items-center justify-center rounded-xl text-sm transition-colors ${
                     hasEvents ? "bg-primary/10 font-semibold text-foreground" : "text-muted-foreground"
                   }`}
@@ -309,6 +314,42 @@ export function AgendaClient({
       >
         <Plus className="size-6" />
       </button>
+
+      {/* Day events list (multiple events on same day) */}
+      <Modal
+        open={!!selectedDayEvents}
+        onClose={() => setSelectedDayEvents(null)}
+        title={selectedDayEvents ? formatLongDate(selectedDayEvents[0].date) : ""}
+      >
+        {selectedDayEvents && (
+          <div className="flex flex-col gap-2">
+            {selectedDayEvents.map((e) => {
+              const station = getStation(e.station)
+              return (
+                <button
+                  key={e.id}
+                  onClick={() => { setSelectedDayEvents(null); setSelected(e) }}
+                  className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 text-left transition-colors active:bg-secondary"
+                >
+                  <span
+                    className="flex size-10 shrink-0 items-center justify-center rounded-xl text-white"
+                    style={{ backgroundColor: `hsl(${station.color})` }}
+                  >
+                    <CalendarDays className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-foreground">{e.title}</p>
+                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="size-3 shrink-0" /> {e.time} · {station.name}
+                    </p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </Modal>
 
       {/* Event detail */}
       <Modal open={!!selected} onClose={() => setSelected(null)} title={t("agenda.eventDetail")}>
