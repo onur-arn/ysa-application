@@ -236,7 +236,7 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors active:bg-secondary"
+      className="flex w-full items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors active:bg-secondary"
     >
       <div className="relative shrink-0">
         {member.photoUrl ? (
