@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-const ADMIN_EMAIL = "admin@youthstation.org"
+const ADMIN_EMAIL = "secretaire@youthstation.org"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
