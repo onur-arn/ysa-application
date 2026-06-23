@@ -16,19 +16,27 @@ export async function GET() {
   try {
     const admin = createAdminClient()
 
-    // Check pending_members
+    // Check pending_members (incl. photo_url)
     const { data: pending, error: pendingErr } = await admin
       .from("pending_members")
-      .select("id, email, first_name, last_name, station, memleket, phone, role")
+      .select("id, email, first_name, last_name, station, role, photo_url")
       .limit(5)
     result.pending_members = pendingErr ? { error: pendingErr.message } : pending
 
-    // Check profiles
+    // Check profiles (incl. photo_url)
     const { data: profiles, error: profilesErr } = await admin
       .from("profiles")
-      .select("id, email, name, station, memleket, phone, role, birthday")
-      .limit(10)
+      .select("id, email, name, station, role, photo_url")
+      .limit(20)
     result.profiles = profilesErr ? { error: profilesErr.message } : profiles
+
+    // Check storage buckets
+    const { data: buckets, error: bucketsErr } = await admin.storage.listBuckets()
+    result.storage_buckets = bucketsErr ? { error: bucketsErr.message } : buckets?.map(b => ({ id: b.id, name: b.name, public: b.public }))
+
+    // List avatars bucket root
+    const { data: avatarFiles, error: avatarErr } = await admin.storage.from("avatars").list("", { limit: 10 })
+    result.avatars_bucket = avatarErr ? { error: avatarErr.message } : avatarFiles?.map(f => f.name)
 
     // List pending_members columns
     const { data: cols, error: colsErr } = await admin

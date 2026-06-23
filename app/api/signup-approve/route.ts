@@ -72,13 +72,17 @@ export async function GET(req: NextRequest) {
   // Move photo from pending/ to avatars/ if exists
   let photoUrl = pending.photo_url ?? null
   if (photoUrl && photoUrl.includes("/pending/")) {
-    const ext = photoUrl.split(".").pop()
+    const filename = photoUrl.split("/").pop()?.split("?")[0] ?? ""
+    const ext = filename.split(".").pop() ?? "jpg"
     const newPath = `avatars/${userId}.${ext}`
     const oldPath = `pending/${pendingId}.${ext}`
     const { error: copyErr } = await admin.storage.from("avatars").copy(oldPath, newPath)
-    if (!copyErr) {
+    if (copyErr) {
+      console.error("[signup-approve] photo copy error:", copyErr.message)
+    } else {
       const { data: urlData } = admin.storage.from("avatars").getPublicUrl(newPath)
       photoUrl = urlData.publicUrl
+      console.log("[signup-approve] photo moved to:", photoUrl)
       await admin.storage.from("avatars").remove([oldPath])
     }
   }

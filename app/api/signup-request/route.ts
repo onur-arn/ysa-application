@@ -62,16 +62,21 @@ export async function POST(req: NextRequest) {
     try {
       const buffer = Buffer.from(photoBase64, "base64")
       const path = `pending/${pendingId}.${photoExt}`
+      const mimeType = photoExt === "jpg" ? "image/jpeg" : `image/${photoExt}`
       const { error: upErr } = await admin.storage.from("avatars").upload(path, buffer, {
-        contentType: `image/${photoExt}`,
+        contentType: mimeType,
         upsert: true,
       })
-      if (!upErr) {
+      if (upErr) {
+        console.error("[signup-request] photo upload error:", upErr.message, upErr)
+      } else {
         const { data: urlData } = admin.storage.from("avatars").getPublicUrl(path)
-        await admin.from("pending_members").update({ photo_url: urlData.publicUrl }).eq("id", pendingId)
+        const { error: updateErr } = await admin.from("pending_members").update({ photo_url: urlData.publicUrl }).eq("id", pendingId)
+        if (updateErr) console.error("[signup-request] photo_url update error:", updateErr.message)
+        else console.log("[signup-request] photo saved:", urlData.publicUrl)
       }
     } catch (err) {
-      console.error("[signup-request] photo upload error:", err)
+      console.error("[signup-request] photo upload exception:", err)
     }
   }
 
