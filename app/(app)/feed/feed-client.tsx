@@ -10,6 +10,7 @@ interface FeedClientProps {
   initialPosts?: Record<string, unknown>[]
   initialIgem?: Record<string, unknown>[]
   initialStories?: Record<string, unknown>[]
+  initialIgemComments?: Record<string, unknown>[]
 }
 
 export function FeedClient({
@@ -19,6 +20,7 @@ export function FeedClient({
   initialPosts = [],
   initialIgem = [],
   initialStories = [],
+  initialIgemComments = [],
 }: FeedClientProps) {
   return (
     <>
@@ -42,6 +44,7 @@ export function FeedClient({
           initialPosts={initialPosts}
           initialIgem={initialIgem}
           initialPhotoMap={initialProfiles}
+          initialIgemComments={initialIgemComments}
         />
       </div>
     </>

@@ -696,15 +696,15 @@ function SuccessStep({ email, onLogin }: { email: string; onLogin: () => void })
       <div className="mb-5 flex size-20 items-center justify-center rounded-full bg-emerald-500/15">
         <CheckCircle2 className="size-10 text-emerald-500" />
       </div>
-      <h1 className="font-heading text-2xl font-bold text-foreground">Hesabınız oluşturuldu!</h1>
+      <h1 className="font-heading text-2xl font-bold text-foreground">Talebiniz alındı!</h1>
       <p className="mt-3 text-sm text-muted-foreground text-pretty">
-        Kayıt başarıyla tamamlandı.
+        Kaydınız başarıyla iletildi. Yönetici onayladıktan sonra hesabınız aktif hale gelecektir.
       </p>
       <p className="mt-2 text-sm text-muted-foreground text-pretty">
-        Hemen giriş yapabilirsiniz.
+        Onay e-postası geldiğinde giriş yapabilirsiniz.
       </p>
       <Button size="lg" className="mt-8 w-full" onClick={onLogin}>
-        Giriş yap
+        Giriş sayfasına dön
       </Button>
     </div>
   )

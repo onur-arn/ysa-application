@@ -133,6 +133,7 @@ export function SettingsClient({
         initials: authorInitials,
         station: authorStation,
         motivation: igemMotivation,
+        created_by: user.id,
       })
     } catch {}
     setIgemSent(true)

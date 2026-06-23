@@ -313,6 +313,27 @@ create policy "Authenticated can insert chat messages" on chat_messages for inse
 -- Posts — created_by pour identifier l'auteur par UUID (fix bug noms dupliqués)
 alter table posts add column if not exists created_by uuid references auth.users(id) on delete set null;
 
+-- iGEM requests — created_by + delete policy
+alter table igem_requests add column if not exists created_by uuid references auth.users(id) on delete set null;
+drop policy if exists "Authenticated can delete own igem" on igem_requests;
+create policy "Authenticated can delete own igem" on igem_requests for delete to authenticated using (created_by = auth.uid());
+
+-- iGEM comments
+create table if not exists igem_comments (
+  id         uuid primary key default uuid_generate_v4(),
+  igem_id    uuid references igem_requests(id) on delete cascade not null,
+  author     text not null,
+  initials   text not null,
+  station    text not null,
+  text       text not null,
+  created_at timestamptz default now()
+);
+alter table igem_comments enable row level security;
+drop policy if exists "Authenticated can read igem_comments"   on igem_comments;
+drop policy if exists "Authenticated can insert igem_comments" on igem_comments;
+create policy "Authenticated can read igem_comments"   on igem_comments for select to authenticated using (true);
+create policy "Authenticated can insert igem_comments" on igem_comments for insert to authenticated with check (true);
+
 -- ── STORAGE: chat-images bucket ───────────────────────────────────────────────
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('chat-images', 'chat-images', true, 5242880, '{image/jpeg,image/png,image/webp,image/gif}')

@@ -15,7 +15,10 @@ export async function POST(req: NextRequest) {
   // Password update
   if (body.password) {
     const { error: pwErr } = await supabase.auth.updateUser({ password: body.password })
-    if (pwErr) console.error("[profile-update] password:", pwErr)
+    if (pwErr) {
+      console.error("[profile-update] password:", pwErr)
+      return NextResponse.json({ error: `Şifre güncellenemedi: ${pwErr.message}` }, { status: 400 })
+    }
   }
 
   const name: string = body.name ?? ""

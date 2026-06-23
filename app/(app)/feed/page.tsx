@@ -7,7 +7,7 @@ export default async function FeedPage() {
 
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  const [profileRes, allProfilesRes, postsRes, igemRes, storiesRes] = await Promise.all([
+  const [profileRes, allProfilesRes, postsRes, igemRes, storiesRes, igemCommentsRes] = await Promise.all([
     user
       ? supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
       : Promise.resolve({ data: null }),
@@ -18,11 +18,15 @@ export default async function FeedPage() {
       .order("created_at", { ascending: false }),
     supabase
       .from("igem_requests")
-      .select("author,initials,station,motivation,created_at"),
+      .select("id,author,initials,station,motivation,created_at,created_by"),
     supabase
       .from("stories")
       .select("*")
       .gte("created_at", cutoff)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("igem_comments")
+      .select("id,igem_id,author,initials,station,text,created_at")
       .order("created_at", { ascending: true }),
   ])
 
@@ -34,6 +38,7 @@ export default async function FeedPage() {
       initialPosts={(postsRes.data ?? []) as Record<string, unknown>[]}
       initialIgem={(igemRes.data ?? []) as Record<string, unknown>[]}
       initialStories={(storiesRes.data ?? []) as Record<string, unknown>[]}
+      initialIgemComments={(igemCommentsRes.data ?? []) as Record<string, unknown>[]}
     />
   )
 }

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users } from "lucide-react"
+import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users, ChevronDown as CommentsToggle } from "lucide-react"
 import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
 import { getStation, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
@@ -498,39 +498,108 @@ function PollBlock({ poll, myVote, onVote }: { poll: Poll; myVote: string | null
 }
 
 // ── iGEM card ─────────────────────────────────────────────────────────────────
-function IgemCard({ author, initials, station, motivation, date, photoMap }: {
-  author: string; initials: string; station: string; motivation: string; date: string
+type IgemComment = { id: string; author: string; initials: string; station: string; text: string; time: string }
+
+function IgemCard({ id, author, initials, station, motivation, date, photoMap, me, comments, onDelete, onComment }: {
+  id: string; author: string; initials: string; station: string; motivation: string; date: string
   photoMap: Map<string, string>
+  me: { id: string; name: string; initials: string; station: string }
+  comments: IgemComment[]
+  onDelete?: () => void
+  onComment: (text: string) => void
 }) {
   const s = getStation(station as never)
   const photo = photoMap.get(author)
+  const isOwn = author === me.name
+  const [showComments, setShowComments] = useState(false)
+  const [commentText, setCommentText] = useState("")
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
   return (
-    <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="flex items-center gap-1.5 rounded-full bg-purple-500/15 px-2.5 py-1 text-xs font-semibold text-purple-600">
-          <Rocket className="size-3.5" /> iGEM Talebi
-        </span>
-      </div>
-      <div className="flex items-center gap-3">
-        {photo ? (
-          <img src={photo} alt={initials} className="size-10 shrink-0 rounded-full object-cover" />
-        ) : (
-          <span
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-            style={{ backgroundColor: `hsl(${s.color})` }}
-          >
-            {initials}
+    <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5">
+      <div className="p-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 rounded-full bg-purple-500/15 px-2.5 py-1 text-xs font-semibold text-purple-600">
+            <Rocket className="size-3.5" /> iGEM Talebi
           </span>
-        )}
-        <div>
-          <p className="font-semibold text-foreground">{author}</p>
-          <p className="text-xs font-medium" style={{ color: `hsl(${s.color})` }}>{s.name}</p>
+          {isOwn && !confirmDelete && (
+            <button onClick={() => setConfirmDelete(true)} className="flex size-7 items-center justify-center rounded-full text-muted-foreground active:bg-purple-500/10">
+              <Trash2 className="size-3.5" />
+            </button>
+          )}
+          {isOwn && confirmDelete && (
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => onDelete?.()} className="rounded-lg bg-destructive px-2.5 py-1 text-xs font-semibold text-white">Sil</button>
+              <button onClick={() => setConfirmDelete(false)} className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground">İptal</button>
+            </div>
+          )}
         </div>
-        <span className="ml-auto text-xs text-muted-foreground">{timeAgo(date)}</span>
+        <div className="flex items-center gap-3">
+          {photo ? (
+            <img src={photo} alt={initials} className="size-10 shrink-0 rounded-full object-cover" />
+          ) : (
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: `hsl(${s.color})` }}>
+              {initials}
+            </span>
+          )}
+          <div>
+            <p className="font-semibold text-foreground">{author}</p>
+            <p className="text-xs font-medium" style={{ color: `hsl(${s.color})` }}>{s.name}</p>
+          </div>
+          <span className="ml-auto text-xs text-muted-foreground">{timeAgo(date)}</span>
+        </div>
+        {motivation && <p className="mt-3 text-sm leading-relaxed text-foreground/80">{motivation}</p>}
       </div>
-      {motivation && (
-        <p className="mt-3 text-sm leading-relaxed text-foreground/80">{motivation}</p>
-      )}
+
+      {/* Comment toggle */}
+      <div className="flex items-center gap-1 border-t border-purple-500/20 px-3 py-1.5">
+        <button
+          onClick={() => { setShowComments(v => !v); setTimeout(() => inputRef.current?.focus(), 100) }}
+          className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground"
+        >
+          <MessageCircle className="size-4" />
+          {comments.length > 0 && comments.length}
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {showComments && (
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}>
+            <div className="border-t border-purple-500/20 px-4 pb-3 pt-2">
+              {comments.map(c => (
+                <div key={c.id} className="flex gap-2.5 py-2">
+                  <Avatar initials={c.initials} station={c.station} size={7} photoUrl={photoMap.get(c.author)} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xs font-semibold text-foreground">{c.author}</span>
+                      <span className="text-[10px] text-muted-foreground">{c.time}</span>
+                    </div>
+                    <p className="text-xs text-foreground/80">{c.text}</p>
+                  </div>
+                </div>
+              ))}
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  ref={inputRef}
+                  value={commentText}
+                  onChange={e => setCommentText(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && commentText.trim()) { onComment(commentText.trim()); setCommentText("") } }}
+                  placeholder="Yorum yaz…"
+                  className="h-9 flex-1 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                />
+                <button
+                  onClick={() => { if (commentText.trim()) { onComment(commentText.trim()); setCommentText("") } }}
+                  disabled={!commentText.trim()}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-40"
+                >
+                  <Send className="size-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -541,6 +610,7 @@ interface PostsFeedProps {
   initialPosts?: Record<string, unknown>[]
   initialIgem?: Record<string, unknown>[]
   initialPhotoMap?: { id: string; name: string; photo_url: string | null }[]
+  initialIgemComments?: Record<string, unknown>[]
 }
 
 function mapPostsFromRaw(postsRaw: Record<string, unknown>[]): Post[] {
@@ -570,14 +640,27 @@ export function PostsFeed({
   initialPosts = [],
   initialIgem = [],
   initialPhotoMap = [],
+  initialIgemComments = [],
 }: PostsFeedProps) {
-  const [igemRequests, setIgemRequests] = useState<{ author: string; initials: string; station: string; motivation: string; date: string }[]>(() =>
+  const [igemRequests, setIgemRequests] = useState<{ id: string; author: string; initials: string; station: string; motivation: string; date: string; createdBy?: string; comments: IgemComment[] }[]>(() =>
     initialIgem.map((r) => ({
+      id: (r.id as string) ?? "",
       author: (r.author as string) ?? "",
       initials: (r.initials as string) ?? "?",
       station: (r.station as string) ?? "intl",
       motivation: (r.motivation as string) ?? "",
       date: r.created_at as string,
+      createdBy: (r.created_by as string) ?? undefined,
+      comments: initialIgemComments
+        .filter(c => c.igem_id === r.id)
+        .map(c => ({
+          id: c.id as string,
+          author: (c.author as string) ?? "",
+          initials: (c.initials as string) ?? "?",
+          station: (c.station as string) ?? "intl",
+          text: (c.text as string) ?? "",
+          time: timeAgo(c.created_at as string),
+        })),
     }))
   )
   const [showArchive, setShowArchive] = useState(false)
@@ -708,27 +791,56 @@ export function PostsFeed({
 
   type FeedItem =
     | { kind: "post"; data: Post; date: string }
-    | { kind: "igem"; data: typeof igemRequests[number]; idx: number; date: string }
+    | { kind: "igem"; data: typeof igemRequests[number]; date: string }
 
   const allItems: FeedItem[] = [
     ...posts.map(p => ({ kind: "post" as const, data: p, date: p.createdAt })),
-    ...igemRequests.map((r, i) => ({ kind: "igem" as const, data: r, idx: i, date: r.date })),
+    ...igemRequests.map((r) => ({ kind: "igem" as const, data: r, date: r.date })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   const freshItems   = allItems.filter(item => new Date(item.date).getTime() > cutoff)
   const archivedItems = allItems.filter(item => new Date(item.date).getTime() <= cutoff)
 
+  async function deleteIgem(id: string) {
+    setIgemRequests(prev => prev.filter(r => r.id !== id))
+    const supabase = createClient()
+    await supabase.from("igem_requests").delete().eq("id", id)
+  }
+
+  async function addIgemComment(igemId: string, text: string) {
+    const supabase = createClient()
+    const { data } = await supabase.from("igem_comments").insert({
+      igem_id: igemId,
+      author: me.name,
+      initials: me.initials,
+      station: me.station,
+      text,
+    }).select().single()
+    if (data) {
+      setIgemRequests(prev => prev.map(r =>
+        r.id === igemId
+          ? { ...r, comments: [...r.comments, { id: data.id, author: me.name, initials: me.initials, station: me.station, text, time: "şimdi" }] }
+          : r
+      ))
+    }
+  }
+
   function renderItem(item: FeedItem) {
     if (item.kind === "igem") {
       return (
         <IgemCard
-          key={`igem-${item.idx}`}
+          key={`igem-${item.data.id}`}
+          id={item.data.id}
           author={item.data.author}
           initials={item.data.initials ?? "?"}
           station={item.data.station ?? "intl"}
           motivation={item.data.motivation}
           date={item.data.date}
           photoMap={photoMap}
+          me={me}
+          comments={item.data.comments}
+          onDelete={() => deleteIgem(item.data.id)}
+          onComment={(text) => addIgemComment(item.data.id, text)}
         />
       )
     }
