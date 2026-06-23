@@ -54,6 +54,26 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
   const [commentText, setCommentText] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
   const s = getStation(post.station as never)
+  const [imgFit, setImgFit] = useState<"cover" | "contain">("cover")
+  const [imgMaxH, setImgMaxH] = useState(320)
+
+  function handleImgLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+    const img = e.currentTarget
+    const ratio = img.naturalWidth / img.naturalHeight
+    if (ratio < 0.85) {
+      // Portrait: show full image
+      setImgFit("contain")
+      setImgMaxH(480)
+    } else if (ratio > 1.4) {
+      // Landscape: constrain height, no crop
+      setImgFit("contain")
+      setImgMaxH(260)
+    } else {
+      // Square-ish: cover
+      setImgFit("cover")
+      setImgMaxH(320)
+    }
+  }
 
   const myVote = post.poll
     ? (post.poll.options.find(o => o.voters.includes(ME))?.id ?? null)
@@ -149,8 +169,9 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
           <img
             src={post.imageUrl}
             alt=""
-            className="w-full rounded-xl object-cover"
-            style={{ maxHeight: 320 }}
+            onLoad={handleImgLoad}
+            className="w-full rounded-xl bg-muted"
+            style={{ objectFit: imgFit, maxHeight: imgMaxH }}
           />
         </div>
       )}
