@@ -14,23 +14,28 @@ export async function POST(req: NextRequest) {
   let tasks: Record<string, unknown>[] = body.tasks ?? []
   let igem: Record<string, unknown>[] = body.igem ?? []
   let pendingMembers: Record<string, unknown>[] = []
+  let conversations: Record<string, unknown>[] = []
 
   // Merge with Supabase data if available
   if (SUPABASE_ENABLED) {
     try {
       const admin = createAdminClient()
-      const [profRes, postRes, taskRes, igemRes, pendRes] = await Promise.all([
+      const [profRes, postRes, taskRes, igemRes, pendRes, convRes] = await Promise.all([
         admin.from("profiles").select("*").order("name"),
         admin.from("posts").select("*, post_comments(*), post_likes(*), polls(*, poll_options(*, poll_votes(*)))").order("created_at", { ascending: false }),
         admin.from("tasks").select("*").order("created_at", { ascending: false }),
         admin.from("igem_requests").select("*").order("created_at", { ascending: false }),
         admin.from("pending_members").select("*").order("created_at", { ascending: false }),
+        admin.from("conversations")
+          .select("id, type, name, created_at, conversation_members(member_name), chat_messages(sender_name, text, created_at, is_system)")
+          .order("created_at", { ascending: true }),
       ])
       if (profRes.data?.length) profiles = profRes.data
       if (postRes.data?.length) posts = postRes.data
       if (taskRes.data?.length) tasks = taskRes.data
       if (igemRes.data?.length) igem = igemRes.data
       if (pendRes.data?.length) pendingMembers = pendRes.data
+      if (convRes.data?.length) conversations = convRes.data
     } catch (err) {
       console.error("[export-pdf] Supabase fetch error:", err)
     }
@@ -106,6 +111,41 @@ export async function POST(req: NextRequest) {
     String(r.created_at ? new Date(r.created_at as string).toLocaleDateString("fr-FR") : ""),
   ])
 
+  // ── Conversations section
+  type ConvRow = {
+    id: string
+    type: string
+    name: string | null
+    created_at: string
+    conversation_members: Array<{ member_name: string }>
+    chat_messages: Array<{ sender_name: string; text: string | null; created_at: string; is_system: boolean }>
+  }
+  const convsHtml = (conversations as unknown as ConvRow[]).map((conv) => {
+    const members = (conv.conversation_members ?? []).map((m) => m.member_name).join(", ")
+    const msgs = (conv.chat_messages ?? [])
+      .filter((m) => !m.is_system)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    const convTitle = conv.type === "dm"
+      ? `🔒 DM — ${members || conv.name || "?"}`
+      : `👥 ${conv.name || "Grup"}`
+    const msgRows = msgs.map((m) => [
+      m.sender_name,
+      new Date(m.created_at).toLocaleString("fr-FR"),
+      (m.text ?? "").slice(0, 300),
+    ])
+    return `
+      <div style="margin-bottom:18px;border:1px solid #e0f2fe;border-radius:8px;overflow:hidden">
+        <div style="background:#f0f9ff;padding:8px 12px">
+          <span style="font-weight:700;font-size:13px;color:#0e7490">${convTitle}</span>
+          <span style="font-size:11px;color:#6b7280;margin-left:8px">Üyeler: ${members} · ${msgs.length} mesaj · ${new Date(conv.created_at).toLocaleDateString("fr-FR")}</span>
+        </div>
+        ${msgRows.length > 0
+          ? table(["Gönderen", "Tarih", "Mesaj"], msgRows)
+          : "<p style='padding:8px 12px;font-size:12px;color:#9ca3af'>Mesaj yok</p>"
+        }
+      </div>`
+  }).join("")
+
   const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -150,6 +190,10 @@ export async function POST(req: NextRequest) {
 
   ${igem.length > 0 ? section("🚀 Demandes iGEM (" + igem.length + ")",
     table(["Auteur", "Station", "Motivation", "Date"], igemRows)
+  ) : ""}
+
+  ${conversations.length > 0 ? section("💬 Sohbetler / Conversations (" + conversations.length + ")",
+    convsHtml
   ) : ""}
 
   <p style="margin-top:40px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f4f8;padding-top:12px">

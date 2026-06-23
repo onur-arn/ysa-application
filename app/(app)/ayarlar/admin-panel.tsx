@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Shield, ChevronDown, Trash2, Check, Loader2, Users,
-  CalendarDays, Rocket, ListTodo, FileDown, X,
+  CalendarDays, Rocket, ListTodo, FileDown, X, MessageCircle, ChevronRight,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getStation } from "@/lib/data/stations"
@@ -13,15 +13,22 @@ type Member = { id: string; name: string; email: string; station: string; role: 
 type Event  = { id: string; title: string; date: string; station: string; place: string }
 type IgemReq = { id: string; author: string; initials: string; station: string; motivation: string; created_at: string }
 type Task   = { id: string; title: string; station: string; assignee: string; status: string }
+type Conv   = {
+  id: string; type: string; name: string | null; created_at: string
+  conversation_members: Array<{ member_name: string }>
+  chat_messages: Array<{ id: string; sender_name: string; text: string | null; created_at: string; is_system: boolean }>
+}
 
 export function AdminPanel() {
   const [open, setOpen] = useState(false)
-  const [section, setSection] = useState<"members" | "events" | "igem" | "tasks" | null>(null)
+  const [section, setSection] = useState<"members" | "events" | "igem" | "tasks" | "convs" | null>(null)
 
   const [members,  setMembers]  = useState<Member[]>([])
   const [events,   setEvents]   = useState<Event[]>([])
   const [igemReqs, setIgemReqs] = useState<IgemReq[]>([])
   const [tasks,    setTasks]    = useState<Task[]>([])
+  const [convs,    setConvs]    = useState<Conv[]>([])
+  const [openConvId, setOpenConvId] = useState<string | null>(null)
   const [loading,  setLoading]  = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportDone, setExportDone] = useState(false)
@@ -29,16 +36,18 @@ export function AdminPanel() {
   async function loadAll() {
     setLoading(true)
     const supabase = createClient()
-    const [m, e, ig, t] = await Promise.all([
+    const [m, e, ig, t, c] = await Promise.all([
       supabase.from("profiles").select("id,name,email,station,role,photo_url").order("name"),
       supabase.from("events").select("id,title,date,station,place").order("date", { ascending: false }),
       supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at").order("created_at", { ascending: false }),
       supabase.from("tasks").select("id,title,station,assignee,status").order("created_at", { ascending: false }),
+      supabase.from("conversations").select("id,type,name,created_at,conversation_members(member_name),chat_messages(id,sender_name,text,created_at,is_system)").order("created_at", { ascending: false }),
     ])
     setMembers((m.data ?? []).filter(x => x.email !== "admin@youthstation.org"))
     setEvents(e.data ?? [])
     setIgemReqs(ig.data ?? [])
     setTasks(t.data ?? [])
+    setConvs((c.data ?? []) as Conv[])
     setLoading(false)
   }
 
@@ -117,10 +126,11 @@ export function AdminPanel() {
   }
 
   const tabs: { key: typeof section; icon: typeof Shield; label: string; count: number }[] = [
-    { key: "members", icon: Users,       label: "Üyeler",        count: members.length },
-    { key: "events",  icon: CalendarDays, label: "Etkinlikler",   count: events.length },
-    { key: "igem",    icon: Rocket,       label: "iGEM Talepleri", count: igemReqs.length },
-    { key: "tasks",   icon: ListTodo,     label: "Görevler",      count: tasks.length },
+    { key: "members", icon: Users,          label: "Üyeler",     count: members.length },
+    { key: "events",  icon: CalendarDays,   label: "Etkinlik",   count: events.length },
+    { key: "igem",    icon: Rocket,         label: "iGEM",       count: igemReqs.length },
+    { key: "tasks",   icon: ListTodo,       label: "Görevler",   count: tasks.length },
+    { key: "convs",   icon: MessageCircle,  label: "Sohbetler",  count: convs.length },
   ]
 
   return (
@@ -168,7 +178,7 @@ export function AdminPanel() {
                 </div>
 
                 {/* Tabs */}
-                <div className="grid grid-cols-4 gap-0 border-b border-border/50">
+                <div className="grid grid-cols-5 gap-0 border-b border-border/50">
                   {tabs.map(tab => (
                     <button
                       key={tab.key}
@@ -336,6 +346,69 @@ export function AdminPanel() {
                                 <p className={`truncate text-xs ${statusColor}`}>{t.assignee}</p>
                               </div>
                               <DeleteButton onConfirm={() => deleteTask(t.id)} />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Conversations */}
+                <AnimatePresence initial={false}>
+                  {section === "convs" && (
+                    <motion.div
+                      initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="divide-y divide-border/50 max-h-96 overflow-y-auto">
+                        {convs.length === 0 && (
+                          <p className="py-6 text-center text-sm text-muted-foreground">Sohbet yok</p>
+                        )}
+                        {convs.map(conv => {
+                          const members = conv.conversation_members.map(m => m.member_name)
+                          const msgs = (conv.chat_messages ?? []).filter(m => !m.is_system)
+                          const isOpen = openConvId === conv.id
+                          const title = conv.type === "dm"
+                            ? `DM: ${members.join(" & ")}`
+                            : (conv.name ?? "Grup")
+                          return (
+                            <div key={conv.id} className="border-b border-border/50 last:border-0">
+                              <button
+                                onClick={() => setOpenConvId(isOpen ? null : conv.id)}
+                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left active:bg-secondary"
+                              >
+                                <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-semibold text-foreground">{title}</p>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {members.join(", ")} · {msgs.length} mesaj
+                                  </p>
+                                </div>
+                                <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                              </button>
+                              {isOpen && (
+                                <div className="max-h-48 overflow-y-auto border-t border-border/30 bg-secondary/30">
+                                  {msgs.length === 0 && (
+                                    <p className="py-3 text-center text-xs text-muted-foreground">Mesaj yok</p>
+                                  )}
+                                  {msgs
+                                    .slice()
+                                    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+                                    .map((msg) => (
+                                      <div key={msg.id} className="border-b border-border/20 px-4 py-2 last:border-0">
+                                        <div className="flex items-baseline gap-2">
+                                          <span className="shrink-0 text-[11px] font-semibold text-primary">{msg.sender_name}</span>
+                                          <span className="text-[10px] text-muted-foreground">
+                                            {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-foreground">{msg.text ?? ""}</p>
+                                      </div>
+                                    ))
+                                  }
+                                </div>
+                              )}
                             </div>
                           )
                         })}
