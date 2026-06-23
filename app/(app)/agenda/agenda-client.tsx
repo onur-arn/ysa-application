@@ -314,24 +314,6 @@ export function AgendaClient({
       <Modal open={!!selected} onClose={() => setSelected(null)} title={t("agenda.eventDetail")}>
         {selected && (
           <div className="flex flex-col gap-4">
-            {/* Author actions */}
-            {selected.createdBy && selected.createdBy === currentUserId && (
-              <div className="flex gap-2 self-end">
-                <button
-                  onClick={() => { setEditingEvent(selected); setSelected(null) }}
-                  className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary transition-colors active:bg-primary/10"
-                >
-                  <Pencil className="size-4" /> Düzenle
-                </button>
-                <button
-                  onClick={() => handleDelete(selected.id)}
-                  className="flex items-center gap-1.5 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-semibold text-destructive transition-colors active:bg-destructive/10"
-                >
-                  <Trash2 className="size-4" /> Sil
-                </button>
-              </div>
-            )}
-
             <div
               className="rounded-2xl p-4 text-white"
               style={{
@@ -371,6 +353,24 @@ export function AgendaClient({
                 >
                   {selected.link}
                 </a>
+              </div>
+            )}
+
+            {/* Author actions */}
+            {selected.createdBy && selected.createdBy === currentUserId && (
+              <div className="flex gap-2 self-end pt-1">
+                <button
+                  onClick={() => { setEditingEvent(selected); setSelected(null) }}
+                  className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary transition-colors active:bg-primary/10"
+                >
+                  <Pencil className="size-4" /> Düzenle
+                </button>
+                <button
+                  onClick={() => handleDelete(selected.id)}
+                  className="flex items-center gap-1.5 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-semibold text-destructive transition-colors active:bg-destructive/10"
+                >
+                  <Trash2 className="size-4" /> Sil
+                </button>
               </div>
             )}
           </div>
