@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Shield, ChevronDown, Trash2, Loader2, Users,
-  CalendarDays, Rocket, ListTodo, FileDown, MessageCircle, ChevronRight,
+  CalendarDays, Rocket, ListTodo, FileDown, MessageCircle, ChevronRight, Newspaper,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getStation } from "@/lib/data/stations"
@@ -13,6 +13,7 @@ type Member = { id: string; name: string; email: string; station: string; role: 
 type Event  = { id: string; title: string; date: string; station: string; place: string }
 type IgemReq = { id: string; author: string; initials: string; station: string; motivation: string; created_at: string }
 type Task   = { id: string; title: string; station: string; assignee: string; status: string }
+type PostItem = { id: string; author: string; content: string; station: string; created_at: string }
 type Conv   = {
   id: string; type: string; name: string | null; created_at: string
   conversation_members: Array<{ member_name: string }>
@@ -21,12 +22,13 @@ type Conv   = {
 
 export function AdminPanel() {
   const [open, setOpen] = useState(false)
-  const [section, setSection] = useState<"members" | "events" | "igem" | "tasks" | "convs" | null>(null)
+  const [section, setSection] = useState<"members" | "events" | "igem" | "tasks" | "convs" | "posts" | null>(null)
 
   const [members,  setMembers]  = useState<Member[]>([])
   const [events,   setEvents]   = useState<Event[]>([])
   const [igemReqs, setIgemReqs] = useState<IgemReq[]>([])
   const [tasks,    setTasks]    = useState<Task[]>([])
+  const [posts,    setPosts]    = useState<PostItem[]>([])
   const [convs,    setConvs]    = useState<Conv[]>([])
   const [openConvId, setOpenConvId] = useState<string | null>(null)
   const [loading,  setLoading]  = useState(false)
@@ -36,17 +38,19 @@ export function AdminPanel() {
   async function loadAll() {
     setLoading(true)
     const supabase = createClient()
-    const [m, e, ig, t, c] = await Promise.all([
+    const [m, e, ig, t, p, c] = await Promise.all([
       supabase.from("profiles").select("id,name,email,station,role,photo_url").order("name"),
       supabase.from("events").select("id,title,date,station,place").order("date", { ascending: false }),
       supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at").order("created_at", { ascending: false }),
       supabase.from("tasks").select("id,title,station,assignee,status").order("created_at", { ascending: false }),
+      supabase.from("posts").select("id,author,content,station,created_at").order("created_at", { ascending: false }),
       supabase.from("conversations").select("id,type,name,created_at,conversation_members(member_name),chat_messages(id,sender_name,text,created_at,is_system)").order("created_at", { ascending: false }),
     ])
     setMembers((m.data ?? []).filter(x => x.email !== "admin@youthstation.org"))
     setEvents(e.data ?? [])
     setIgemReqs(ig.data ?? [])
     setTasks(t.data ?? [])
+    setPosts(p.data ?? [])
     setConvs((c.data ?? []) as Conv[])
     setLoading(false)
   }
@@ -80,6 +84,12 @@ export function AdminPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ taskId: id }),
     })
+  }
+
+  async function deletePost(id: string) {
+    setPosts(prev => prev.filter(p => p.id !== id))
+    const supabase = createClient()
+    await supabase.from("posts").delete().eq("id", id)
   }
 
   async function rejectIgem(id: string) {
@@ -124,6 +134,7 @@ export function AdminPanel() {
     { key: "events",  icon: CalendarDays,   label: "Etkinlik",   count: events.length },
     { key: "igem",    icon: Rocket,         label: "iGEM",       count: igemReqs.length },
     { key: "tasks",   icon: ListTodo,       label: "Görevler",   count: tasks.length },
+    { key: "posts",   icon: Newspaper,      label: "Paylaşım",   count: posts.length },
     { key: "convs",   icon: MessageCircle,  label: "Sohbetler",  count: convs.length },
   ]
 
@@ -172,7 +183,7 @@ export function AdminPanel() {
                 </div>
 
                 {/* Tabs */}
-                <div className="grid grid-cols-5 gap-0 border-b border-border/50">
+                <div className="grid grid-cols-6 gap-0 border-b border-border/50">
                   {tabs.map(tab => (
                     <button
                       key={tab.key}
@@ -322,6 +333,40 @@ export function AdminPanel() {
                                 <p className={`truncate text-xs ${statusColor}`}>{t.assignee}</p>
                               </div>
                               <DeleteButton onConfirm={() => deleteTask(t.id)} />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Posts */}
+                <AnimatePresence initial={false}>
+                  {section === "posts" && (
+                    <motion.div
+                      initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="divide-y divide-border/50 max-h-72 overflow-y-auto">
+                        {posts.length === 0 && (
+                          <p className="py-6 text-center text-sm text-muted-foreground">Paylaşım yok</p>
+                        )}
+                        {posts.map(p => {
+                          const s = getStation(p.station as never)
+                          return (
+                            <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
+                              <span
+                                className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[9px] font-bold text-white"
+                                style={{ backgroundColor: `hsl(${s.color})` }}
+                              >
+                                {s.short}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold text-foreground">{p.author}</p>
+                                <p className="truncate text-xs text-muted-foreground">{p.content}</p>
+                              </div>
+                              <DeleteButton onConfirm={() => deletePost(p.id)} />
                             </div>
                           )
                         })}

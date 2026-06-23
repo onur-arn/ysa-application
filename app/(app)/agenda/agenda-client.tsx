@@ -131,7 +131,7 @@ export function AgendaClient({
           const d = localDate(e.date)
           return d.getFullYear() === year && d.getMonth() === month
         })
-        .sort((a, b) => a.date.localeCompare(b.date)),
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? "")),
     [filtered, year, month],
   )
 
@@ -296,7 +296,7 @@ export function AgendaClient({
       ) : (
         <div className="flex flex-col gap-2 px-4">
           {[...filtered]
-            .sort((a, b) => a.date.localeCompare(b.date))
+            .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? ""))
             .map((e) => (
               <EventRow key={e.id} event={e} onClick={() => setSelected(e)} showMonth />
             ))}
