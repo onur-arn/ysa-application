@@ -399,7 +399,7 @@ export function AgendaClient({
 
             {/* Author actions */}
             {selected.createdBy && selected.createdBy === currentUserId && (
-              <div className="flex gap-2 self-end pt-1">
+              <div className="flex gap-2 self-end -mt-2">
                 <button
                   onClick={() => { setEditingEvent(selected); setSelected(null) }}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary transition-colors active:bg-primary/10"
