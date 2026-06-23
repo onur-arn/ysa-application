@@ -11,6 +11,7 @@ import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { PageHeader } from "@/components/app-shell"
 import { createClient } from "@/lib/supabase/client"
+import { useNavVisibility } from "@/lib/nav-visibility"
 
 type Tab = "groups" | "dm"
 
@@ -88,9 +89,16 @@ export function MessagesClient({
   initialConversations = [],
 }: MessagesClientProps) {
   const { t } = useI18n()
+  const { setHideNav } = useNavVisibility()
   const [tab, setTab] = useState<Tab>("groups")
   const [search, setSearch] = useState("")
   const [openId, setOpenId] = useState<string | null>(null)
+
+  // Hide bottom nav when a conversation is open
+  useEffect(() => {
+    setHideNav(openId !== null)
+    return () => setHideNav(false)
+  }, [openId])
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
     name: initialProfile?.name ?? "",

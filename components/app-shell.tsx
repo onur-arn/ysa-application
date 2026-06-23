@@ -9,6 +9,13 @@ import { usePathname } from "next/navigation"
 import { useState, useEffect, type ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usePullToRefresh } from "@/lib/use-pull-to-refresh"
+import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
+
+function BottomNavWrapper() {
+  const { hideNav } = useNavVisibility()
+  if (hideNav) return null
+  return <BottomNav />
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
@@ -40,6 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pullProgress = Math.min(pull / THRESHOLD, 1)
 
   return (
+    <NavVisibilityProvider>
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background">
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card/95 px-4 py-2.5 backdrop-blur-lg">
         <Link href="/feed" className="flex items-center gap-2" aria-label="YouthStation">
@@ -98,8 +106,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         {children}
       </main>
-      <BottomNav />
+      <BottomNavWrapper />
     </div>
+    </NavVisibilityProvider>
   )
 }
 
