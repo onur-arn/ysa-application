@@ -15,6 +15,9 @@ import { useTheme } from "@/lib/theme/context"
 import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
+import { AdminPanel } from "./admin-panel"
+
+const ADMIN_EMAIL = "admin@youthstation.org"
 
 type ProfileData = {
   name: string
@@ -305,6 +308,9 @@ export function SettingsClient({
             </div>
           </Section>
         )}
+
+        {/* Admin panel — admin@youthstation.org only */}
+        {initialEmail === ADMIN_EMAIL && <AdminPanel />}
 
         {/* Logout */}
         <button
