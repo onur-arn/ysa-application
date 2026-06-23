@@ -909,7 +909,6 @@ function NewDMModal({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="İsim ara…"
-              autoFocus
               className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
             />
           </div>
@@ -1015,7 +1014,6 @@ function CreateGroupModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Grup adı…"
-            autoFocus
             className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
 

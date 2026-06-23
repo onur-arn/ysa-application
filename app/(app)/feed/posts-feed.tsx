@@ -352,7 +352,6 @@ function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (conte
           {tab === "post" ? (
             <>
               <textarea
-                autoFocus
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 placeholder="Ne paylaşmak istiyorsunuz?"
@@ -393,7 +392,6 @@ function ComposeModal({ onClose, onPost }: { onClose: () => void; onPost: (conte
               <div className="mb-3">
                 <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Soru</label>
                 <input
-                  autoFocus
                   value={question}
                   onChange={e => setQuestion(e.target.value)}
                   placeholder="Sorunuzu yazın…"
