@@ -487,17 +487,13 @@ function CreateEventModal({
         <Field label={t("agenda.eventTitle")}>
           <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder={t("agenda.eventTitlePlaceholder")} />
         </Field>
-        <div className="flex gap-3">
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <Field label={t("agenda.day")}>
-              <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " w-full text-sm px-2"} />
-            </Field>
-          </div>
-          <div className="w-28 shrink-0 overflow-hidden">
-            <Field label={t("agenda.time")}>
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " w-full text-sm px-2"} />
-            </Field>
-          </div>
+        <div className="grid grid-cols-[1fr_90px] gap-2">
+          <Field label={t("agenda.day")}>
+            <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " w-full text-sm px-2"} />
+          </Field>
+          <Field label={t("agenda.time")}>
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " w-full text-sm px-2"} />
+          </Field>
         </div>
         <Field label={t("agenda.place")}>
           <input value={place} onChange={(e) => setPlace(e.target.value)} className={inputClass} placeholder={t("agenda.placePlaceholder")} />
