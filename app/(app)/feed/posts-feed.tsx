@@ -536,82 +536,71 @@ function IgemCard({ author, initials, station, motivation, date, photoMap }: {
 }
 
 // ── Main feed ─────────────────────────────────────────────────────────────────
-export function PostsFeed() {
-  const [igemRequests, setIgemRequests] = useState<{ author: string; initials: string; station: string; motivation: string; date: string }[]>([])
+interface PostsFeedProps {
+  initialMe?: { id: string; name: string; initials: string; station: string; photoUrl?: string | null }
+  initialPosts?: Record<string, unknown>[]
+  initialIgem?: Record<string, unknown>[]
+  initialPhotoMap?: { id: string; name: string; photo_url: string | null }[]
+}
+
+function mapPostsFromRaw(postsRaw: Record<string, unknown>[]): Post[] {
+  return postsRaw.map((p) => ({
+    id: p.id as string,
+    author: (p.author as string) ?? "",
+    initials: (p.initials as string) ?? "?",
+    station: ((p.station ?? "paris") as StationId),
+    content: (p.content as string) ?? "",
+    imageUrl: (p.image_url as string) ?? undefined,
+    createdAt: p.created_at as string,
+    createdBy: (p.created_by as string) ?? undefined,
+    likedBy: ((p.post_likes as { voter_name: string }[]) ?? []).map((l) => l.voter_name),
+    comments: ((p.post_comments as { id: string; author: string; initials: string; station: string; text: string; created_at: string }[]) ?? []).map((c) => ({
+      id: c.id,
+      author: c.author ?? "",
+      initials: c.initials ?? "?",
+      station: ((c.station ?? "paris") as StationId),
+      text: c.text ?? "",
+      time: timeAgo(c.created_at),
+    })),
+  }))
+}
+
+export function PostsFeed({
+  initialMe,
+  initialPosts = [],
+  initialIgem = [],
+  initialPhotoMap = [],
+}: PostsFeedProps) {
+  const [igemRequests, setIgemRequests] = useState<{ author: string; initials: string; station: string; motivation: string; date: string }[]>(() =>
+    initialIgem.map((r) => ({
+      author: (r.author as string) ?? "",
+      initials: (r.initials as string) ?? "?",
+      station: (r.station as string) ?? "intl",
+      motivation: (r.motivation as string) ?? "",
+      date: r.created_at as string,
+    }))
+  )
   const [showArchive, setShowArchive] = useState(false)
-  const [isIntl, setIsIntl] = useState(false)
-  const [photoMap, setPhotoMap] = useState<Map<string, string>>(new Map())
-  const [me, setMe] = useState<{ id: string; name: string; initials: string; station: string; photoUrl?: string | null }>({
-    id: "", name: "", initials: "", station: "paris",
+  const [isIntl, setIsIntl] = useState(initialMe?.station === "intl" || !initialMe)
+  const [photoMap, setPhotoMap] = useState<Map<string, string>>(() => {
+    const map = new Map<string, string>()
+    initialPhotoMap.forEach(p => {
+      if (p.photo_url) {
+        map.set(p.id, p.photo_url)
+        map.set(p.name, p.photo_url)
+      }
+    })
+    return map
   })
+  const [me, setMe] = useState<{ id: string; name: string; initials: string; station: string; photoUrl?: string | null }>(
+    initialMe ?? { id: "", name: "", initials: "", station: "paris" }
+  )
+
+  const [posts, setPosts] = useState<Post[]>(() => mapPostsFromRaw(initialPosts))
+  const [composeOpen, setComposeOpen] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
-
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data: profile } = await supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
-        if (profile) {
-          const ini = profile.initials || profile.name?.trim().split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || ""
-          setMe({ id: user.id, name: profile.name || "", initials: ini, station: profile.station || "paris", photoUrl: profile.photo_url })
-          setIsIntl(profile.station === "intl")
-        }
-      } else {
-        setIsIntl(true)
-      }
-
-      // Build photo map: UUID → photo_url (primary) + name → photo_url (fallback for comments/igem)
-      const { data: allProfiles } = await supabase.from("profiles").select("id,name,photo_url")
-      if (allProfiles) {
-        const map = new Map<string, string>()
-        allProfiles.forEach(p => {
-          if (p.photo_url) {
-            map.set(p.id, p.photo_url)   // UUID key — collision-free, used for posts
-            map.set(p.name, p.photo_url) // name key — fallback for comments/igem
-          }
-        })
-        setPhotoMap(map)
-      }
-
-      const { data: igem } = await supabase.from("igem_requests").select("author,initials,station,motivation,created_at")
-      if (igem) {
-        setIgemRequests(igem.map((r) => ({
-          author: r.author,
-          initials: r.initials ?? "?",
-          station: r.station ?? "intl",
-          motivation: r.motivation ?? "",
-          date: r.created_at,
-        })))
-      }
-
-      const { data: postsData } = await supabase
-        .from("posts")
-        .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at)")
-        .order("created_at", { ascending: false })
-      if (postsData) {
-        setPosts(postsData.map((p) => ({
-          id: p.id,
-          author: p.author ?? "",
-          initials: p.initials ?? "?",
-          station: (p.station ?? "paris") as StationId,
-          content: p.content ?? "",
-          imageUrl: p.image_url ?? undefined,
-          createdAt: p.created_at,
-          createdBy: p.created_by ?? undefined,
-          likedBy: (p.post_likes ?? []).map((l: { voter_name: string }) => l.voter_name),
-          comments: (p.post_comments ?? []).map((c: { id: string; author: string; initials: string; station: string; text: string; created_at: string }) => ({
-            id: c.id,
-            author: c.author ?? "",
-            initials: c.initials ?? "?",
-            station: (c.station ?? "paris") as StationId,
-            text: c.text ?? "",
-            time: timeAgo(c.created_at),
-          })),
-        })))
-      }
-    }
-    load()
 
     // Realtime: new posts appear instantly for all users
     const channel = supabase
@@ -673,9 +662,6 @@ export function PostsFeed() {
 
     return () => { supabase.removeChannel(channel) }
   }, [])
-
-  const [posts, setPosts] = useState<Post[]>([])
-  const [composeOpen, setComposeOpen] = useState(false)
 
   function updatePost(updated: Post) {
     setPosts(prev => prev.map(p => p.id === updated.id ? updated : p))

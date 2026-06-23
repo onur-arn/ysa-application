@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
@@ -42,96 +42,73 @@ type CustomDM = {
 
 type CurrentUser = { station: StationId; name: string; isIntl: boolean }
 
-export function MessagesClient() {
+interface MessagesClientProps {
+  initialUserId?: string
+  initialProfile?: { name: string; initials: string; station: string } | null
+  initialProfiles?: { id: string; name: string; photo_url: string | null }[]
+  initialConversations?: Record<string, unknown>[]
+}
+
+function mapConversations(
+  convRows: Record<string, unknown>[],
+  userName: string,
+): { groups: CustomGroup[]; dms: CustomDM[] } {
+  const groups: CustomGroup[] = []
+  const dms: CustomDM[] = []
+
+  for (const c of convRows) {
+    const memberNames = ((c.conversation_members as { member_name: string }[]) ?? [])
+      .map((m) => m.member_name)
+      .filter((n) => n !== userName)
+
+    // Derive last message from embedded chat_messages (sorted asc, last is the latest)
+    const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; is_system: boolean; created_at: string }[]) ?? []
+    const lastMsgObj = msgs.length > 0 ? msgs[msgs.length - 1] : null
+    const lastMessage = lastMsgObj?.text ?? ((c.type as string) === "group" ? "Grup oluşturuldu" : "")
+    const lastTime = lastMsgObj?.created_at
+      ? new Date(lastMsgObj.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+      : ""
+
+    if ((c.type as string) === "group") {
+      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", memberNames, lastMessage, lastTime, unread: 0, messages: [] })
+    } else {
+      const otherName = memberNames[0] ?? ""
+      dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
+    }
+  }
+
+  return { groups, dms }
+}
+
+export function MessagesClient({
+  initialUserId = "",
+  initialProfile = null,
+  initialProfiles = [],
+  initialConversations = [],
+}: MessagesClientProps) {
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>("groups")
   const [search, setSearch] = useState("")
   const [openId, setOpenId] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<CurrentUser>({ station: "intl", name: "", isIntl: true })
-  const [customGroups, setCustomGroups] = useState<CustomGroup[]>([])
-  const [customDMs, setCustomDMs]       = useState<CustomDM[]>([])
+  const [currentUser, setCurrentUser] = useState<CurrentUser>({
+    station: (initialProfile?.station as StationId) ?? "intl",
+    name: initialProfile?.name ?? "",
+    isIntl: initialProfile?.station === "intl",
+  })
+
+  const initialMapped = useMemo(
+    () => mapConversations(initialConversations, initialProfile?.name ?? ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  const [customGroups, setCustomGroups] = useState<CustomGroup[]>(initialMapped.groups)
+  const [customDMs, setCustomDMs]       = useState<CustomDM[]>(initialMapped.dms)
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [newDMOpen, setNewDMOpen]             = useState(false)
-  const [photoMap, setPhotoMap]               = useState<Map<string, string>>(new Map())
+  const [photoMap, setPhotoMap]               = useState<Map<string, string>>(
+    () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
+  )
 
-  useEffect(() => {
-    async function load() {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-
-      // Build photo map: name → photo_url
-      const { data: allProfiles } = await supabase.from("profiles").select("name,photo_url")
-      if (allProfiles) {
-        setPhotoMap(new Map(allProfiles.filter(p => p.photo_url).map(p => [p.name as string, p.photo_url as string])))
-      }
-
-      let userName = ""
-      if (user) {
-        const { data: profile } = await supabase.from("profiles").select("name,station").eq("id", user.id).single()
-        if (profile) {
-          userName = profile.name ?? ""
-          setCurrentUser({
-            station: (profile.station as StationId) ?? "intl",
-            name: profile.name ?? "",
-            isIntl: profile.station === "intl",
-          })
-        }
-      }
-
-      if (!userName) return
-
-      // Load groups from Supabase where current user is a member
-      const { data: memberRows } = await supabase
-        .from("conversation_members")
-        .select("conversation_id")
-        .eq("member_name", userName)
-
-      const convIds = memberRows?.map((r: { conversation_id: string }) => r.conversation_id) ?? []
-
-      if (convIds.length > 0) {
-        const { data: convRows } = await supabase
-          .from("conversations")
-          .select("id,type,name,initials,created_at,conversation_members(member_name)")
-          .in("id", convIds)
-          .order("created_at", { ascending: false })
-
-        if (convRows) {
-          const groups: CustomGroup[] = []
-          const dms: CustomDM[] = []
-
-          for (const c of convRows) {
-            const memberNames = (c.conversation_members ?? [])
-              .map((m: { member_name: string }) => m.member_name)
-              .filter((n: string) => n !== userName)
-
-            const { data: lastMsg } = await supabase
-              .from("chat_messages")
-              .select("text,created_at")
-              .eq("conversation_id", c.id)
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .single()
-
-            const lastMessage = lastMsg?.text ?? (c.type === "group" ? "Grup oluşturuldu" : "")
-            const lastTime = lastMsg?.created_at
-              ? new Date(lastMsg.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-              : ""
-
-            if (c.type === "group") {
-              groups.push({ id: c.id, name: c.name ?? "", initials: c.initials ?? "", memberNames, lastMessage, lastTime, unread: 0, messages: [] })
-            } else {
-              const otherName = memberNames[0] ?? ""
-              groups // DMs are handled separately
-              dms.push({ id: c.id, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
-            }
-          }
-          setCustomGroups(groups)
-          setCustomDMs(dms)
-        }
-      }
-    }
-    load()
-  }, [])
 
   // ── Group actions ─────────────────────────────────────────────────────────
   async function createGroup(name: string, memberNames: string[]) {

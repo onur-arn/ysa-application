@@ -16,89 +16,69 @@ type CurrentUser = { id: string; station: StationId; role: string; name: string;
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done"]
 
-export function TasksClient() {
+interface TasksClientProps {
+  initialUserId?: string
+  initialProfile?: { name: string; initials: string; station: string; role: string } | null
+  initialProfiles?: { id: string; name: string; photo_url: string | null }[]
+  initialTasks?: Record<string, unknown>[]
+  initialComments?: Record<string, unknown>[]
+}
+
+function mapTasksFromRaw(
+  tasksRaw: Record<string, unknown>[],
+  commentsRaw: Record<string, unknown>[],
+): Task[] {
+  const commentsByTask: Record<string, TaskComment[]> = {}
+  for (const c of commentsRaw) {
+    const taskId = c.task_id as string
+    commentsByTask[taskId] = commentsByTask[taskId] || []
+    commentsByTask[taskId].push({
+      id: c.id as string,
+      author: (c.author as string) ?? "",
+      initials: (c.initials as string) ?? "",
+      text: (c.text as string) ?? "",
+      time: new Date(c.created_at as string).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+    })
+  }
+  return tasksRaw.map((t) => ({
+    id: t.id as string,
+    title: (t.title as string) ?? "",
+    description: (t.description as string) ?? "",
+    status: ((t.status as TaskStatus) ?? "todo"),
+    priority: ((t.priority as TaskPriority) ?? "normal"),
+    station: ((t.station as StationId) ?? "paris"),
+    assignee: (t.assignee as string) ?? "Atanmadı",
+    assigneeInitials: (t.assignee_initials as string) ?? "NA",
+    assignedBy: (t.assigned_by as string) ?? "",
+    assignedByInitials: (t.assigned_by_initials as string) ?? "",
+    assignedByStation: ((t.assigned_by_station as StationId) ?? "paris"),
+    comments: commentsByTask[t.id as string] ?? [],
+    createdById: (t.created_by as string) ?? undefined,
+  }))
+}
+
+export function TasksClient({
+  initialUserId = "",
+  initialProfile = null,
+  initialProfiles = [],
+  initialTasks = [],
+  initialComments = [],
+}: TasksClientProps) {
   const { t } = useI18n()
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasks, setTasks] = useState<Task[]>(() => mapTasksFromRaw(initialTasks, initialComments))
   const [filter, setFilter] = useState<TaskStatus | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
-  const [myId, setMyId]             = useState("")
-  const [myStation, setMyStation] = useState<StationId>("intl")
-  const [myRole, setMyRole]       = useState("")
-  const [myName, setMyName]       = useState("")
-  const [myInitials, setMyInitials] = useState("")
-  const [photoMap, setPhotoMap]   = useState<Map<string, string>>(new Map())
+  const [myId, setMyId]             = useState(initialUserId)
+  const [myStation, setMyStation] = useState<StationId>((initialProfile?.station as StationId) ?? "intl")
+  const [myRole, setMyRole]       = useState(initialProfile?.role ?? "")
+  const [myName, setMyName]       = useState(initialProfile?.name ?? "")
+  const [myInitials, setMyInitials] = useState(initialProfile?.initials ?? "")
+  const [photoMap, setPhotoMap]   = useState<Map<string, string>>(
+    () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
+  )
 
   useEffect(() => {
     const supabase = createClient()
-
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      setMyId(user.id)
-      const { data: profile } = await supabase.from("profiles").select("name,initials,station,role").eq("id", user.id).single()
-      if (profile) {
-        setMyStation((profile.station as StationId) ?? "intl")
-        setMyRole(profile.role ?? "")
-        setMyName(profile.name ?? "")
-        setMyInitials(profile.initials ?? "")
-      }
-
-      // Build photo map: name → photo_url
-      const { data: allProfiles } = await supabase.from("profiles").select("name,photo_url")
-      if (allProfiles) {
-        setPhotoMap(new Map(allProfiles.filter(p => p.photo_url).map(p => [p.name as string, p.photo_url as string])))
-      }
-
-      // Load tasks — try with created_by, fallback without if column missing
-      let { data: tasksData, error: tasksErr } = await supabase
-        .from("tasks")
-        .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at,created_by")
-        .order("created_at", { ascending: false })
-      if (tasksErr) {
-        const { data: fallback } = await supabase
-          .from("tasks")
-          .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at")
-          .order("created_at", { ascending: false })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        tasksData = fallback as any
-      }
-
-      // Load all task comments
-      const { data: commentsData } = await supabase
-        .from("task_comments")
-        .select("id,task_id,author,initials,text,created_at")
-        .order("created_at", { ascending: true })
-
-      const commentsByTask: Record<string, TaskComment[]> = {}
-      for (const c of commentsData ?? []) {
-        commentsByTask[c.task_id] = commentsByTask[c.task_id] || []
-        commentsByTask[c.task_id].push({
-          id: c.id,
-          author: c.author ?? "",
-          initials: c.initials ?? "",
-          text: c.text ?? "",
-          time: new Date(c.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
-        })
-      }
-      if (tasksData) {
-        setTasks(tasksData.map((t) => ({
-          id: t.id,
-          title: t.title ?? "",
-          description: t.description ?? "",
-          status: (t.status as TaskStatus) ?? "todo",
-          priority: (t.priority as TaskPriority) ?? "normal",
-          station: (t.station as StationId) ?? "paris",
-          assignee: t.assignee ?? "Atanmadı",
-          assigneeInitials: t.assignee_initials ?? "NA",
-          assignedBy: t.assigned_by ?? "",
-          assignedByInitials: t.assigned_by_initials ?? "",
-          assignedByStation: (t.assigned_by_station as StationId) ?? "paris",
-          comments: commentsByTask[t.id] ?? [],
-          createdById: t.created_by ?? undefined,
-        })))
-      }
-    }
-    load()
 
     const channel = supabase
       .channel("tasks-realtime")

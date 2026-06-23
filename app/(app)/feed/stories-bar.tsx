@@ -28,54 +28,40 @@ type Story = {
   musicPreviewUrl?: string
 }
 
-export function StoriesBar() {
+interface StoriesBarProps {
+  initialUser?: { name: string; station: string; initials: string }
+  initialStories?: Record<string, unknown>[]
+}
+
+function mapStoriesFromRaw(raw: Record<string, unknown>[]): Story[] {
+  return raw.map((s) => ({
+    id: s.id as string,
+    station: s.station as string,
+    authorName: s.author_name as string,
+    initials: s.initials as string,
+    imageUrl: s.image_url as string,
+    createdAt: s.created_at as string,
+    fitMode: ((s.fit_mode as "cover" | "contain") ?? "cover"),
+    musicPreviewUrl: (s.music_preview_url as string) ?? undefined,
+  }))
+}
+
+export function StoriesBar({
+  initialUser,
+  initialStories = [],
+}: StoriesBarProps) {
   const { t } = useI18n()
-  const [stories, setStories]         = useState<Story[]>([])
+  const [stories, setStories]         = useState<Story[]>(() => mapStoriesFromRaw(initialStories))
   const [active, setActive]           = useState<string | null>(null)   // station id
   const [storyIdx, setStoryIdx]       = useState(0)
   const [fromMyButton, setFromMyButton] = useState(false)
   const [editingImage, setEditingImage] = useState<string | null>(null)
-  const [user, setUser] = useState<{ name: string; station: string; initials: string }>({ name: "", station: "paris", initials: "" })
+  const [user, setUser] = useState<{ name: string; station: string; initials: string }>(
+    initialUser ?? { name: "", station: "paris", initials: "" }
+  )
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      const supabase = createClient()
-      const { data: { user: authUser } } = await supabase.auth.getUser()
-      if (authUser) {
-        const { data: profile } = await supabase.from("profiles").select("name,initials,station").eq("id", authUser.id).single()
-        if (profile) {
-          setUser({
-            name: profile.name ?? "",
-            station: profile.station ?? "paris",
-            initials: profile.initials ?? "",
-          })
-        }
-      }
-
-      // Load stories from last 24h
-      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      const { data: dbStories } = await supabase
-        .from("stories")
-        .select("*")
-        .gte("created_at", cutoff)
-        .order("created_at", { ascending: true })
-      if (dbStories) {
-        setStories(dbStories.map((s) => ({
-          id: s.id,
-          station: s.station,
-          authorName: s.author_name,
-          initials: s.initials,
-          imageUrl: s.image_url,
-          createdAt: s.created_at,
-          fitMode: (s.fit_mode as "cover" | "contain") ?? "cover",
-          musicPreviewUrl: s.music_preview_url ?? undefined,
-        })))
-      }
-    }
-    load()
-  }, [])
   const myStories = stories.filter((s) => s.station === user.station)
 
   function openStation(stationId: string, startIdx = 0, myBtn = false) {

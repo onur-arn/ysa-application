@@ -22,7 +22,37 @@ const MONTHS_TR = [
 const WEEKDAYS = ["Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz"]
 const WEEKDAYS_FULL = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-export function AgendaClient() {
+interface AgendaClientProps {
+  initialUserId?: string
+  initialUserStation?: string
+  initialIsIntl?: boolean
+  initialEvents?: Record<string, unknown>[]
+}
+
+function mapEventsFromRaw(eventsRaw: Record<string, unknown>[]): EventItem[] {
+  return eventsRaw.map((e) => ({
+    id: e.id as string,
+    title: (e.title as string) ?? "",
+    date: (e.date as string) ?? "",
+    time: (e.time as string) ?? "18:00",
+    place: (e.place as string) ?? "—",
+    station: ((e.station as StationId) ?? "paris"),
+    description: (e.description as string) ?? undefined,
+    link: (e.link as string) ?? undefined,
+    likes: 0,
+    participantsCount: 0,
+    notAttendingCount: 0,
+    comments: [],
+    createdBy: (e.created_by as string) ?? undefined,
+  }))
+}
+
+export function AgendaClient({
+  initialUserId = "",
+  initialUserStation = "paris",
+  initialIsIntl = false,
+  initialEvents = [],
+}: AgendaClientProps) {
   const { t } = useI18n()
   const [view, setView] = useState<View>("calendar")
   const [filter, setFilter] = useState<Filter>("all")
@@ -30,61 +60,17 @@ export function AgendaClient() {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
-  const [events, setEvents] = useState<EventItem[]>([])
+  const [events, setEvents] = useState<EventItem[]>(() => mapEventsFromRaw(initialEvents))
   const [selected, setSelected] = useState<EventItem | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null)
-  const [userStation, setUserStation] = useState<string>("paris")
-  const [isIntl, setIsIntl] = useState(false)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [userStation, setUserStation] = useState<string>(initialUserStation)
+  const [isIntl, setIsIntl] = useState(initialIsIntl)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialUserId || null)
   const [insertError, setInsertError] = useState<string | null>(null)
 
   useEffect(() => {
-    async function loadUser() {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      setCurrentUserId(user.id)
-      const { data: p } = await supabase.from("profiles").select("station").eq("id", user.id).single()
-      if (p?.station) {
-        setUserStation(p.station)
-        setIsIntl(p.station === "intl")
-      }
-    }
-    loadUser()
-  }, [])
-
-  useEffect(() => {
     const supabase = createClient()
-
-    async function loadEvents() {
-      const { data, error } = await supabase
-        .from("events")
-        .select("id,title,date,time,place,station,description,link,created_by")
-        .order("date", { ascending: true })
-      if (error) {
-        console.error("[agenda] loadEvents error:", error.message)
-        return
-      }
-      if (data) {
-        setEvents(data.map((e) => ({
-          id: e.id,
-          title: e.title ?? "",
-          date: e.date ?? "",
-          time: e.time ?? "18:00",
-          place: e.place ?? "—",
-          station: (e.station as StationId) ?? "paris",
-          description: e.description ?? undefined,
-          link: e.link ?? undefined,
-          likes: 0,
-          participantsCount: 0,
-          notAttendingCount: 0,
-          comments: [],
-          createdBy: e.created_by ?? undefined,
-        })))
-      }
-    }
-    loadEvents()
 
     const channel = supabase
       .channel("events-realtime")

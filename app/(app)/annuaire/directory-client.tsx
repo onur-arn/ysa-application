@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo } from "react"
 import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { MEMBERS, STATIONS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
@@ -10,48 +10,50 @@ import { createClient } from "@/lib/supabase/client"
 
 type StationFilter = "all" | StationId
 
-export function DirectoryClient() {
+interface DirectoryClientProps {
+  initialCurrentUserId?: string
+  initialCurrentUserStation?: string
+  initialProfiles?: Record<string, unknown>[]
+}
+
+function mapProfiles(profiles: Record<string, unknown>[]): Member[] {
+  return profiles.map((p) => ({
+    id: p.id as string,
+    name: (p.name as string) ?? "",
+    initials: (p.initials as string) ?? "",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    role: ((p.role as string) ?? "") as any,
+    station: ((p.station ?? "paris") as StationId),
+    city: (p.station as string) ?? "paris",
+    email: (p.email as string) ?? "",
+    phone: (p.phone as string) ?? "",
+    birthday: (p.birthday as string) ?? "",
+    linkedin: (p.linkedin as string) ?? "",
+    memleket: (p.memleket as string) ?? "",
+    igemEgitimi: (p.igem_egitimi as "evet" | "hayır") ?? undefined,
+    photoUrl: (p.photo_url as string) ?? undefined,
+    online: false,
+  }))
+}
+
+export function DirectoryClient({
+  initialCurrentUserId = "",
+  initialCurrentUserStation = "paris",
+  initialProfiles = [],
+}: DirectoryClientProps) {
   const { t } = useI18n()
   const [search, setSearch] = useState("")
   const [stationFilter, setStationFilter] = useState<StationFilter>("all")
   const [selected, setSelected] = useState<Member | null>(null)
-  const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
-  const [currentUser, setCurrentUser] = useState<{ station: StationId; isIntl: boolean }>({ station: "paris", isIntl: false })
+  const [allMembers, setAllMembers] = useState<Member[]>(() =>
+    initialProfiles.length > 0 ? mapProfiles(initialProfiles) : MEMBERS
+  )
+  const [currentUser, setCurrentUser] = useState<{ station: StationId; isIntl: boolean }>({
+    station: (initialCurrentUserStation as StationId) ?? "paris",
+    isIntl: initialCurrentUserStation === "intl",
+  })
   const [assignOpen, setAssignOpen] = useState(false)
 
-  useEffect(() => {
-    async function load() {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data: me } = await supabase.from("profiles").select("station").eq("id", user.id).single()
-        if (me?.station) {
-          setCurrentUser({ station: me.station as StationId, isIntl: me.station === "intl" })
-        }
-      }
-      const { data: profiles } = await supabase.from("profiles").select("*")
-      if (profiles && profiles.length > 0) {
-        const mapped: Member[] = profiles.map((p) => ({
-          id: p.id,
-          name: p.name ?? "",
-          initials: p.initials ?? "",
-          role: p.role ?? "",
-          station: (p.station ?? "paris") as StationId,
-          city: p.station ?? "paris",
-          email: p.email ?? "",
-          phone: p.phone ?? "",
-          birthday: p.birthday ?? "",
-          linkedin: p.linkedin ?? "",
-          memleket: p.memleket ?? "",
-          igemEgitimi: p.igem_egitimi ?? undefined,
-          photoUrl: p.photo_url ?? undefined,
-          online: false,
-        }))
-        setAllMembers(mapped)
-      }
-    }
-    load()
-  }, [])
 
   // All stations see all members
   const visibleMembers = allMembers
