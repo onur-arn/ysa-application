@@ -93,7 +93,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <main
-        className="flex-1 pb-24"
+        className="flex-1 pb-28"
         style={{ transform: pull > 0 ? `translateY(${pull * 0.3}px)` : undefined, transition: pull === 0 ? "transform 0.25s ease" : "none" }}
       >
         {children}

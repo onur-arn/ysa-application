@@ -921,7 +921,7 @@ export function PostsFeed({
       {/* Compose button */}
       <button
         onClick={() => setComposeOpen(true)}
-        className="fixed bottom-36 right-1/2 z-30 flex h-14 w-14 translate-x-[calc(min(50vw,224px)-1.5rem)] items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 transition-transform active:scale-90"
+        className="fixed bottom-20 right-1/2 z-30 flex h-14 w-14 translate-x-[calc(min(50vw,224px)-1.5rem)] items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 transition-transform active:scale-90"
       >
         <Plus className="h-7 w-7" />
       </button>
