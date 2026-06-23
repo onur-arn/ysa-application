@@ -356,3 +356,14 @@ create policy "Auth users upload chat images"
 create policy "Auth users delete own chat image"
   on storage.objects for delete to authenticated
   using (bucket_id = 'chat-images');
+
+-- ── EVENTS — colonnes ajoutées si table créée avant le schema complet ────────
+-- À exécuter si erreur "Could not find column ... in schema cache"
+-- Puis : Supabase Dashboard > Settings > API > Reload schema cache
+alter table events add column if not exists time        text;
+alter table events add column if not exists place       text;
+alter table events add column if not exists station     text;
+alter table events add column if not exists description text;
+alter table events add column if not exists link        text;
+alter table events add column if not exists created_by  uuid references auth.users(id) on delete set null;
+alter table events add column if not exists created_at  timestamptz default now();

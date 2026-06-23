@@ -396,7 +396,21 @@ export function AgendaClient({
           setInsertError(null)
           const supabase = createClient()
           const { data: { user } } = await supabase.auth.getUser()
-          const { data, error } = await supabase.from("events").insert({
+          // Pre-generate UUID client-side to avoid relying on .select() after insert
+          // (which fails when PostgREST schema cache is stale)
+          const newId = crypto.randomUUID()
+          const newEvent = { ...e, id: newId, createdBy: user?.id }
+
+          // Show event immediately in UI
+          setEvents((prev) => [...prev, newEvent])
+          if (e.date) {
+            const d = new Date(e.date + "T00:00:00")
+            setCursor(new Date(d.getFullYear(), d.getMonth(), 1))
+          }
+          setSelected(newEvent)
+
+          const { error } = await supabase.from("events").insert({
+            id: newId,
             title: e.title,
             date: e.date,
             time: e.time,
@@ -405,19 +419,12 @@ export function AgendaClient({
             description: e.description ?? null,
             link: e.link ?? null,
             created_by: user?.id ?? null,
-          }).select().single()
+          })
 
-          if (!error && data) {
-            const newEvent = { ...e, id: data.id, createdBy: user?.id }
-            setEvents((prev) => [...prev, newEvent])
-            // Navigate to the event's month and show detail
-            if (e.date) {
-              const d = new Date(e.date + "T00:00:00")
-              setCursor(new Date(d.getFullYear(), d.getMonth(), 1))
-            }
-            setSelected(newEvent)
-          } else if (error) {
+          if (error) {
             console.error("[agenda] insert event failed:", error.message)
+            setEvents((prev) => prev.filter((x) => x.id !== newId))
+            setSelected(null)
             setInsertError(`Etkinlik kaydedilemedi: ${error.message}`)
           }
         }}
