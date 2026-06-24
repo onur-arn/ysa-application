@@ -5,7 +5,6 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState, useEffect, type ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { usePullToRefresh } from "@/lib/use-pull-to-refresh"
 import { useMidnightLogout } from "@/lib/use-midnight-logout"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
 import { PresenceProvider } from "@/lib/presence"
@@ -25,13 +24,10 @@ function BottomNavWrapper() {
   return <BottomNav />
 }
 
-function MainWrapper({ children, pull }: { children: ReactNode; pull: number }) {
+function MainWrapper({ children }: { children: ReactNode }) {
   const { hideNav } = useNavVisibility()
   return (
-    <main
-      className={`relative flex-1 ${hideNav ? "" : "pb-28"}`}
-      style={{ transform: pull > 0 ? `translateY(${pull * 0.3}px)` : undefined, transition: pull === 0 ? "transform 0.25s ease" : "none" }}
-    >
+    <main className={`relative flex-1 ${hideNav ? "" : "pb-28"}`}>
       {children}
     </main>
   )
@@ -45,7 +41,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [avatar, setAvatar] = useState<{ photoUrl?: string | null; initials: string; color: string } | null>(null)
   const [userName, setUserName] = useState("")
 
-  const { pull, refreshing } = usePullToRefresh()
   useMidnightLogout()
 
   useEffect(() => {
@@ -66,9 +61,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     loadAvatar()
   }, [])
-
-  const THRESHOLD = 72
-  const pullProgress = Math.min(pull / THRESHOLD, 1)
 
   return (
     <NavVisibilityProvider>
@@ -100,31 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* Pull-to-refresh indicator */}
-      <div
-        className="pointer-events-none flex items-center justify-center overflow-hidden transition-all duration-200"
-        style={{ height: pull > 0 || refreshing ? `${pull}px` : 0 }}
-      >
-        <svg
-          className="text-primary"
-          style={{
-            width: 28,
-            height: 28,
-            opacity: pullProgress,
-            transform: `rotate(${refreshing ? 0 : pullProgress * 360 * 0.8}deg)`,
-            animation: refreshing ? "spin 0.7s linear infinite" : "none",
-          }}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          strokeLinecap="round"
-        >
-          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-        </svg>
-      </div>
-
-      <MainWrapper pull={pull}>{children}</MainWrapper>
+      <MainWrapper>{children}</MainWrapper>
       <BottomNavWrapper />
     </div>
     </PresenceProvider>

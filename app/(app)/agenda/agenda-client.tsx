@@ -7,7 +7,6 @@ import { useI18n } from "@/lib/i18n/context"
 import { createClient } from "@/lib/supabase/client"
 import { type EventItem } from "@/lib/data/feed"
 import { STATIONS_SORTED, getStation, type StationId } from "@/lib/data/stations"
-import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
@@ -190,8 +189,6 @@ export function AgendaClient({
 
   return (
     <div>
-      <PageHeader title={t("nav.agenda")} />
-
       {/* Station filter */}
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-2 pt-3">
         <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label={t("agenda.all")} />

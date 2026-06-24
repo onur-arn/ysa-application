@@ -4,7 +4,6 @@ import { useState, useMemo } from "react"
 import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { MEMBERS, STATIONS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
-import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
@@ -101,8 +100,6 @@ export function DirectoryClient({
 
   return (
     <div>
-      <PageHeader title={t("nav.directory")} />
-
       <div className="px-4 pt-3">
         {/* Search */}
         <div className="relative mb-3">

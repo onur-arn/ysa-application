@@ -9,7 +9,6 @@ import {
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
-import { PageHeader } from "@/components/app-shell"
 import { createClient } from "@/lib/supabase/client"
 import { useNavVisibility } from "@/lib/nav-visibility"
 import { Modal } from "@/components/ui/modal"
@@ -388,7 +387,6 @@ export function MessagesClient({
   // ── List view ─────────────────────────────────────────────────────────────
   return (
     <div>
-      <PageHeader title={t("nav.messages")} />
       <div className="px-4 pt-3">
         {/* Search */}
         <div className="relative mb-3">

@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { motion } from "framer-motion"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, Moon, Sun } from "lucide-react"
+import { useTheme } from "@/lib/theme/context"
 
 export default function LandingPage() {
   const router = useRouter()
+  const { theme, toggle } = useTheme()
 
   return (
     <main
@@ -19,6 +21,19 @@ export default function LandingPage() {
         <div className="absolute -left-24 top-1/3 size-64 rounded-full bg-[#3B62E8]/10 blur-3xl" />
         <div className="absolute -right-16 bottom-1/4 size-56 rounded-full bg-[#4B73F7]/8 blur-3xl" />
       </div>
+
+      {/* Theme toggle — top right */}
+      <button
+        onClick={toggle}
+        className="absolute right-4 top-4 flex size-9 items-center justify-center rounded-xl transition-colors"
+        style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}
+        aria-label="Tema değiştir"
+      >
+        {theme === "dark"
+          ? <Sun className="size-4 text-white/70" />
+          : <Moon className="size-4 text-white/70" />
+        }
+      </button>
 
       {/* Top spacer */}
       <div />

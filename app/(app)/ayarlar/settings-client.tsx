@@ -264,11 +264,21 @@ export function SettingsClient({
         <button
           onClick={logout}
           disabled={loggingOut}
-          className="mb-4 flex items-center justify-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/5 py-3.5 font-semibold text-destructive transition-colors active:bg-destructive/10 disabled:opacity-60"
+          className="flex items-center justify-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/5 py-3.5 font-semibold text-destructive transition-colors active:bg-destructive/10 disabled:opacity-60"
         >
           <LogOut className="size-5" />
           {t("settings.logout")}
         </button>
+
+        {/* Developer credit */}
+        <p className="mb-4 mt-5 text-center text-[11px] leading-relaxed text-muted-foreground/60">
+          Tamamen <span className="font-medium text-muted-foreground">Onur Arslan</span> tarafından geliştirilmiştir.{" "}
+          Bilgi için{" "}
+          <a href="mailto:onur54700@gmail.com" className="underline underline-offset-2 hover:text-primary transition-colors">
+            onur54700@gmail.com
+          </a>{" "}
+          ile iletişime geçin.
+        </p>
       </div>
 
       {/* Edit profile modal */}

@@ -6,7 +6,6 @@ import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown
 import { useI18n } from "@/lib/i18n/context"
 import { type Task, type TaskStatus, type TaskPriority, type TaskComment } from "@/lib/data/tasks"
 import { getStation, STATIONS, MEMBERS, type StationId } from "@/lib/data/stations"
-import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
@@ -173,8 +172,6 @@ export function TasksClient({
 
   return (
     <div>
-      <PageHeader title={t("nav.tasks")} />
-
       {/* Status counters */}
       <div className="grid grid-cols-3 gap-2 px-4 pt-3">
         <CounterCard
