@@ -979,76 +979,58 @@ function NewDMModal({
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 400, damping: 32 }}
-        onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-t-2xl border border-border bg-card"
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3.5">
-          <h2 className="font-heading text-base font-bold">Yeni sohbet</h2>
-          <button onClick={onClose} className="rounded-full p-1 text-muted-foreground active:bg-secondary">
-            <X className="size-5" />
-          </button>
+    <Modal open onClose={onClose} title="Yeni sohbet">
+      <div className="flex flex-col gap-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="İsim ara…"
+            className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+          />
         </div>
 
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="İsim ara…"
-              className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-            />
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-border">
-            {filtered.map((m) => {
-              const s = getStation(m.station)
-              const hasExisting = existingNames.includes(m.name)
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => onSelect(m)}
-                  className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors active:bg-secondary"
-                >
-                  <div className="relative shrink-0">
-                    {m.photoUrl ? (
-                      <img src={m.photoUrl} alt={m.initials} className="size-10 rounded-full object-cover" />
-                    ) : (
-                      <span
-                        className="flex size-10 items-center justify-center rounded-full text-xs font-bold text-white"
-                        style={{ backgroundColor: `hsl(${s.color})` }}
-                      >
-                        {m.initials}
-                      </span>
-                    )}
-                    {m.online && (
-                      <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card bg-emerald-500" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
-                  </div>
-                  {hasExisting && (
-                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                      Mevcut
+        <div className="overflow-hidden rounded-xl border border-border">
+          {filtered.map((m) => {
+            const s = getStation(m.station)
+            const hasExisting = existingNames.includes(m.name)
+            return (
+              <button
+                key={m.id}
+                onClick={() => onSelect(m)}
+                className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors active:bg-secondary"
+              >
+                <div className="relative shrink-0">
+                  {m.photoUrl ? (
+                    <img src={m.photoUrl} alt={m.initials} className="size-10 rounded-full object-cover" />
+                  ) : (
+                    <span
+                      className="flex size-10 items-center justify-center rounded-full text-xs font-bold text-white"
+                      style={{ backgroundColor: `hsl(${s.color})` }}
+                    >
+                      {m.initials}
                     </span>
                   )}
-                </button>
-              )
-            })}
-          </div>
+                  {m.online && (
+                    <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card bg-emerald-500" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
+                </div>
+                {hasExisting && (
+                  <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    Mevcut
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </Modal>
   )
 }
 
