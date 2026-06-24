@@ -419,7 +419,7 @@ function EditProfileModal({
       }
     }
     const err = await onSave({
-      name, email, phone, birthday, linkedin, memleket,
+      name: profile.name, email, phone, birthday, linkedin, memleket,
       photoUrl: finalPhotoUrl, station: stationVal, role,
       igemEgitimi: profile.igemEgitimi,
       igemTarihi: profile.igemTarihi,
@@ -528,12 +528,13 @@ function EditProfileModal({
             <p className="text-xs text-muted-foreground">Profil fotoğrafı</p>
           </div>
 
-          {/* Name */}
+          {/* Name — read-only */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">Ad Soyad</label>
-            <div className="relative">
-              <User className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input type="text" value={name} onChange={e => setName(e.target.value)} className={fieldClass} />
+            <div className="flex h-11 items-center gap-2 rounded-xl border border-input bg-muted px-3 text-sm text-muted-foreground cursor-not-allowed">
+              <User className="size-4 shrink-0" />
+              <span className="flex-1 truncate">{profile.name || "—"}</span>
+              <span className="text-xs">Değiştirilemez</span>
             </div>
           </div>
 
