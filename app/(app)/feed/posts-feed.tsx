@@ -322,6 +322,8 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
   function submitPost() {
     if (!canPost) return
     onPost(content.trim(), imageUrl)
+    setContent("")
+    setImageUrl(undefined)
     onClose()
   }
 
@@ -333,6 +335,8 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
       voters: [],
     }))
     onPost(question.trim(), undefined, { question: question.trim(), options: pollOptions })
+    setQuestion("")
+    setOptions(["", ""])
     onClose()
   }
 
@@ -681,7 +685,11 @@ export function PostsFeed({
             .single()
           if (full) {
             const mapped = mapPostsFromRaw([full as Record<string, unknown>])[0]
-            setPosts(prev => prev.map(x => x.id === p.id ? mapped : x))
+            setPosts(prev => prev.map(x => {
+              if (x.id !== p.id) return x
+              // Preserve optimistic poll data if DB hasn't stored it yet
+              return { ...mapped, poll: mapped.poll ?? x.poll }
+            }))
           }
         }, 2500)
       })
@@ -708,7 +716,7 @@ export function PostsFeed({
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "polls" }, (payload) => {
         const poll = payload.new as { id: string; post_id: string; question: string }
-        // Wait briefly for poll_options to be inserted, then patch the post
+        // Wait for poll_options to be inserted, then patch the post
         setTimeout(async () => {
           const sb = createClient()
           const { data } = await sb
@@ -727,11 +735,14 @@ export function PostsFeed({
                   voters: (opt.poll_votes ?? []).map((v) => v.voter_name),
                 })),
             }
-            setPosts(prev => prev.map(p =>
-              p.id === poll.post_id ? { ...p, poll: pollData } : p
-            ))
+            setPosts(prev => prev.map(p => {
+              if (p.id !== poll.post_id) return p
+              // Only update if we got real options; preserve existing if DB returned empty
+              if (pollData.options.length === 0 && p.poll?.options?.length) return p
+              return { ...p, poll: pollData }
+            }))
           }
-        }, 800)
+        }, 1500)
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, (payload) => {
         const l = payload.new as { post_id: string; voter_name: string }
@@ -819,6 +830,7 @@ export function PostsFeed({
       comments: [],
     }
     setPosts(prev => [newPost, ...prev])
+    window.scrollTo({ top: 0, behavior: "smooth" })
     if (user) {
       try {
         await supabase.from("posts").insert({
