@@ -570,8 +570,8 @@ interface PostsFeedProps {
 
 function mapPostsFromRaw(postsRaw: Record<string, unknown>[]): Post[] {
   return postsRaw.map((p) => {
-    const rawPolls = (p.polls as { id: string; question: string; poll_options: { id: string; text: string; position: number; poll_votes: { option_id: string; voter_name: string }[] }[] }[]) ?? []
-    const rawPoll = rawPolls[0] ?? null
+    // polls is returned as a single object (not array) because post_id has UNIQUE constraint
+    const rawPoll = (p.polls as { id: string; question: string; poll_options: { id: string; text: string; position: number; poll_votes: { option_id: string; voter_name: string }[] }[] } | null) ?? null
     const poll: Poll | undefined = rawPoll ? {
       question: rawPoll.question,
       options: (rawPoll.poll_options ?? [])
