@@ -1380,13 +1380,12 @@ function ChatView({
                     : <span className="mt-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{m.initials}</span>
                 })()}
                 <div
-                  className={`rounded-2xl px-3 py-2 ${
+                  className={`rounded-2xl px-3.5 py-2 ${
                     m.self
-                      ? "rounded-br-md bg-primary text-primary-foreground"
-                      : "rounded-bl-md bg-card text-foreground shadow-sm"
+                      ? "rounded-br-[5px] bg-primary text-primary-foreground"
+                      : "rounded-bl-[5px] bg-card text-foreground shadow-sm"
                   }`}
                 >
-                  {!m.self && <p className="mb-0.5 text-[11px] font-semibold text-primary">{m.author}</p>}
                   {msg.image && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={msg.image} alt="" className="mb-1 max-h-48 rounded-lg" />
@@ -1405,7 +1404,7 @@ function ChatView({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
         {(attached || uploading) && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-xs text-secondary-foreground">
             {uploading
