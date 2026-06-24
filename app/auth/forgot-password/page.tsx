@@ -28,14 +28,16 @@ export default function ForgotPasswordPage() {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
       if (error) {
         console.error("[resetPassword]", error)
-        setError(error.message)
+        if (error.message.toLowerCase().includes("rate limit")) {
+          setError("Çok fazla istek gönderildi. Lütfen birkaç dakika bekleyip tekrar deneyin.")
+        } else {
+          setError("Bir hata oluştu. Lütfen tekrar deneyin.")
+        }
       } else {
         setSent(true)
       }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Bilinmeyen hata"
-      console.error("[resetPassword]", e)
-      setError(msg)
+    } catch {
+      setError("Bir hata oluştu. Lütfen tekrar deneyin.")
     } finally {
       setLoading(false)
     }
