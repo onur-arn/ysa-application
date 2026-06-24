@@ -271,14 +271,17 @@ export function SettingsClient({
         </button>
 
         {/* Developer credit */}
-        <p className="mb-4 mt-5 text-center text-[11px] leading-relaxed text-muted-foreground/60">
-          Tamamen <span className="font-medium text-muted-foreground">Onur Arslan</span> tarafından geliştirilmiştir.{" "}
-          Bilgi için{" "}
-          <a href="mailto:onur54700@gmail.com" className="underline underline-offset-2 hover:text-primary transition-colors">
-            onur54700@gmail.com
-          </a>{" "}
-          ile iletişime geçin.
-        </p>
+        <div className="mb-4 mt-5 flex flex-col items-center gap-1 text-center text-[11px] text-muted-foreground/55">
+          <p>
+            <span className="font-medium text-muted-foreground/75">Onur Arslan</span> tarafından geliştirilmiştir.
+          </p>
+          <p>
+            Bilgi için{" "}
+            <a href="mailto:onur54700@gmail.com" className="underline underline-offset-2 hover:text-primary transition-colors">
+              onur54700@gmail.com
+            </a>
+          </p>
+        </div>
       </div>
 
       {/* Edit profile modal */}

@@ -23,43 +23,51 @@ export default function ResetPasswordPage() {
     const supabase = createClient()
     let unsubscribe: (() => void) | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
+    let resolved = false
+
+    function resolve() {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      setReady(true)
+    }
 
     async function init() {
-      // 1. PKCE flow: ?code=xxx in query string
+      // Listen for auth state changes FIRST — catches any async session establishment
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+        if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") resolve()
+      })
+      unsubscribe = () => subscription.unsubscribe()
+
+      // 1. PKCE flow: ?code=xxx
       const code = new URLSearchParams(window.location.search).get("code")
       if (code) {
-        const { error: err } = await supabase.auth.exchangeCodeForSession(code)
-        if (!err) { setReady(true); return }
-        // code_verifier may be missing (different browser/device) — fall through
+        await supabase.auth.exchangeCodeForSession(code)
+        // Always check session after exchange — it may succeed even if error is returned
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) { resolve(); return }
       }
 
-      // 2. Implicit flow: tokens in URL hash (#access_token=...&type=recovery)
+      // 2. Implicit flow: #access_token=...&type=recovery
       const hash = window.location.hash.slice(1)
       if (hash) {
         const p = new URLSearchParams(hash)
-        const accessToken = p.get("access_token")
-        const refreshToken = p.get("refresh_token")
-        if (accessToken && p.get("type") === "recovery") {
-          const { error: err } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken ?? "",
-          })
-          if (!err) { setReady(true); return }
+        const at = p.get("access_token")
+        if (at && p.get("type") === "recovery") {
+          await supabase.auth.setSession({ access_token: at, refresh_token: p.get("refresh_token") ?? "" })
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session) { resolve(); return }
         }
       }
 
-      // 3. Session already set (e.g. via auth state change event)
+      // 3. Existing session
       const { data: { session } } = await supabase.auth.getSession()
-      if (session) { setReady(true); return }
+      if (session) { resolve(); return }
 
-      // 4. Wait for PASSWORD_RECOVERY event (fallback)
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-        if (event === "PASSWORD_RECOVERY") setReady(true)
-      })
-      unsubscribe = () => subscription.unsubscribe()
+      // 4. Timeout — give Supabase 10s to fire an auth event
       timer = setTimeout(() => {
-        setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
-      }, 6000)
+        if (!resolved) setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
+      }, 10000)
     }
 
     init()
