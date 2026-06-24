@@ -830,16 +830,16 @@ export function PostsFeed({
           image_url: imageUrl ?? null,
           created_by: user.id,
         })
-        if (poll && poll.options.length >= 2) {
+        if (pollWithIds && pollWithIds.options.length >= 2) {
           const { data: pollRow } = await supabase
             .from("polls")
-            .insert({ post_id: newId, question: poll.question })
+            .insert({ post_id: newId, question: pollWithIds.question })
             .select()
             .single()
           if (pollRow) {
+            // Ne pas passer d'id — laisser Supabase générer les UUID
             await supabase.from("poll_options").insert(
-              poll.options.map((opt, i) => ({
-                id: `${newId}-opt-${i}`,
+              pollWithIds.options.map((opt, i) => ({
                 poll_id: pollRow.id,
                 text: opt.text,
                 position: i,

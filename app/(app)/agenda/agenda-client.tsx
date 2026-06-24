@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
+import { DatePicker } from "@/components/date-picker"
 
 type View = "calendar" | "list"
 type Filter = "all" | StationId
@@ -613,7 +614,7 @@ function EventFormModal({
         <div className="flex gap-2">
           <div className="w-[145px] shrink-0">
             <Field label={t("agenda.day")}>
-              <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
+              <DatePicker value={day} onChange={setDay} className={inputClass + " text-sm px-2"} />
             </Field>
           </div>
           <div className="w-[88px] shrink-0">

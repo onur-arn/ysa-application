@@ -37,7 +37,7 @@ function mapTasksFromRaw(
       author: (c.author as string) ?? "",
       initials: (c.initials as string) ?? "",
       text: (c.text as string) ?? "",
-      time: new Date(c.created_at as string).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+      time: new Date(c.created_at as string).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
     })
   }
   return tasksRaw.map((t) => ({
@@ -122,7 +122,7 @@ export function TasksClient({
               author: (c.author as string) ?? "",
               initials: (c.initials as string) ?? "",
               text: (c.text as string) ?? "",
-              time: new Date(c.created_at as string).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+              time: new Date(c.created_at as string).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
             }],
           }
         }))

@@ -421,7 +421,7 @@ export function AdminPanel() {
                                         <div className="flex items-baseline gap-2">
                                           <span className="shrink-0 text-[11px] font-semibold text-primary">{msg.sender_name}</span>
                                           <span className="text-[10px] text-muted-foreground">
-                                            {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                            {new Date(msg.created_at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                                           </span>
                                         </div>
                                         <p className="text-xs text-foreground">{msg.text ?? ""}</p>

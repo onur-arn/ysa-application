@@ -74,7 +74,7 @@ function mapConversations(
     const lastMsgObj = msgs.length > 0 ? msgs[msgs.length - 1] : null
     const lastMessage = lastMsgObj?.text ?? ((c.type as string) === "group" ? "Grup oluşturuldu" : "")
     const lastTime = lastMsgObj?.created_at
-      ? new Date(lastMsgObj.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+      ? new Date(lastMsgObj.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
       : ""
 
     if ((c.type as string) === "group") {
@@ -130,7 +130,7 @@ export function MessagesClient({
   async function createGroup(name: string, memberNames: string[]) {
     const words = name.replace(/[^a-zA-ZÀ-ÿ\s]/g, "").trim().split(/\s+/).filter(Boolean)
     const initials = (words.length >= 2 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase()
-    const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
 
     const supabase = createClient()
     const { data: conv, error } = await supabase
@@ -195,7 +195,7 @@ export function MessagesClient({
   }
 
   async function removeMemberFromGroup(id: string, memberName: string) {
-    const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
     const supabase = createClient()
     await supabase.from("conversation_members").delete()
       .eq("conversation_id", id).eq("member_name", memberName)
@@ -1238,7 +1238,7 @@ function ChatView({
           author: m.sender_name,
           initials: m.sender_initials,
           text: m.text ?? "",
-          time: new Date(m.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+          time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
           self: m.sender_name === senderName,
           image: m.image_url ?? undefined,
           system: m.is_system,
@@ -1262,7 +1262,7 @@ function ChatView({
             author: m.sender_name,
             initials: m.sender_initials,
             text: m.text ?? "",
-            time: new Date(m.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }),
+            time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
             self: m.sender_name === senderName,
             image: m.image_url ?? undefined,
             system: m.is_system,
@@ -1277,7 +1277,7 @@ function ChatView({
 
   async function send() {
     if (!draft.trim() && !attached) return
-    const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
 
     if (conversationId) {
       const supabase = createClient()
