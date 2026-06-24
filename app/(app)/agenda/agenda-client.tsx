@@ -11,7 +11,12 @@ import { PageHeader } from "@/components/app-shell"
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
-import { DatePicker } from "@/components/date-picker"
+
+const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
+  const h = String(Math.floor(i / 4)).padStart(2, "0")
+  const m = String((i % 4) * 15).padStart(2, "0")
+  return `${h}:${m}`
+})
 
 type View = "calendar" | "list"
 type Filter = "all" | StationId
@@ -614,12 +619,15 @@ function EventFormModal({
         <div className="flex gap-2">
           <div className="w-[145px] shrink-0">
             <Field label={t("agenda.day")}>
-              <DatePicker value={day} onChange={setDay} className={inputClass + " text-sm px-2"} />
+              <input type="date" lang="tr" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
             </Field>
           </div>
-          <div className="w-[88px] shrink-0">
+          <div className="w-[100px] shrink-0">
             <Field label={t("agenda.time")}>
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " text-sm px-2"} />
+              <select value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " text-sm px-2"}>
+                <option value="">--:--</option>
+                {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </Field>
           </div>
         </div>

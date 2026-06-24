@@ -800,10 +800,10 @@ export function PostsFeed({
     const { data: { user } } = await supabase.auth.getUser()
     // Pre-generate UUID so the realtime INSERT event matches the optimistic post
     const newId = crypto.randomUUID()
-    // Generate stable option IDs that match what we insert to DB
+    // Générer de vrais UUIDs pour les options (utilisés à la fois en local et en BD)
     const pollWithIds: Poll | undefined = poll ? {
       ...poll,
-      options: poll.options.map((opt, i) => ({ ...opt, id: `${newId}-opt-${i}` })),
+      options: poll.options.map((opt) => ({ ...opt, id: crypto.randomUUID() })),
     } : undefined
     const newPost: Post = {
       id: newId,
@@ -837,9 +837,9 @@ export function PostsFeed({
             .select()
             .single()
           if (pollRow) {
-            // Ne pas passer d'id — laisser Supabase générer les UUID
             await supabase.from("poll_options").insert(
               pollWithIds.options.map((opt, i) => ({
+                id: opt.id,          // vrai UUID généré par crypto.randomUUID()
                 poll_id: pollRow.id,
                 text: opt.text,
                 position: i,

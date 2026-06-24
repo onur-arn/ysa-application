@@ -79,6 +79,7 @@ export function BottomNav() {
   return (
     <nav
       ref={navRef}
+      data-no-pull-refresh
       className="fixed bottom-8 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border bg-card/95 shadow-lg backdrop-blur-lg touch-none select-none"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

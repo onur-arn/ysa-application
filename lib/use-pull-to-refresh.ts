@@ -21,6 +21,8 @@ export function usePullToRefresh() {
 
     function onTouchStart(e: TouchEvent) {
       if (window.scrollY > 0) return
+      // Ne pas activer si le toucher vient d'une zone protégée (nav, modals)
+      if ((e.target as Element).closest("[data-no-pull-refresh]")) return
       startY          = e.touches[0].clientY
       startX          = e.touches[0].clientX
       active          = true
