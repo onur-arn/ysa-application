@@ -114,6 +114,7 @@ export function SettingsClient({
       const supabase = createClient()
       await supabase.auth.signOut()
     } catch {}
+    sessionStorage.removeItem("ys-splash") // Replay splash on next login
     window.location.href = "/auth/login"
   }
 

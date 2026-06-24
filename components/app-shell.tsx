@@ -18,10 +18,10 @@ const PAGE_TITLES: { path: string; label: string }[] = [
   { path: "/ayarlar",   label: "Ayarlar" },
 ]
 
-function BottomNavWrapper() {
+function BottomNavWrapper({ hasUnread }: { hasUnread: boolean }) {
   const { hideNav } = useNavVisibility()
   if (hideNav) return null
-  return <BottomNav />
+  return <BottomNav hasUnread={hasUnread} />
 }
 
 function MainWrapper({ children }: { children: ReactNode }) {
@@ -40,6 +40,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const [avatar, setAvatar] = useState<{ photoUrl?: string | null; initials: string; color: string } | null>(null)
   const [userName, setUserName] = useState("")
+  const [hasUnread, setHasUnread] = useState(false)
 
   useMidnightLogout()
 
@@ -61,6 +62,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     loadAvatar()
   }, [])
+
+  // Listen for new messages from others → show red dot on Mesajlar tab
+  useEffect(() => {
+    if (!userName) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel("shell-unread")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
+        const msg = payload.new as { sender_name?: string }
+        if (msg.sender_name === userName) return
+        if (!window.location.pathname.startsWith("/messages")) setHasUnread(true)
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [userName])
+
+  // Clear dot when user navigates to messages
+  useEffect(() => {
+    if (pathname.startsWith("/messages")) setHasUnread(false)
+  }, [pathname])
 
   return (
     <NavVisibilityProvider>
@@ -93,7 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       <MainWrapper>{children}</MainWrapper>
-      <BottomNavWrapper />
+      <BottomNavWrapper hasUnread={hasUnread} />
     </div>
     </PresenceProvider>
     </NavVisibilityProvider>

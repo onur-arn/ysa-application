@@ -15,7 +15,7 @@ const items = [
   { href: "/gorevler",  icon: ListChecks,    key: "nav.tasks"     },
 ]
 
-export function BottomNav() {
+export function BottomNav({ hasUnread = false }: { hasUnread?: boolean }) {
   const pathname = usePathname()
   const router   = useRouter()
   const { t }    = useI18n()
@@ -80,7 +80,7 @@ export function BottomNav() {
     <nav
       ref={navRef}
       data-no-pull-refresh
-      className="fixed bottom-3 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border/60 bg-card/92 shadow-xl shadow-black/[0.08] backdrop-blur-2xl touch-none select-none"
+      className="fixed bottom-6 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border/60 bg-card/92 shadow-xl shadow-black/[0.08] backdrop-blur-2xl touch-none select-none"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -102,10 +102,16 @@ export function BottomNav() {
                     transition={{ type: "spring", stiffness: 800, damping: 32 }}
                   />
                 )}
-                <Icon
-                  className={cn("relative h-5 w-5 transition-colors", active ? "text-primary" : "text-muted-foreground/70")}
-                  strokeWidth={active ? 2.5 : 1.8}
-                />
+                <div className="relative">
+                  <Icon
+                    className={cn("h-5 w-5 transition-colors", active ? "text-primary" : "text-muted-foreground/70")}
+                    strokeWidth={active ? 2.5 : 1.8}
+                  />
+                  {/* Unread dot — only on messages tab */}
+                  {item.href === "/messages" && hasUnread && (
+                    <span className="absolute -right-1 -top-1 size-2 rounded-full bg-rose-500" />
+                  )}
+                </div>
                 <span className={cn(
                   "relative text-[9.5px] font-semibold leading-none tracking-wide transition-colors",
                   active ? "text-primary" : "text-muted-foreground/60",
