@@ -114,7 +114,7 @@ export function SettingsClient({
       const supabase = createClient()
       await supabase.auth.signOut()
     } catch {}
-    window.location.href = "/"
+    window.location.href = "/auth/login"
   }
 
 
