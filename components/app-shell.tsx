@@ -1,9 +1,6 @@
 "use client"
 
-import { Logo } from "@/components/logo"
 import { BottomNav } from "@/components/bottom-nav"
-import { ThemeToggle } from "@/components/theme-toggle"
-import { Settings } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState, useEffect, type ReactNode } from "react"
@@ -12,6 +9,15 @@ import { usePullToRefresh } from "@/lib/use-pull-to-refresh"
 import { useMidnightLogout } from "@/lib/use-midnight-logout"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
 import { PresenceProvider } from "@/lib/presence"
+
+const PAGE_TITLES: { path: string; label: string }[] = [
+  { path: "/feed",      label: "Ana Sayfa" },
+  { path: "/messages",  label: "Mesajlar" },
+  { path: "/annuaire",  label: "Rehber" },
+  { path: "/agenda",    label: "Takvim" },
+  { path: "/gorevler",  label: "Görevler" },
+  { path: "/ayarlar",   label: "Ayarlar" },
+]
 
 function BottomNavWrapper() {
   const { hideNav } = useNavVisibility()
@@ -34,6 +40,7 @@ function MainWrapper({ children, pull }: { children: ReactNode; pull: number }) 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const onSettings = pathname.startsWith("/ayarlar")
+  const pageTitle = PAGE_TITLES.find(p => pathname.startsWith(p.path))?.label ?? "YouthStation"
 
   const [avatar, setAvatar] = useState<{ photoUrl?: string | null; initials: string; color: string } | null>(null)
   const [userName, setUserName] = useState("")
@@ -67,26 +74,25 @@ export function AppShell({ children }: { children: ReactNode }) {
     <NavVisibilityProvider>
     <PresenceProvider userName={userName}>
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background">
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card/95 px-4 py-2.5 backdrop-blur-lg">
-        <Link href="/feed" className="flex items-center gap-2" aria-label="YouthStation">
-          <Logo size={34} />
-          <span className="font-heading text-base font-extrabold tracking-tight text-primary">YouthStation</span>
-        </Link>
-        <div className="flex items-center gap-1">
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/50 bg-background/85 px-5 py-3 backdrop-blur-xl">
+        <h1 className="font-heading text-[1.35rem] font-bold tracking-[-0.01em] text-foreground">
+          {pageTitle}
+        </h1>
+        <div className="flex items-center gap-2">
           {!onSettings && (
             <Link
               href="/ayarlar"
-              className="flex size-9 shrink-0 items-center justify-center rounded-full overflow-hidden border border-border"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full overflow-hidden ring-2 ring-border/60 hover:ring-primary/40 transition-all"
               aria-label="Ayarlar"
             >
               {avatar?.photoUrl ? (
                 <img src={avatar.photoUrl} alt="Profil" className="size-full object-cover" />
               ) : (
                 <span
-                  className="flex size-full items-center justify-center text-xs font-bold text-white"
-                  style={{ backgroundColor: `hsl(${avatar?.color ?? "262 83% 58%"})` }}
+                  className="flex size-full items-center justify-center text-[11px] font-bold text-white"
+                  style={{ backgroundColor: `hsl(${avatar?.color ?? "258 70% 55%"})` }}
                 >
-                  {avatar?.initials ?? <Settings className="h-4 w-4 text-muted-foreground" />}
+                  {avatar?.initials ?? "?"}
                 </span>
               )}
             </Link>
@@ -128,8 +134,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 export function PageHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between px-4 pb-1 pt-4">
-      <h1 className="font-heading text-2xl font-extrabold tracking-tight text-foreground text-balance">{title}</h1>
+    <div className="flex items-center justify-between px-5 pb-1 pt-5">
+      <h2 className="font-heading text-lg font-bold tracking-[-0.01em] text-foreground">{title}</h2>
       {action}
     </div>
   )

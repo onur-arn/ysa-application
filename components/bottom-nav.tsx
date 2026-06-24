@@ -80,13 +80,13 @@ export function BottomNav() {
     <nav
       ref={navRef}
       data-no-pull-refresh
-      className="fixed bottom-8 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border bg-card/95 shadow-lg backdrop-blur-lg touch-none select-none"
+      className="fixed bottom-6 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border/60 bg-card/92 shadow-xl shadow-black/[0.08] backdrop-blur-2xl touch-none select-none"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      <ul className="flex items-stretch justify-around px-2 pt-1.5">
+      <ul className="flex items-stretch justify-around px-1 py-1">
         {items.map((item) => {
           const active = dragHover !== null
             ? dragHover === item.href
@@ -94,21 +94,21 @@ export function BottomNav() {
           const Icon = item.icon
           return (
             <li key={item.href} className="flex-1" data-href={item.href}>
-              <div className="relative flex h-14 flex-col items-center justify-center gap-1">
+              <div className="relative flex h-14 flex-col items-center justify-center gap-0.5">
                 {active && (
                   <motion.span
-                    layoutId="nav-pill"
-                    className="absolute -top-px h-1 w-8 rounded-full bg-primary"
-                    transition={{ type: "spring", stiffness: 900, damping: 30 }}
+                    layoutId="nav-bg"
+                    className="absolute inset-x-1 inset-y-1 rounded-xl bg-primary/10"
+                    transition={{ type: "spring", stiffness: 800, damping: 32 }}
                   />
                 )}
                 <Icon
-                  className={cn("h-6 w-6 transition-colors", active ? "text-primary" : "text-muted-foreground")}
-                  strokeWidth={active ? 2.4 : 2}
+                  className={cn("relative h-5 w-5 transition-colors", active ? "text-primary" : "text-muted-foreground/70")}
+                  strokeWidth={active ? 2.5 : 1.8}
                 />
                 <span className={cn(
-                  "text-[10px] font-medium leading-none transition-colors",
-                  active ? "text-primary" : "text-muted-foreground",
+                  "relative text-[9.5px] font-semibold leading-none tracking-wide transition-colors",
+                  active ? "text-primary" : "text-muted-foreground/60",
                 )}>
                   {t(item.key)}
                 </span>

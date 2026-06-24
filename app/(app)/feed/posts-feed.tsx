@@ -808,8 +808,8 @@ export function PostsFeed({
   }
 
   async function addPost(content: string, imageUrl?: string, poll?: Poll) {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const userId = me.id
+    if (!userId) return
     // Pre-generate UUID so the realtime INSERT event matches the optimistic post
     const newId = crypto.randomUUID()
     // Générer de vrais UUIDs pour les options (utilisés à la fois en local et en BD)
@@ -826,44 +826,44 @@ export function PostsFeed({
       imageUrl,
       poll: pollWithIds,
       createdAt: new Date().toISOString(),
-      createdBy: user?.id,
+      createdBy: userId,
       likedBy: [],
       comments: [],
     }
+    // Optimistic update — instant, no async wait
     setPosts(prev => [newPost, ...prev])
     window.scrollTo({ top: 0, behavior: "smooth" })
-    if (user) {
-      try {
-        await supabase.from("posts").insert({
-          id: newId,
-          author: me.name,
-          initials: me.initials,
-          station: me.station,
-          content,
-          image_url: imageUrl ?? null,
-          created_by: user.id,
-        })
-        if (pollWithIds && pollWithIds.options.length >= 2) {
-          const { data: pollRow, error: pollErr } = await supabase
-            .from("polls")
-            .insert({ post_id: newId, question: pollWithIds.question })
-            .select()
-            .single()
-          if (pollErr) console.error("[addPost] polls insert:", pollErr)
-          if (pollRow) {
-            const { error: optErr } = await supabase.from("poll_options").insert(
-              pollWithIds.options.map((opt, i) => ({
-                id: opt.id,
-                poll_id: pollRow.id,
-                text: opt.text,
-                position: i,
-              }))
-            )
-            if (optErr) console.error("[addPost] poll_options insert:", optErr)
-          }
+    const supabase = createClient()
+    try {
+      await supabase.from("posts").insert({
+        id: newId,
+        author: me.name,
+        initials: me.initials,
+        station: me.station,
+        content,
+        image_url: imageUrl ?? null,
+        created_by: userId,
+      })
+      if (pollWithIds && pollWithIds.options.length >= 2) {
+        const { data: pollRow, error: pollErr } = await supabase
+          .from("polls")
+          .insert({ post_id: newId, question: pollWithIds.question })
+          .select()
+          .single()
+        if (pollErr) console.error("[addPost] polls insert:", pollErr)
+        if (pollRow) {
+          const { error: optErr } = await supabase.from("poll_options").insert(
+            pollWithIds.options.map((opt, i) => ({
+              id: opt.id,
+              poll_id: pollRow.id,
+              text: opt.text,
+              position: i,
+            }))
+          )
+          if (optErr) console.error("[addPost] poll_options insert:", optErr)
         }
-      } catch (e) { console.error("[addPost]", e) }
-    }
+      }
+    } catch (e) { console.error("[addPost]", e) }
   }
 
   const cutoff = Date.now() - SEVEN_DAYS_MS
