@@ -21,33 +21,49 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     const supabase = createClient()
+    let unsubscribe: (() => void) | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
 
-    // Primary flow: callback exchanged the code server-side, session is in cookies
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setReady(true)
-        return
-      }
-
-      // Fallback: code in URL (direct link, not via callback)
+    async function init() {
+      // 1. PKCE flow: ?code=xxx in query string
       const code = new URLSearchParams(window.location.search).get("code")
       if (code) {
-        supabase.auth.exchangeCodeForSession(code).then(({ error: err }) => {
-          if (!err) setReady(true)
-          else setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
-        })
-        return
+        const { error: err } = await supabase.auth.exchangeCodeForSession(code)
+        if (!err) { setReady(true); return }
+        // code_verifier may be missing (different browser/device) — fall through
       }
 
-      // Last resort: implicit flow (token in hash)
+      // 2. Implicit flow: tokens in URL hash (#access_token=...&type=recovery)
+      const hash = window.location.hash.slice(1)
+      if (hash) {
+        const p = new URLSearchParams(hash)
+        const accessToken = p.get("access_token")
+        const refreshToken = p.get("refresh_token")
+        if (accessToken && p.get("type") === "recovery") {
+          const { error: err } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken ?? "",
+          })
+          if (!err) { setReady(true); return }
+        }
+      }
+
+      // 3. Session already set (e.g. via auth state change event)
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) { setReady(true); return }
+
+      // 4. Wait for PASSWORD_RECOVERY event (fallback)
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
         if (event === "PASSWORD_RECOVERY") setReady(true)
       })
-      const timer = setTimeout(() => {
-        setError("Bağlantı bulunamadı. Lütfen e-postanızdaki bağlantıya tıklayın veya yeni bir sıfırlama talebi oluşturun.")
+      unsubscribe = () => subscription.unsubscribe()
+      timer = setTimeout(() => {
+        setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
       }, 6000)
-      return () => { subscription.unsubscribe(); clearTimeout(timer) }
-    })
+    }
+
+    init()
+    return () => { unsubscribe?.(); clearTimeout(timer) }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
