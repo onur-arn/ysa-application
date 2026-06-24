@@ -22,33 +22,32 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     const supabase = createClient()
 
-    // Supabase v2 PKCE flow: code is passed as a URL query param
-    const code = new URLSearchParams(window.location.search).get("code")
-    if (code) {
-      supabase.auth.exchangeCodeForSession(code).then(({ error: err }) => {
-        if (!err) {
-          setReady(true)
-        } else {
-          setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
-        }
+    // Primary flow: callback exchanged the code server-side, session is in cookies
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setReady(true)
+        return
+      }
+
+      // Fallback: code in URL (direct link, not via callback)
+      const code = new URLSearchParams(window.location.search).get("code")
+      if (code) {
+        supabase.auth.exchangeCodeForSession(code).then(({ error: err }) => {
+          if (!err) setReady(true)
+          else setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
+        })
+        return
+      }
+
+      // Last resort: implicit flow (token in hash)
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+        if (event === "PASSWORD_RECOVERY") setReady(true)
       })
-      return
-    }
-
-    // Fallback: implicit flow — token in URL hash
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") setReady(true)
+      const timer = setTimeout(() => {
+        setError("Bağlantı bulunamadı. Lütfen e-postanızdaki bağlantıya tıklayın veya yeni bir sıfırlama talebi oluşturun.")
+      }, 6000)
+      return () => { subscription.unsubscribe(); clearTimeout(timer) }
     })
-
-    // Timeout: if no token detected after 6s, show error
-    const timer = setTimeout(() => {
-      setError("Bağlantı bulunamadı. Lütfen e-postanızdaki bağlantıya tıklayın veya yeni bir sıfırlama talebi oluşturun.")
-    }, 6000)
-
-    return () => {
-      subscription.unsubscribe()
-      clearTimeout(timer)
-    }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
