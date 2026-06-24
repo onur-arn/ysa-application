@@ -9,7 +9,6 @@ import { usePathname } from "next/navigation"
 import { useState, useEffect, type ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { usePullToRefresh } from "@/lib/use-pull-to-refresh"
-import { useSwipeNav } from "@/lib/use-swipe-nav"
 import { useMidnightLogout } from "@/lib/use-midnight-logout"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
 import { PresenceProvider } from "@/lib/presence"
@@ -40,7 +39,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [userName, setUserName] = useState("")
 
   const { pull, refreshing } = usePullToRefresh()
-  useSwipeNav()
   useMidnightLogout()
 
   useEffect(() => {

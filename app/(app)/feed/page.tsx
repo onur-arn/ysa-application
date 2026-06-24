@@ -17,7 +17,8 @@ export default async function FeedPage() {
     supabase
       .from("posts")
       .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at),polls(id,question,poll_options(id,text,position,poll_votes(option_id,voter_name)))")
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .limit(25),
     supabase
       .from("igem_requests")
       .select("id,author,initials,station,motivation,created_at,created_by"),

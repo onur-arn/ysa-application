@@ -1405,7 +1405,7 @@ function ChatView({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         {(attached || uploading) && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-xs text-secondary-foreground">
             {uploading

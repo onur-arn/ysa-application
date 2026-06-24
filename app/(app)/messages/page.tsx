@@ -32,6 +32,7 @@ export default async function MessagesPage() {
         .select("id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin),chat_messages(id,sender_name,sender_initials,text,image_url,is_system,created_at)")
         .in("id", convIds)
         .order("created_at", { ascending: false })
+        .limit(30)
       convRows = (data ?? []) as Record<string, unknown>[]
     }
   }
