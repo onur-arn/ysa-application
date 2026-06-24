@@ -9,7 +9,7 @@ import { useRef } from "react"
 import {
   Mail, Lock, User, Phone, Cake, ExternalLink, Loader2,
   ChevronDown, ChevronLeft, Check, MapPin, Briefcase, CheckCircle2,
-  Camera, Home, Moon, Sun, Eye, EyeOff, ZoomIn,
+  Camera, Moon, Sun, Eye, EyeOff, ZoomIn,
 } from "lucide-react"
 import Cropper from "react-easy-crop"
 import type { Area } from "react-easy-crop"
@@ -147,14 +147,8 @@ export default function SignUpPage() {
   return (
     <main className="relative flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-sm">
-        {/* Back to home + theme toggle */}
-        <div className="absolute left-4 top-4 flex items-center gap-2">
-          <button
-            onClick={() => router.push("/")}
-            className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Home className="size-4" />
-          </button>
+        {/* Theme toggle */}
+        <div className="absolute right-4 top-4">
           <button
             onClick={toggle}
             className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"

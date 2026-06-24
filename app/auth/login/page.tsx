@@ -4,7 +4,7 @@ import type React from "react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
-import { Mail, Lock, Loader2, Home, Moon, Sun, Eye, EyeOff } from "lucide-react"
+import { Mail, Lock, Loader2, Moon, Sun, Eye, EyeOff } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
@@ -42,13 +42,7 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
-      <div className="absolute left-4 top-4 flex items-center gap-2">
-        <button
-          onClick={() => router.push("/")}
-          className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Home className="size-4" />
-        </button>
+      <div className="absolute right-4 top-4">
         <button
           onClick={toggle}
           className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
