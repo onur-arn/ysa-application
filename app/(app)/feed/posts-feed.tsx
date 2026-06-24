@@ -687,8 +687,9 @@ export function PostsFeed({
             const mapped = mapPostsFromRaw([full as Record<string, unknown>])[0]
             setPosts(prev => prev.map(x => {
               if (x.id !== p.id) return x
-              // Preserve optimistic poll data if DB hasn't stored it yet
-              return { ...mapped, poll: mapped.poll ?? x.poll }
+              // Prefer whichever version has actual options (DB > optimistic)
+              const bestPoll = mapped.poll?.options?.length ? mapped.poll : x.poll
+              return { ...mapped, poll: bestPoll }
             }))
           }
         }, 2500)
@@ -843,23 +844,25 @@ export function PostsFeed({
           created_by: user.id,
         })
         if (pollWithIds && pollWithIds.options.length >= 2) {
-          const { data: pollRow } = await supabase
+          const { data: pollRow, error: pollErr } = await supabase
             .from("polls")
             .insert({ post_id: newId, question: pollWithIds.question })
             .select()
             .single()
+          if (pollErr) console.error("[addPost] polls insert:", pollErr)
           if (pollRow) {
-            await supabase.from("poll_options").insert(
+            const { error: optErr } = await supabase.from("poll_options").insert(
               pollWithIds.options.map((opt, i) => ({
-                id: opt.id,          // vrai UUID généré par crypto.randomUUID()
+                id: opt.id,
                 poll_id: pollRow.id,
                 text: opt.text,
                 position: i,
               }))
             )
+            if (optErr) console.error("[addPost] poll_options insert:", optErr)
           }
         }
-      } catch {}
+      } catch (e) { console.error("[addPost]", e) }
     }
   }
 
