@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { I18nProvider } from "@/lib/i18n/context"
 import { ThemeProvider } from "@/lib/theme/context"
+import { SplashScreen } from "@/components/splash-screen"
 import "./globals.css"
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
@@ -51,6 +52,7 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased bg-background">
         <ThemeProvider>
+          <SplashScreen />
           <I18nProvider>{children}</I18nProvider>
         </ThemeProvider>
         {process.env.NODE_ENV === "production" && <Analytics />}
