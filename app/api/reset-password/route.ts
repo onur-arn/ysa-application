@@ -1,32 +1,46 @@
-import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
-  const { token_hash, password } = await request.json()
+  const { email, birthday, password } = await request.json()
 
-  if (!token_hash || !password || password.length < 6) {
+  if (!email || !birthday) {
     return NextResponse.json({ error: "Geçersiz istek." }, { status: 400 })
   }
 
-  // Verify the token and get the user
-  const supabase = await createClient()
-  const { data, error: otpErr } = await supabase.auth.verifyOtp({ token_hash, type: "recovery" })
+  const admin = createAdminClient()
 
-  if (otpErr || !data.user) {
-    return NextResponse.json(
-      { error: "Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun." },
-      { status: 400 },
-    )
+  // Check if email exists in profiles
+  const { data: profile, error: profileErr } = await admin
+    .from("profiles")
+    .select("id, birthday")
+    .eq("email", email.trim().toLowerCase())
+    .single()
+
+  if (profileErr || !profile) {
+    return NextResponse.json({ error: "mail non connu" }, { status: 404 })
   }
 
-  // Update the password via admin client (bypasses session propagation issues)
-  const admin = createAdminClient()
-  const { error: updateErr } = await admin.auth.admin.updateUserById(data.user.id, { password })
+  // Check birthday
+  if (!profile.birthday || profile.birthday !== birthday) {
+    return NextResponse.json({ error: "Date de naissance incorrecte." }, { status: 400 })
+  }
+
+  // Identity verified — if no password, just return success (step 1)
+  if (!password) {
+    return NextResponse.json({ success: true })
+  }
+
+  if (password.length < 6) {
+    return NextResponse.json({ error: "Şifre en az 6 karakter olmalı." }, { status: 400 })
+  }
+
+  // Update password via admin
+  const { error: updateErr } = await admin.auth.admin.updateUserById(profile.id, { password })
 
   if (updateErr) {
     return NextResponse.json({ error: "Şifre güncellenemedi. Lütfen tekrar deneyin." }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, email: data.user.email })
+  return NextResponse.json({ success: true })
 }
