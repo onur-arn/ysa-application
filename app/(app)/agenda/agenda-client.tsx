@@ -137,8 +137,9 @@ export function AgendaClient({
     [events, filter],
   )
 
-  const year = cursor.getFullYear()
+  const year  = cursor.getFullYear()
   const month = cursor.getMonth()
+  const today = new Date()
 
   const monthEvents = useMemo(() => {
     const mStart = new Date(year, month, 1)
@@ -187,6 +188,7 @@ export function AgendaClient({
 
   const firstDayIdx = (new Date(year, month, 1).getDay() + 6) % 7
   const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const todayDay    = today.getFullYear() === year && today.getMonth() === month ? today.getDate() : -1
 
   function changeMonth(delta: number) {
     setCursor(new Date(year, month + delta, 1))
@@ -314,9 +316,12 @@ export function AgendaClient({
                   }}
                   className={`relative flex aspect-square flex-col items-center justify-start rounded-xl pt-1.5 text-sm transition-colors ${
                     allClickable ? "font-semibold text-foreground" : "text-muted-foreground"
-                  } ${hasEvents && !hasPeriod ? "bg-primary/10" : ""}`}
+                  } ${hasEvents && !hasPeriod && day !== todayDay ? "bg-primary/10" : ""}`}
                 >
-                  <span>{day}</span>
+                  <span className={day === todayDay
+                    ? "flex size-6 -mt-0.5 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground"
+                    : ""
+                  }>{day}</span>
                   {hasEvents && (
                     <span className="mt-0.5 flex gap-0.5">
                       {dayEvents.slice(0, 3).map((e) => (
