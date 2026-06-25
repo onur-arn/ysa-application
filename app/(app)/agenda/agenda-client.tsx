@@ -44,6 +44,7 @@ function mapEventsFromRaw(eventsRaw: Record<string, unknown>[]): EventItem[] {
     station: ((e.station as StationId) ?? "paris"),
     description: (e.description as string) ?? undefined,
     link: (e.link as string) ?? undefined,
+    endDate: (e.end_date as string) ?? undefined,
     likes: 0,
     participantsCount: 0,
     notAttendingCount: 0,
@@ -93,6 +94,7 @@ export function AgendaClient({
             station: ((e.station as StationId) ?? "paris"),
             description: (e.description as string) ?? undefined,
             link: (e.link as string) ?? undefined,
+            endDate: (e.end_date as string) ?? undefined,
             likes: 0, participantsCount: 0, notAttendingCount: 0, comments: [],
             createdBy: (e.created_by as string) ?? undefined,
           }]
@@ -177,6 +179,7 @@ export function AgendaClient({
       station: updated.station,
       description: updated.description ?? null,
       link: updated.link ?? null,
+      end_date: updated.endDate ?? null,
     }).eq("id", editingEvent.id)
 
     if (!error) {
@@ -462,6 +465,7 @@ export function AgendaClient({
             station: e.station,
             description: e.description ?? null,
             link: e.link ?? null,
+            end_date: e.endDate ?? null,
             created_by: user?.id ?? null,
           })
 
@@ -573,6 +577,8 @@ function EventFormModal({
 
   const [title, setTitle]       = useState(initialValues?.title ?? "")
   const [day, setDay]           = useState(initialValues?.date ?? "")
+  const [endDay, setEndDay]     = useState(initialValues?.endDate ?? "")
+  const [eventType, setEventType] = useState<"once" | "period">(initialValues?.endDate ? "period" : "once")
   const [time, setTime]         = useState(initialValues?.time ?? "")
   const [place, setPlace]       = useState(initialValues?.place === "—" ? "" : (initialValues?.place ?? ""))
   const [description, setDescription] = useState(initialValues?.description ?? "")
@@ -585,6 +591,7 @@ function EventFormModal({
 
   function submit() {
     if (!title.trim() || !day || !time) return
+    if (eventType === "period" && !endDay) return
     onSubmit({
       id: initialValues?.id ?? String(Date.now()),
       title: title.trim(),
@@ -594,14 +601,15 @@ function EventFormModal({
       station: station as StationId,
       description: description.trim() || undefined,
       link: link.trim() || undefined,
+      endDate: eventType === "period" ? endDay : undefined,
       likes: 0,
       participantsCount: 0,
       notAttendingCount: 0,
       comments: [],
     })
     if (!isEdit) {
-      setTitle(""); setDay(""); setTime(""); setPlace("")
-      setDescription(""); setLink(""); setStation(userStation)
+      setTitle(""); setDay(""); setEndDay(""); setTime(""); setPlace("")
+      setDescription(""); setLink(""); setStation(userStation); setEventType("once")
     }
   }
 
@@ -612,22 +620,61 @@ function EventFormModal({
           <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder={t("agenda.eventTitlePlaceholder")} />
         </Field>
 
-        {/* Gün + Saat — tailles fixes compactes */}
-        <div className="flex gap-2">
-          <div className="w-[145px] shrink-0">
-            <Field label={t("agenda.day")}>
-              <input type="date" lang="tr" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
-            </Field>
-          </div>
-          <div className="w-[100px] shrink-0">
-            <Field label={t("agenda.time")}>
-              <select value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " text-sm px-2"}>
-                <option value="">--:--</option>
-                {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </Field>
-          </div>
+        {/* Etkinlik türü: Bir kez / Bir dönem */}
+        <div className="flex gap-2 rounded-xl bg-secondary p-1">
+          {(["once", "period"] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => { setEventType(type); if (type === "once") setEndDay("") }}
+              className={`relative flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${
+                eventType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+              }`}
+            >
+              {type === "once" ? "Bir kez" : "Bir dönem"}
+            </button>
+          ))}
         </div>
+
+        {/* Gün + Saat — tailles fixes compactes */}
+        {eventType === "once" ? (
+          <div className="flex gap-2">
+            <div className="w-[145px] shrink-0">
+              <Field label={t("agenda.day")}>
+                <input type="date" lang="tr" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
+              </Field>
+            </div>
+            <div className="w-[100px] shrink-0">
+              <Field label={t("agenda.time")}>
+                <select value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " text-sm px-2"}>
+                  <option value="">--:--</option>
+                  {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </Field>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <Field label="Başlangıç tarihi">
+                  <input type="date" lang="tr" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
+                </Field>
+              </div>
+              <div className="w-[100px] shrink-0">
+                <Field label={t("agenda.time")}>
+                  <select value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " text-sm px-2"}>
+                    <option value="">--:--</option>
+                    {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </Field>
+              </div>
+            </div>
+            <Field label="Bitiş tarihi">
+              <input type="date" lang="tr" value={endDay} onChange={(e) => setEndDay(e.target.value)} min={day || undefined} className={inputClass + " text-sm px-2"} />
+            </Field>
+          </div>
+        )}
 
         <Field label={t("agenda.place")}>
           <input value={place} onChange={(e) => setPlace(e.target.value)} className={inputClass} placeholder={t("agenda.placePlaceholder")} />
@@ -658,7 +705,7 @@ function EventFormModal({
             </div>
           </Field>
         )}
-        <Button onClick={submit} disabled={!title.trim() || !day || !time} className="mt-1 h-12">
+        <Button onClick={submit} disabled={!title.trim() || !day || !time || (eventType === "period" && !endDay)} className="mt-1 h-12">
           {isEdit ? "Kaydet" : t("agenda.create")}
         </Button>
       </div>

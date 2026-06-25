@@ -1,5 +1,17 @@
 import type { StationId } from "./stations"
 
+export type ChatPollOption = {
+  id: string
+  text: string
+  voters: string[]
+}
+
+export type ChatPoll = {
+  id: string
+  question: string
+  options: ChatPollOption[]
+}
+
 export type ChatMessage = {
   id: string
   author: string
@@ -9,6 +21,7 @@ export type ChatMessage = {
   self?: boolean
   image?: string
   system?: boolean
+  poll?: ChatPoll
 }
 
 export type GroupConversation = {

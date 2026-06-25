@@ -634,6 +634,27 @@ function CreateTaskModal({
               </p>
             ) : (
               <div className="max-h-48 overflow-y-auto">
+                {/* Tümü — tüm ekip seçeneği */}
+                {(() => {
+                  const tumuSelected = selectedAssignee?.name === "Tümü"
+                  return (
+                    <button
+                      key="tumuoption"
+                      type="button"
+                      onClick={() => setSelectedAssignee(tumuSelected ? null : { name: "Tümü", initials: "TM", role: "Tüm ekip" })}
+                      className={`flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors ${tumuSelected ? "bg-primary/8" : "hover:bg-secondary/60"}`}
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary">
+                        TM
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-foreground">Tümü</p>
+                        <p className="truncate text-xs text-muted-foreground">Tüm ekip</p>
+                      </div>
+                      {tumuSelected && <Check className="size-4 shrink-0 text-primary" />}
+                    </button>
+                  )
+                })()}
                 {stationMembers.map((m, i) => {
                   const selected = selectedAssignee?.name === m.name
                   return (

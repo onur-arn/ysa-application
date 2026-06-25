@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
-  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck,
+  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { GROUP_CHATS, DM_CHATS, type ChatMessage } from "@/lib/data/messages"
+import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
 import { useNavVisibility } from "@/lib/nav-visibility"
@@ -1185,6 +1185,7 @@ function ChatView({
   const [attached, setAttached] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPollCompose, setShowPollCompose] = useState(false)
   const scrollRef   = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -1205,10 +1206,28 @@ function ChatView({
 
     const supabase = createClient()
 
+    type RawPollOption = { id: string; text: string; position: number; message_poll_votes: { option_id: string; voter_name: string }[] }
+    type RawPoll = { id: string; question: string; message_poll_options: RawPollOption[] } | null
+
+    function parsePoll(rawPoll: RawPoll): ChatPoll | undefined {
+      if (!rawPoll) return undefined
+      return {
+        id: rawPoll.id,
+        question: rawPoll.question,
+        options: (rawPoll.message_poll_options ?? [])
+          .sort((a, b) => a.position - b.position)
+          .map((o) => ({
+            id: o.id,
+            text: o.text,
+            voters: (o.message_poll_votes ?? []).map((v) => v.voter_name),
+          })),
+      }
+    }
+
     async function loadMessages() {
       const { data } = await supabase
         .from("chat_messages")
-        .select("id,sender_name,sender_initials,text,image_url,is_system,created_at")
+        .select("id,sender_name,sender_initials,text,image_url,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true })
 
@@ -1222,6 +1241,7 @@ function ChatView({
           self: m.sender_name === senderName,
           image: m.image_url ?? undefined,
           system: m.is_system,
+          poll: parsePoll((m as Record<string, unknown>).message_polls as RawPoll),
         })))
       }
     }
@@ -1248,6 +1268,63 @@ function ChatView({
             system: m.is_system,
           }]
         })
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_polls" }, (payload) => {
+        const poll = payload.new as { id: string; message_id: string; question: string }
+        setTimeout(async () => {
+          const { data } = await supabase
+            .from("message_polls")
+            .select("id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name))")
+            .eq("id", poll.id)
+            .single()
+          if (!data) return
+          const chatPoll: ChatPoll = {
+            id: data.id,
+            question: (data as Record<string, unknown>).question as string,
+            options: ((data as Record<string, unknown>).message_poll_options as { id: string; text: string; position: number; message_poll_votes: { option_id: string; voter_name: string }[] }[] ?? [])
+              .sort((a, b) => a.position - b.position)
+              .map((o) => ({ id: o.id, text: o.text, voters: (o.message_poll_votes ?? []).map((v) => v.voter_name) })),
+          }
+          setMessages((prev) => prev.map((msg) =>
+            msg.id === poll.message_id ? { ...msg, poll: chatPoll } : msg
+          ))
+        }, 600)
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_poll_votes" }, (payload) => {
+        const v = payload.new as { option_id: string; voter_name: string }
+        setMessages((prev) => prev.map((msg) => {
+          if (!msg.poll) return msg
+          if (!msg.poll.options.some((o) => o.id === v.option_id)) return msg
+          return {
+            ...msg,
+            poll: {
+              ...msg.poll,
+              options: msg.poll.options.map((o) =>
+                o.id === v.option_id && !o.voters.includes(v.voter_name)
+                  ? { ...o, voters: [...o.voters, v.voter_name] }
+                  : o
+              ),
+            },
+          }
+        }))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_poll_votes" }, (payload) => {
+        const v = payload.old as { option_id: string; voter_name: string }
+        setMessages((prev) => prev.map((msg) => {
+          if (!msg.poll) return msg
+          if (!msg.poll.options.some((o) => o.id === v.option_id)) return msg
+          return {
+            ...msg,
+            poll: {
+              ...msg.poll,
+              options: msg.poll.options.map((o) =>
+                o.id === v.option_id
+                  ? { ...o, voters: o.voters.filter((vn) => vn !== v.voter_name) }
+                  : o
+              ),
+            },
+          }
+        }))
       })
       .subscribe()
 
@@ -1299,6 +1376,73 @@ function ChatView({
     setAttached(null)
   }
 
+  async function sendPoll(question: string, optionTexts: string[]) {
+    if (!conversationId) return
+    const supabase = createClient()
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+
+    const { data: msg } = await supabase.from("chat_messages").insert({
+      conversation_id: conversationId,
+      sender_name: senderName,
+      sender_initials: senderInitials,
+      text: `📊 ${question}`,
+    }).select().single()
+    if (!msg) return
+
+    const { data: poll } = await supabase.from("message_polls").insert({
+      message_id: msg.id,
+      question,
+    }).select().single()
+    if (!poll) return
+
+    await supabase.from("message_poll_options").insert(
+      optionTexts.map((text, i) => ({ id: `${poll.id}-opt-${i}`, poll_id: poll.id, text, position: i }))
+    )
+
+    const newMsg: ChatMessage = {
+      id: msg.id,
+      author: senderName,
+      initials: senderInitials,
+      text: `📊 ${question}`,
+      time,
+      self: true,
+      poll: {
+        id: poll.id,
+        question,
+        options: optionTexts.map((text, i) => ({ id: `${poll.id}-opt-${i}`, text, voters: [] })),
+      },
+    }
+    setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, newMsg])
+  }
+
+  async function voteOnPoll(messageId: string, optionId: string) {
+    const msg = messages.find((m) => m.id === messageId)
+    if (!msg?.poll) return
+    const alreadyVotedOption = msg.poll.options.find((o) => o.voters.includes(senderName))
+    const previousId = alreadyVotedOption?.id
+    const clickedMine = previousId === optionId
+
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== messageId || !m.poll) return m
+      return {
+        ...m,
+        poll: {
+          ...m.poll,
+          options: m.poll.options.map((o) => {
+            const without = o.voters.filter((v) => v !== senderName)
+            return o.id === optionId && !clickedMine
+              ? { ...o, voters: [...without, senderName] }
+              : { ...o, voters: without }
+          }),
+        },
+      }
+    }))
+
+    const supabase = createClient()
+    if (previousId) await supabase.from("message_poll_votes").delete().eq("option_id", previousId).eq("voter_name", senderName)
+    if (!clickedMine) await supabase.from("message_poll_votes").insert({ option_id: optionId, voter_name: senderName })
+  }
+
   return (
     <div className="relative flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden">
       {/* Header */}
@@ -1346,6 +1490,30 @@ function ChatView({
                 <span className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
                   {m.text}
                 </span>
+              </div>
+            )
+          }
+
+          if (m.poll) {
+            return (
+              <div key={m.id} className={`flex flex-col gap-1 ${m.self ? "items-end" : "items-start"}`}>
+                <div className="flex items-center gap-1.5 px-1">
+                  {!m.self && (() => {
+                    const photo = photoMap?.get(m.author)
+                    return photo
+                      ? <img src={photo} alt={m.initials} className="size-5 rounded-full object-cover" />
+                      : <span className="flex size-5 items-center justify-center rounded-full bg-secondary text-[9px] font-bold text-secondary-foreground">{m.initials}</span>
+                  })()}
+                  <span className="text-xs font-semibold text-foreground">{m.self ? "Sen" : m.author}</span>
+                  <span className="text-[10px] text-muted-foreground">{m.time}</span>
+                </div>
+                <div className="w-full max-w-[85%]">
+                  <ChatPollBlock
+                    poll={m.poll}
+                    voterName={senderName}
+                    onVote={(optId) => voteOnPoll(m.id, optId)}
+                  />
+                </div>
               </div>
             )
           }
@@ -1430,6 +1598,15 @@ function ChatView({
           >
             <ImageIcon className="size-5" />
           </button>
+          {conversationId && (
+            <button
+              onClick={() => setShowPollCompose(true)}
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-secondary"
+              aria-label="Anket oluştur"
+            >
+              <BarChart2 className="size-5" />
+            </button>
+          )}
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -1467,6 +1644,176 @@ function ChatView({
           />
         )}
       </AnimatePresence>
+
+      {/* Poll compose sheet */}
+      <AnimatePresence>
+        {showPollCompose && (
+          <PollComposeSheet
+            onClose={() => setShowPollCompose(false)}
+            onSubmit={(question, options) => {
+              setShowPollCompose(false)
+              sendPoll(question, options)
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  )
+}
+
+// ── Chat poll block ───────────────────────────────────────────────────────────
+function ChatPollBlock({
+  poll, voterName, onVote,
+}: {
+  poll: ChatPoll
+  voterName: string
+  onVote: (optionId: string) => void
+}) {
+  const total = poll.options.reduce((s, o) => s + o.voters.length, 0)
+  const myVote = poll.options.find((o) => o.voters.includes(voterName))?.id ?? null
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 shadow-sm">
+      <div className="flex items-center gap-2">
+        <BarChart2 className="size-4 shrink-0 text-primary" />
+        <p className="font-semibold text-foreground text-sm">{poll.question}</p>
+      </div>
+      {poll.options.map((opt) => {
+        const pct = total > 0 ? Math.round((opt.voters.length / total) * 100) : 0
+        const isMyVote = myVote === opt.id
+        return (
+          <div key={opt.id}>
+            <button
+              onClick={() => onVote(opt.id)}
+              className={`relative w-full overflow-hidden rounded-xl border text-left transition-all ${
+                isMyVote ? "border-primary" : "border-border/70"
+              }`}
+            >
+              <div
+                className={`absolute inset-y-0 left-0 rounded-xl transition-all duration-500 ${
+                  isMyVote ? "bg-primary/20" : "bg-muted"
+                }`}
+                style={{ width: total > 0 ? `${pct}%` : "0%" }}
+              />
+              <div className="relative flex items-center gap-2 px-3 py-2">
+                <span className={`flex-1 text-sm font-medium ${isMyVote ? "text-primary" : "text-foreground"}`}>
+                  {opt.text}
+                </span>
+                {isMyVote && <Check className="size-3.5 shrink-0 text-primary" />}
+                <span className="shrink-0 text-xs font-bold text-muted-foreground">{pct}%</span>
+              </div>
+            </button>
+            {opt.voters.length > 0 && (
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-1 px-1">
+                <Users className="size-3 shrink-0 text-muted-foreground/50" />
+                {opt.voters.map((v, i) => (
+                  <span key={v} className="text-[10px] text-muted-foreground">
+                    {v}{i < opt.voters.length - 1 ? "," : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <p className="text-right text-[11px] text-muted-foreground">{total} oy</p>
+    </div>
+  )
+}
+
+// ── Poll compose sheet ────────────────────────────────────────────────────────
+function PollComposeSheet({
+  onClose, onSubmit,
+}: {
+  onClose: () => void
+  onSubmit: (question: string, options: string[]) => void
+}) {
+  const [question, setQuestion] = useState("")
+  const [options, setOptions]   = useState(["", ""])
+
+  function setOption(i: number, v: string) { setOptions((p) => p.map((o, idx) => idx === i ? v : o)) }
+  function addOption() { setOptions((p) => [...p, ""]) }
+  function removeOption(i: number) { if (options.length > 2) setOptions((p) => p.filter((_, idx) => idx !== i)) }
+
+  const validOptions = options.filter((o) => o.trim())
+  const canSubmit = question.trim() && validOptions.length >= 2
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="absolute inset-0 z-30 flex items-end bg-black/50"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 400, damping: 32 }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[80vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-card"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3.5">
+          <div className="flex items-center gap-2">
+            <BarChart2 className="size-4 text-primary" />
+            <h2 className="font-heading text-base font-bold">Anket oluştur</h2>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-muted-foreground active:bg-secondary">
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Soru</label>
+            <input
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="Anket sorusu..."
+              className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Seçenekler</label>
+            <div className="flex flex-col gap-2">
+              {options.map((opt, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    value={opt}
+                    onChange={(e) => setOption(i, e.target.value)}
+                    placeholder={`Seçenek ${i + 1}`}
+                    className="h-10 flex-1 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  />
+                  {options.length > 2 && (
+                    <button
+                      onClick={() => removeOption(i)}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-destructive/10 active:text-destructive"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {options.length < 6 && (
+                <button
+                  onClick={addOption}
+                  className="flex items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors active:bg-secondary"
+                >
+                  <Plus className="size-4" /> Seçenek ekle
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="shrink-0 border-t border-border p-4">
+          <button
+            onClick={() => { if (canSubmit) onSubmit(question.trim(), validOptions.map((o) => o.trim())) }}
+            disabled={!canSubmit}
+            className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40"
+          >
+            Anketi gönder
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }

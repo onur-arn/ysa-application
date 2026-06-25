@@ -24,6 +24,7 @@ export type EventItem = {
   notAttendingCount: number
   comments: EventComment[]
   createdBy?: string
+  endDate?: string // ISO — for period events
 }
 
 export const EVENTS: EventItem[] = []

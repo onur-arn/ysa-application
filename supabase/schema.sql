@@ -103,6 +103,39 @@ alter table poll_votes enable row level security;
 drop policy if exists "Authenticated can manage votes" on poll_votes;
 create policy "Authenticated can manage votes" on poll_votes for all to authenticated using (true) with check (true);
 
+-- ── MESSAGE POLLS ────────────────────────────────────────────────────────────
+create table if not exists message_polls (
+  id         uuid primary key default uuid_generate_v4(),
+  message_id uuid references chat_messages(id) on delete cascade unique not null,
+  question   text not null
+);
+alter table message_polls enable row level security;
+drop policy if exists "Authenticated can read message_polls"   on message_polls;
+drop policy if exists "Authenticated can insert message_polls" on message_polls;
+create policy "Authenticated can read message_polls"   on message_polls for select to authenticated using (true);
+create policy "Authenticated can insert message_polls" on message_polls for insert to authenticated with check (true);
+
+create table if not exists message_poll_options (
+  id       text primary key,
+  poll_id  uuid references message_polls(id) on delete cascade not null,
+  text     text not null,
+  position int not null default 0
+);
+alter table message_poll_options enable row level security;
+drop policy if exists "Authenticated can read message_poll_options"   on message_poll_options;
+drop policy if exists "Authenticated can insert message_poll_options" on message_poll_options;
+create policy "Authenticated can read message_poll_options"   on message_poll_options for select to authenticated using (true);
+create policy "Authenticated can insert message_poll_options" on message_poll_options for insert to authenticated with check (true);
+
+create table if not exists message_poll_votes (
+  option_id  text references message_poll_options(id) on delete cascade not null,
+  voter_name text not null,
+  primary key (option_id, voter_name)
+);
+alter table message_poll_votes enable row level security;
+drop policy if exists "Authenticated can manage message_poll_votes" on message_poll_votes;
+create policy "Authenticated can manage message_poll_votes" on message_poll_votes for all to authenticated using (true) with check (true);
+
 -- ── COMMENTS ─────────────────────────────────────────────────────────────────
 create table if not exists post_comments (
   id         uuid primary key default uuid_generate_v4(),
