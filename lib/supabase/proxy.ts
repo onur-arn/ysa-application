@@ -32,6 +32,14 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
+
+  // /auth/reset-password is only accessible via the email link (must have token_hash)
+  if (pathname === "/auth/reset-password" && !request.nextUrl.searchParams.get("token_hash")) {
+    const url = request.nextUrl.clone()
+    url.pathname = "/auth/forgot-password"
+    return NextResponse.redirect(url)
+  }
+
   const isAuthRoute    = pathname.startsWith("/auth")
   const isPublicApi    = pathname.startsWith("/api/signup-") || pathname.startsWith("/api/test-email") || pathname === "/api/reset-password"
   const isPublicRoute  = pathname === "/" || pathname === "/manifest.json" || isPublicApi
