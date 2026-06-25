@@ -334,10 +334,10 @@ export function AgendaClient({
                         <div key={event.id} className="relative h-1.5">
                           <div
                             className={`absolute inset-y-0 ${
-                              type === "start"  ? "left-[40%] right-0 rounded-l-full" :
-                              type === "end"    ? "left-0 right-[40%] rounded-r-full" :
+                              type === "start"  ? "left-[38%] -right-1 rounded-l-full" :
+                              type === "end"    ? "-left-1 right-[38%] rounded-r-full" :
                               type === "only"   ? "left-[15%] right-[15%] rounded-full" :
-                              "-left-0.5 -right-0.5"
+                              "-left-1 -right-1"
                             }`}
                             style={{ backgroundColor: `hsl(${getStation(event.station).color})` }}
                           />
@@ -401,7 +401,11 @@ export function AgendaClient({
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold text-foreground">{e.title}</p>
                     <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="size-3 shrink-0" /> {e.time} · {station.name}
+                      {e.endDate
+                        ? <><CalendarDays className="size-3 shrink-0" /> {formatShortDate(e.date)} → {formatShortDate(e.endDate)}</>
+                        : <><Clock className="size-3 shrink-0" /> {e.time}</>
+                      }
+                      {" · "}{station.name}
                     </p>
                   </div>
                   <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -428,12 +432,18 @@ export function AgendaClient({
 
             <div className="flex items-center gap-3 text-sm">
               <CalendarDays className="size-5 shrink-0 text-primary" />
-              <span>{formatLongDate(selected.date)}</span>
+              {selected.endDate ? (
+                <span>{formatLongDate(selected.date)} — {formatLongDate(selected.endDate)}</span>
+              ) : (
+                <span>{formatLongDate(selected.date)}</span>
+              )}
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <Clock className="size-5 shrink-0 text-primary" />
-              <span>{selected.time}</span>
-            </div>
+            {!selected.endDate && (
+              <div className="flex items-center gap-3 text-sm">
+                <Clock className="size-5 shrink-0 text-primary" />
+                <span>{selected.time}</span>
+              </div>
+            )}
             <div className="flex items-center gap-3 text-sm">
               <MapPin className="size-5 shrink-0 text-primary" />
               <span>{selected.place}</span>
@@ -598,10 +608,17 @@ function EventRow({
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-foreground">{event.title}</p>
         <div className="mt-0.5 flex flex-col gap-0.5 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Clock className="size-3 shrink-0" />
-            {event.time}
-          </span>
+          {event.endDate ? (
+            <span className="flex items-center gap-1">
+              <CalendarDays className="size-3 shrink-0" />
+              {formatShortDate(event.date)} → {formatShortDate(event.endDate)}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <Clock className="size-3 shrink-0" />
+              {event.time}
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <MapPin className="size-3 shrink-0" />
             <span className="truncate">{event.place}</span>
@@ -773,4 +790,9 @@ function localDate(dateStr: string) {
 function formatLongDate(iso: string) {
   const d = localDate(iso)
   return `${WEEKDAYS_FULL[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS_TR[d.getMonth()]} ${d.getFullYear()}`
+}
+
+function formatShortDate(iso: string) {
+  const d = localDate(iso)
+  return `${d.getDate()} ${MONTHS_TR[d.getMonth()].slice(0, 3)}`
 }
