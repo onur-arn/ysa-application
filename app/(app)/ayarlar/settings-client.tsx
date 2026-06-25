@@ -278,8 +278,8 @@ export function SettingsClient({
           </p>
           <p>
             Bilgi için{" "}
-            <a href="mailto:onur54700@gmail.com" className="underline underline-offset-2 hover:text-primary transition-colors">
-              onur54700@gmail.com
+            <a href="mailto:secretaire@youthstation.org" className="underline underline-offset-2 hover:text-primary transition-colors">
+              secretaire@youthstation.org
             </a>
           </p>
         </div>
