@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 import { useNavVisibility } from "@/lib/nav-visibility"
 import { Modal } from "@/components/ui/modal"
 import { usePresence } from "@/lib/presence"
@@ -1279,6 +1280,7 @@ function ChatView({
   const [showPollCompose, setShowPollCompose] = useState(false)
   const scrollRef   = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const chatChannelRef = useRef<RealtimeChannel | null>(null)
 
   const isFirstScroll = useRef(true)
   useEffect(() => {
@@ -1417,7 +1419,25 @@ function ChatView({
           }
         }))
       })
+      .on("broadcast", { event: "message" }, ({ payload }) => {
+        const m = payload as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; is_system: boolean; created_at: string; conversation_id: string }
+        if (m.sender_name === senderName) return
+        setMessages((prev) => {
+          if (prev.some((x) => x.id === m.id)) return prev
+          return [...prev, {
+            id: m.id,
+            author: m.sender_name,
+            initials: m.sender_initials,
+            text: m.text ?? "",
+            time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
+            self: false,
+            image: m.image_url ?? undefined,
+            system: m.is_system,
+          }]
+        })
+      })
       .subscribe()
+    chatChannelRef.current = channel
 
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1450,6 +1470,19 @@ function ChatView({
         }
         setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
         onMessagesChange?.([...messages, newMsg])
+        chatChannelRef.current?.send({
+          type: "broadcast", event: "message",
+          payload: {
+            id: inserted.id,
+            sender_name: senderName,
+            sender_initials: senderInitials,
+            text: draft.trim() || null,
+            image_url: attached ?? null,
+            is_system: false,
+            created_at: (inserted as Record<string, unknown>).created_at as string ?? new Date().toISOString(),
+            conversation_id: conversationId,
+          },
+        })
       }
     } else {
       // Static/mock conversation — local only

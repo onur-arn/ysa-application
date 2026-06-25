@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText, Trash2, Pencil } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
@@ -10,6 +10,7 @@ import { STATIONS_SORTED, getStation, type StationId } from "@/lib/data/stations
 import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 
 const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
   const h = String(Math.floor(i / 4)).padStart(2, "0")
@@ -84,6 +85,7 @@ export function AgendaClient({
   const [isIntl, setIsIntl] = useState(initialIsIntl)
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialUserId || null)
   const [insertError, setInsertError] = useState<string | null>(null)
+  const agendaChannelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -127,7 +129,20 @@ export function AgendaClient({
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "events" }, (payload) => {
         setEvents((prev) => prev.filter((e) => e.id !== (payload.old as Record<string, unknown>).id))
       })
+      .on("broadcast", { event: "event_add" }, ({ payload }) => {
+        const e = payload as EventItem
+        setEvents((prev) => prev.some((x) => x.id === e.id) ? prev : [...prev, e])
+      })
+      .on("broadcast", { event: "event_update" }, ({ payload }) => {
+        const e = payload as Partial<EventItem> & { id: string }
+        setEvents((prev) => prev.map((x) => x.id === e.id ? { ...x, ...e } : x))
+      })
+      .on("broadcast", { event: "event_delete" }, ({ payload }) => {
+        const { id } = payload as { id: string }
+        setEvents((prev) => prev.filter((e) => e.id !== id))
+      })
       .subscribe()
+    agendaChannelRef.current = channel
 
     return () => { supabase.removeChannel(channel) }
   }, [])
@@ -200,6 +215,7 @@ export function AgendaClient({
     if (!error) {
       setEvents((prev) => prev.filter((e) => e.id !== eventId))
       setSelected(null)
+      agendaChannelRef.current?.send({ type: "broadcast", event: "event_delete", payload: { id: eventId } })
     }
   }
 
@@ -218,9 +234,9 @@ export function AgendaClient({
     }).eq("id", editingEvent.id)
 
     if (!error) {
-      setEvents((prev) => prev.map((e) =>
-        e.id === editingEvent.id ? { ...e, ...updated, id: editingEvent.id, createdBy: editingEvent.createdBy } : e
-      ))
+      const merged = { ...updated, id: editingEvent.id, createdBy: editingEvent.createdBy }
+      setEvents((prev) => prev.map((e) => e.id === editingEvent.id ? { ...e, ...merged } : e))
+      agendaChannelRef.current?.send({ type: "broadcast", event: "event_update", payload: merged })
     }
     setEditingEvent(null)
   }
@@ -544,6 +560,8 @@ export function AgendaClient({
             setEvents((prev) => prev.filter((x) => x.id !== newId))
             setSelected(null)
             setInsertError(`Etkinlik kaydedilemedi: ${error.message}`)
+          } else {
+            agendaChannelRef.current?.send({ type: "broadcast", event: "event_add", payload: newEvent })
           }
         }}
       />

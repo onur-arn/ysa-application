@@ -7,6 +7,7 @@ import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/d
 import { getStation, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
 import { Modal } from "@/components/ui/modal"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -653,6 +654,7 @@ export function PostsFeed({
   const [posts, setPosts] = useState<Post[]>(() => mapPostsFromRaw(initialPosts))
   const [composeOpen, setComposeOpen] = useState(false)
   const latestPostTimeRef = useRef<string>("")
+  const feedChannelRef = useRef<RealtimeChannel | null>(null)
 
   // Keep latestPostTimeRef in sync so polling can fetch only new posts
   useEffect(() => {
@@ -830,7 +832,16 @@ export function PostsFeed({
         const old = payload.old as { id: string }
         setIgemRequests((prev) => prev.filter((r) => r.id !== old.id))
       })
+      .on("broadcast", { event: "post_add" }, ({ payload }) => {
+        const p = payload as Post
+        setPosts((prev) => prev.some((x) => x.id === p.id) ? prev : [p, ...prev])
+      })
+      .on("broadcast", { event: "post_delete" }, ({ payload }) => {
+        const { id } = payload as { id: string }
+        setPosts((prev) => prev.filter((p) => p.id !== id))
+      })
       .subscribe()
+    feedChannelRef.current = channel
 
     return () => { supabase.removeChannel(channel) }
   }, [])
@@ -841,6 +852,7 @@ export function PostsFeed({
 
   async function deletePost(id: string) {
     setPosts((prev) => prev.filter((p) => p.id !== id))
+    feedChannelRef.current?.send({ type: "broadcast", event: "post_delete", payload: { id } })
     const supabase = createClient()
     await supabase.from("posts").delete().eq("id", id)
   }
@@ -882,6 +894,7 @@ export function PostsFeed({
         image_url: imageUrl ?? null,
         created_by: userId,
       })
+      feedChannelRef.current?.send({ type: "broadcast", event: "post_add", payload: newPost })
       if (pollWithIds && pollWithIds.options.length >= 2) {
         const { data: pollRow, error: pollErr } = await supabase
           .from("polls")
