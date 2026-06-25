@@ -4,7 +4,6 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Mail, Loader2, CheckCircle2, Moon, Sun, ArrowLeft } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/lib/theme/context"
@@ -21,18 +20,14 @@ export default function ForgotPasswordPage() {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    const supabase = createClient()
-    // Use the current origin so it works on every deployment
-    const redirectTo = `${window.location.origin}/auth/callback?next=/auth/reset-password`
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
-      if (error) {
-        console.error("[resetPassword]", error)
-        if (error.message.toLowerCase().includes("rate limit")) {
-          setError("Çok fazla istek gönderildi. Lütfen birkaç dakika bekleyip tekrar deneyin.")
-        } else {
-          setError("Bir hata oluştu. Lütfen tekrar deneyin.")
-        }
+      const res = await fetch("/api/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), appUrl: window.location.origin }),
+      })
+      if (!res.ok) {
+        setError("Bir hata oluştu. Lütfen tekrar deneyin.")
       } else {
         setSent(true)
       }

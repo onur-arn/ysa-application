@@ -1,30 +1,41 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
-import { Mail, Lock, Eye, EyeOff, Loader2, CheckCircle2, Cake, Moon, Sun } from "lucide-react"
+import { Mail, Lock, Eye, EyeOff, Loader2, CheckCircle2, Cake, Hash, Moon, Sun } from "lucide-react"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/lib/theme/context"
 
-export default function ResetPasswordPage() {
-  const router = useRouter()
+function ResetPasswordForm() {
+  const router        = useRouter()
+  const searchParams  = useSearchParams()
   const { theme, toggle } = useTheme()
 
-  // Step 1 — identity verification
-  const [email, setEmail] = useState("")
+  const [email, setEmail]       = useState(searchParams.get("email") ?? "")
   const [birthday, setBirthday] = useState("")
-  const [step1Loading, setStep1Loading] = useState(false)
-  const [step1Error, setStep1Error] = useState<string | null>(null)
+  const [code, setCode]         = useState(searchParams.get("code") ?? "")
 
-  // Step 2 — new password
-  const [verified, setVerified] = useState(false)
-  const [password, setPassword] = useState("")
-  const [showPw, setShowPw] = useState(false)
+  const [step1Loading, setStep1Loading] = useState(false)
+  const [step1Error, setStep1Error]     = useState<string | null>(null)
+  const [verified, setVerified]         = useState(false)
+
+  const [password, setPassword]         = useState("")
+  const [showPw, setShowPw]             = useState(false)
   const [step2Loading, setStep2Loading] = useState(false)
-  const [step2Error, setStep2Error] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
+  const [step2Error, setStep2Error]     = useState<string | null>(null)
+  const [done, setDone]                 = useState(false)
+
+  // If all three params come from URL, auto-submit step 1
+  useEffect(() => {
+    const urlEmail    = searchParams.get("email")
+    const urlCode     = searchParams.get("code")
+    if (urlEmail && urlCode) {
+      setEmail(urlEmail)
+      setCode(urlCode)
+    }
+  }, [])
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault()
@@ -34,7 +45,7 @@ export default function ResetPasswordPage() {
     const res = await fetch("/api/reset-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email.trim(), birthday }),
+      body: JSON.stringify({ email: email.trim(), birthday, code: code.trim() }),
     })
 
     const json = await res.json()
@@ -59,7 +70,7 @@ export default function ResetPasswordPage() {
     const res = await fetch("/api/reset-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email.trim(), birthday, password }),
+      body: JSON.stringify({ email: email.trim(), birthday, code: code.trim(), password }),
     })
 
     const json = await res.json()
@@ -97,7 +108,9 @@ export default function ResetPasswordPage() {
           <Logo className="h-14 w-14" />
           <h1 className="mt-4 font-heading text-2xl font-bold text-foreground">Yeni şifre belirle</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {verified ? "Kimliğiniz doğrulandı. Yeni şifrenizi belirleyin." : "Kimliğinizi doğrulamak için bilgilerinizi girin."}
+            {verified
+              ? "Kimliğiniz doğrulandı. Yeni şifrenizi belirleyin."
+              : "E-postanıza gönderilen kodu, e-posta adresinizi ve doğum tarihinizi girin."}
           </p>
         </div>
 
@@ -120,6 +133,7 @@ export default function ResetPasswordPage() {
                 onSubmit={handleVerify}
                 className="flex flex-col gap-4"
               >
+                {/* Email */}
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium text-foreground">E-posta</label>
                   <div className="relative">
@@ -135,6 +149,7 @@ export default function ResetPasswordPage() {
                   </div>
                 </div>
 
+                {/* Birthday */}
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium text-foreground">Date de naissance</label>
                   <div className="relative">
@@ -149,9 +164,31 @@ export default function ResetPasswordPage() {
                   </div>
                 </div>
 
+                {/* Code */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">Code de vérification</label>
+                  <div className="relative">
+                    <Hash className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      required
+                      value={code}
+                      onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="6 chiffres reçus par e-mail"
+                      inputMode="numeric"
+                      maxLength={6}
+                      className={`${fieldClass} tracking-[0.25em] font-mono`}
+                    />
+                  </div>
+                </div>
+
                 {step1Error && <p className="text-sm text-destructive">{step1Error}</p>}
 
-                <Button type="submit" size="lg" disabled={step1Loading || !email || !birthday}>
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={step1Loading || !email || !birthday || code.length !== 6}
+                >
                   {step1Loading ? <Loader2 className="size-5 animate-spin" /> : "Vérifier"}
                 </Button>
 
@@ -214,7 +251,11 @@ export default function ResetPasswordPage() {
 
                 {step2Error && <p className="text-sm text-destructive">{step2Error}</p>}
 
-                <Button type="submit" size="lg" disabled={step2Loading || password.length < 6}>
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={step2Loading || password.length < 6}
+                >
                   {step2Loading ? <Loader2 className="size-5 animate-spin" /> : "Şifreyi güncelle"}
                 </Button>
 
@@ -231,5 +272,13 @@ export default function ResetPasswordPage() {
         )}
       </motion.div>
     </main>
+  )
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense>
+      <ResetPasswordForm />
+    </Suspense>
   )
 }

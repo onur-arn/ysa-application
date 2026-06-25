@@ -423,3 +423,13 @@ drop policy if exists "Authenticated can delete story_reactions" on story_reacti
 create policy "Authenticated can read story_reactions"   on story_reactions for select to authenticated using (true);
 create policy "Authenticated can insert story_reactions" on story_reactions for insert to authenticated with check (true);
 create policy "Authenticated can delete story_reactions" on story_reactions for delete to authenticated using (true);
+
+-- ── PASSWORD RESET TOKENS ─────────────────────────────────────────────────────
+create table if not exists password_reset_tokens (
+  email      text primary key,
+  code       text not null,
+  expires_at timestamptz not null,
+  created_at timestamptz default now()
+);
+alter table password_reset_tokens enable row level security;
+-- Only service-role (admin client) can access this table
