@@ -17,6 +17,15 @@ const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
   return `${h}:${m}`
 })
 
+function currentRounded() {
+  const now = new Date()
+  const mins = now.getHours() * 60 + now.getMinutes()
+  const rounded = Math.ceil(mins / 15) * 15
+  const h = String(Math.floor(rounded / 60) % 24).padStart(2, "0")
+  const m = String(rounded % 60).padStart(2, "0")
+  return `${h}:${m}`
+}
+
 type View = "calendar" | "list"
 type Filter = "all" | StationId
 
@@ -131,26 +140,50 @@ export function AgendaClient({
   const year = cursor.getFullYear()
   const month = cursor.getMonth()
 
-  const monthEvents = useMemo(
-    () =>
-      filtered
-        .filter((e) => {
-          const d = localDate(e.date)
-          return d.getFullYear() === year && d.getMonth() === month
-        })
-        .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? "")),
-    [filtered, year, month],
-  )
+  const monthEvents = useMemo(() => {
+    const mStart = new Date(year, month, 1)
+    const mEnd   = new Date(year, month + 1, 0)
+    return filtered
+      .filter((e) => {
+        const start = localDate(e.date)
+        const end   = e.endDate ? localDate(e.endDate) : start
+        return start <= mEnd && end >= mStart
+      })
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? ""))
+  }, [filtered, year, month])
 
   const eventsByDay = useMemo(() => {
     const map: Record<number, EventItem[]> = {}
-    monthEvents.forEach((e) => {
-      const day = localDate(e.date).getDate()
-      map[day] = map[day] || []
-      map[day].push(e)
+    monthEvents.filter((e) => !e.endDate).forEach((e) => {
+      const d = localDate(e.date).getDate()
+      map[d] = map[d] || []
+      map[d].push(e)
     })
     return map
   }, [monthEvents])
+
+  const periodByDay = useMemo(() => {
+    const map: Record<number, { event: EventItem; type: "start" | "middle" | "end" | "only" }[]> = {}
+    const mStart = new Date(year, month, 1)
+    const mEnd   = new Date(year, month + 1, 0)
+    monthEvents.filter((e) => e.endDate).forEach((e) => {
+      const evStart = localDate(e.date)
+      const evEnd   = localDate(e.endDate!)
+      const visStart = evStart < mStart ? mStart : evStart
+      const visEnd   = evEnd > mEnd ? mEnd : evEnd
+      const cur = new Date(visStart)
+      while (cur <= visEnd) {
+        const dn = cur.getDate()
+        const isFirst = cur.getTime() === visStart.getTime()
+        const isLast  = cur.getTime() === visEnd.getTime()
+        const type = isFirst && isLast ? "only" : isFirst ? "start" : isLast ? "end" : "middle"
+        map[dn] = map[dn] || []
+        map[dn].push({ event: e, type })
+        cur.setDate(cur.getDate() + 1)
+      }
+    })
+    return map
+  }, [monthEvents, year, month])
 
   const firstDayIdx = (new Date(year, month, 1).getDay() + 6) % 7
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -264,21 +297,26 @@ export function AgendaClient({
             ))}
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1
-              const dayEvents = eventsByDay[day] || []
-              const hasEvents = dayEvents.length > 0
+              const dayEvents  = eventsByDay[day] || []
+              const periodDays = periodByDay[day] || []
+              const hasEvents  = dayEvents.length > 0
+              const hasPeriod  = periodDays.length > 0
+              const allClickable = hasEvents || hasPeriod
+              const allDayItems = [...dayEvents, ...periodDays.map((p) => p.event)]
+              const unique = allDayItems.filter((e, idx, arr) => arr.findIndex((x) => x.id === e.id) === idx)
               return (
                 <button
                   key={day}
                   onClick={() => {
-                    if (!hasEvents) return
-                    if (dayEvents.length === 1) setSelected(dayEvents[0])
-                    else setSelectedDayEvents(dayEvents)
+                    if (!allClickable) return
+                    if (unique.length === 1) setSelected(unique[0])
+                    else setSelectedDayEvents(unique)
                   }}
-                  className={`flex aspect-square flex-col items-center justify-center rounded-xl text-sm transition-colors ${
-                    hasEvents ? "bg-primary/10 font-semibold text-foreground" : "text-muted-foreground"
-                  }`}
+                  className={`relative flex aspect-square flex-col items-center justify-start rounded-xl pt-1.5 text-sm transition-colors ${
+                    allClickable ? "font-semibold text-foreground" : "text-muted-foreground"
+                  } ${hasEvents && !hasPeriod ? "bg-primary/10" : ""}`}
                 >
-                  {day}
+                  <span>{day}</span>
                   {hasEvents && (
                     <span className="mt-0.5 flex gap-0.5">
                       {dayEvents.slice(0, 3).map((e) => (
@@ -289,6 +327,23 @@ export function AgendaClient({
                         />
                       ))}
                     </span>
+                  )}
+                  {hasPeriod && (
+                    <div className="absolute bottom-1 left-0 right-0 flex flex-col gap-0.5">
+                      {periodDays.slice(0, 2).map(({ event, type }) => (
+                        <div key={event.id} className="relative h-1.5">
+                          <div
+                            className={`absolute inset-y-0 ${
+                              type === "start"  ? "left-[40%] right-0 rounded-l-full" :
+                              type === "end"    ? "left-0 right-[40%] rounded-r-full" :
+                              type === "only"   ? "left-[15%] right-[15%] rounded-full" :
+                              "-left-0.5 -right-0.5"
+                            }`}
+                            style={{ backgroundColor: `hsl(${getStation(event.station).color})` }}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </button>
               )
@@ -579,7 +634,7 @@ function EventFormModal({
   const [day, setDay]           = useState(initialValues?.date ?? "")
   const [endDay, setEndDay]     = useState(initialValues?.endDate ?? "")
   const [eventType, setEventType] = useState<"once" | "period">(initialValues?.endDate ? "period" : "once")
-  const [time, setTime]         = useState(initialValues?.time ?? "")
+  const [time, setTime]         = useState(initialValues?.time ?? (initialValues?.endDate ? "" : currentRounded()))
   const [place, setPlace]       = useState(initialValues?.place === "—" ? "" : (initialValues?.place ?? ""))
   const [description, setDescription] = useState(initialValues?.description ?? "")
   const [link, setLink]         = useState(initialValues?.link ?? "")
@@ -590,13 +645,14 @@ function EventFormModal({
   }, [userStation, initialValues])
 
   function submit() {
-    if (!title.trim() || !day || !time) return
+    if (!title.trim() || !day) return
+    if (eventType === "once" && !time) return
     if (eventType === "period" && !endDay) return
     onSubmit({
       id: initialValues?.id ?? String(Date.now()),
       title: title.trim(),
       date: day,
-      time: time,
+      time: eventType === "period" ? "00:00" : time,
       place: place || "—",
       station: station as StationId,
       description: description.trim() || undefined,
@@ -608,7 +664,7 @@ function EventFormModal({
       comments: [],
     })
     if (!isEdit) {
-      setTitle(""); setDay(""); setEndDay(""); setTime(""); setPlace("")
+      setTitle(""); setDay(""); setEndDay(""); setTime(currentRounded()); setPlace("")
       setDescription(""); setLink(""); setStation(userStation); setEventType("once")
     }
   }
@@ -626,7 +682,11 @@ function EventFormModal({
             <button
               key={type}
               type="button"
-              onClick={() => { setEventType(type); if (type === "once") setEndDay("") }}
+              onClick={() => {
+                setEventType(type)
+                if (type === "once") { setEndDay(""); if (!time) setTime(currentRounded()) }
+                else setTime("")
+              }}
               className={`relative flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${
                 eventType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground"
               }`}
@@ -654,25 +714,17 @@ function EventFormModal({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Field label="Başlangıç tarihi">
-                  <input type="date" lang="tr" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
-                </Field>
-              </div>
-              <div className="w-[100px] shrink-0">
-                <Field label={t("agenda.time")}>
-                  <select value={time} onChange={(e) => setTime(e.target.value)} className={inputClass + " text-sm px-2"}>
-                    <option value="">--:--</option>
-                    {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </Field>
-              </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <Field label="Başlangıç">
+                <input type="date" lang="tr" value={day} onChange={(e) => setDay(e.target.value)} className={inputClass + " text-sm px-2"} />
+              </Field>
             </div>
-            <Field label="Bitiş tarihi">
-              <input type="date" lang="tr" value={endDay} onChange={(e) => setEndDay(e.target.value)} min={day || undefined} className={inputClass + " text-sm px-2"} />
-            </Field>
+            <div className="flex-1">
+              <Field label="Bitiş">
+                <input type="date" lang="tr" value={endDay} onChange={(e) => setEndDay(e.target.value)} min={day || undefined} className={inputClass + " text-sm px-2"} />
+              </Field>
+            </div>
           </div>
         )}
 
@@ -705,7 +757,7 @@ function EventFormModal({
             </div>
           </Field>
         )}
-        <Button onClick={submit} disabled={!title.trim() || !day || !time || (eventType === "period" && !endDay)} className="mt-1 h-12">
+        <Button onClick={submit} disabled={!title.trim() || !day || (eventType === "once" && !time) || (eventType === "period" && !endDay)} className="mt-1 h-12">
           {isEdit ? "Kaydet" : t("agenda.create")}
         </Button>
       </div>
