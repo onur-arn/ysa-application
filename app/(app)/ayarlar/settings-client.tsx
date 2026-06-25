@@ -129,22 +129,13 @@ export function SettingsClient({
       const authorStation = profileData?.station || station
       const authorInitials = profileData?.initials || initials
 
-      const { data: newIgem } = await supabase.from("igem_requests").insert({
+      await supabase.from("igem_requests").insert({
         author: authorName,
         initials: authorInitials,
         station: authorStation,
         motivation: igemMotivation,
         created_by: user.id,
-      }).select().single()
-      if (newIgem) {
-        const ch = supabase.channel("posts-realtime")
-        ch.subscribe((status) => {
-          if (status === "SUBSCRIBED") {
-            ch.send({ type: "broadcast", event: "igem_add", payload: { ...newIgem } })
-            setTimeout(() => supabase.removeChannel(ch), 1500)
-          }
-        })
-      }
+      })
     } catch {}
     setIgemSent(true)
     setIgemOpen(false)
