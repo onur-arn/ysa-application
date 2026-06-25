@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 import { AnimatePresence, motion } from "framer-motion"
 import { Plus, X, ChevronLeft, ChevronRight, Music, Heart } from "lucide-react"
 import { STATIONS_SORTED } from "@/lib/data/stations"
@@ -72,6 +73,7 @@ export function StoriesBar({
   const [reactionCounts, setReactionCounts] = useState<Map<string, number>>(new Map())
   const [myReactions, setMyReactions]       = useState<Set<string>>(new Set())
   const [reactionDetails, setReactionDetails] = useState<Map<string, string[]>>(new Map())
+  const reactionsChannelRef = useRef<RealtimeChannel | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -167,11 +169,12 @@ export function StoriesBar({
     return stories.some(s => s.station === stationId && !seenIds.has(s.id))
   }
 
-  // Load reactions for all visible stories
+  // Load reactions + subscribe to broadcast for instant updates
   useEffect(() => {
     if (stories.length === 0 || !user.name) return
+    const supabase = createClient()
+
     async function loadReactions() {
-      const supabase = createClient()
       const ids = stories.map(s => s.id)
       const { data } = await supabase.from("story_reactions").select("story_id, user_name").in("story_id", ids)
       if (!data) return
@@ -190,20 +193,56 @@ export function StoriesBar({
       setReactionDetails(details)
     }
     loadReactions()
+
+    // Broadcast channel — reacts instantly to others' likes (<200ms)
+    const ch = supabase
+      .channel("stories-reactions")
+      .on("broadcast", { event: "reaction" }, ({ payload }) => {
+        const { storyId, userName, action } = payload as { storyId: string; userName: string; action: "add" | "remove" }
+        if (userName === user.name) return // already handled optimistically
+        setReactionCounts(prev => {
+          const n = new Map(prev)
+          n.set(storyId, Math.max(0, (n.get(storyId) ?? 0) + (action === "add" ? 1 : -1)))
+          return n
+        })
+        setReactionDetails(prev => {
+          const n = new Map(prev)
+          const arr = [...(n.get(storyId) ?? [])]
+          if (action === "add" && !arr.includes(userName)) n.set(storyId, [...arr, userName])
+          if (action === "remove") n.set(storyId, arr.filter(u => u !== userName))
+          return n
+        })
+      })
+      .subscribe()
+
+    reactionsChannelRef.current = ch
+    return () => { supabase.removeChannel(ch) }
   }, [stories.length, user.name])
 
   async function toggleLike(storyId: string) {
     const isLiked = myReactions.has(storyId)
+    const action: "add" | "remove" = isLiked ? "remove" : "add"
     const supabase = createClient()
+
+    // Optimistic update (instant for current user)
     if (isLiked) {
       setMyReactions(prev  => { const n = new Set(prev); n.delete(storyId); return n })
       setReactionCounts(prev => { const n = new Map(prev); n.set(storyId, Math.max(0, (n.get(storyId) ?? 1) - 1)); return n })
+      setReactionDetails(prev => { const n = new Map(prev); n.set(storyId, (n.get(storyId) ?? []).filter(u => u !== user.name)); return n })
       await supabase.from("story_reactions").delete().eq("story_id", storyId).eq("user_name", user.name)
     } else {
       setMyReactions(prev  => new Set([...prev, storyId]))
       setReactionCounts(prev => { const n = new Map(prev); n.set(storyId, (n.get(storyId) ?? 0) + 1); return n })
+      setReactionDetails(prev => { const n = new Map(prev); const arr = n.get(storyId) ?? []; if (!arr.includes(user.name)) n.set(storyId, [...arr, user.name]); return n })
       await supabase.from("story_reactions").insert({ story_id: storyId, user_name: user.name })
     }
+
+    // Broadcast to all other users (<200ms)
+    reactionsChannelRef.current?.send({
+      type: "broadcast",
+      event: "reaction",
+      payload: { storyId, userName: user.name, action },
+    })
   }
 
   // When opened from "my story" button, show only the user's own stories; otherwise show all station stories
