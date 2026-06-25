@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
-import { Lock, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react"
+import { Mail, Lock, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
@@ -11,75 +11,35 @@ import { Button } from "@/components/ui/button"
 export default function ResetPasswordPage() {
   const router = useRouter()
   const [password, setPassword] = useState("")
-  const [confirm, setConfirm] = useState("")
   const [showPw, setShowPw] = useState(false)
-  const [showCf, setShowCf] = useState(false)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [ready, setReady] = useState(false)
+  const [email, setEmail] = useState("")
+  const tokenHashRef = useRef<string | null>(null)
 
   useEffect(() => {
     const supabase = createClient()
-    let unsubscribe: (() => void) | undefined
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let resolved = false
-
-    function resolve() {
-      if (resolved) return
-      resolved = true
-      clearTimeout(timer)
-      setReady(true)
-    }
+    const token_hash = new URLSearchParams(window.location.search).get("token_hash")
+    tokenHashRef.current = token_hash
 
     async function init() {
-      // Listen for auth state changes FIRST — catches any async session establishment
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-        if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") resolve()
-      })
-      unsubscribe = () => subscription.unsubscribe()
-
-      // 1. PKCE flow: ?code=xxx
-      const code = new URLSearchParams(window.location.search).get("code")
-      if (code) {
-        await supabase.auth.exchangeCodeForSession(code)
-        // Always check session after exchange — it may succeed even if error is returned
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session) { resolve(); return }
-      }
-
-      // 2. Implicit flow: #access_token=...&type=recovery
-      const hash = window.location.hash.slice(1)
-      if (hash) {
-        const p = new URLSearchParams(hash)
-        const at = p.get("access_token")
-        if (at && p.get("type") === "recovery") {
-          await supabase.auth.setSession({ access_token: at, refresh_token: p.get("refresh_token") ?? "" })
-          const { data: { session } } = await supabase.auth.getSession()
-          if (session) { resolve(); return }
+      if (token_hash) {
+        const { data, error: otpErr } = await supabase.auth.verifyOtp({ token_hash, type: "recovery" })
+        if (!otpErr && data.user?.email) {
+          setEmail(data.user.email)
+          return
         }
       }
-
-      // 3. Existing session
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session) { resolve(); return }
-
-      // 4. Timeout — give Supabase 10s to fire an auth event
-      timer = setTimeout(() => {
-        if (!resolved) setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
-      }, 10000)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.email) setEmail(user.email)
     }
 
     init()
-    return () => { unsubscribe?.(); clearTimeout(timer) }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (password !== confirm) {
-      setError("Şifreler eşleşmiyor.")
-      return
-    }
     if (password.length < 6) {
       setError("Şifre en az 6 karakter olmalı.")
       return
@@ -87,15 +47,28 @@ export default function ResetPasswordPage() {
     setLoading(true)
     setError(null)
     const supabase = createClient()
+
+    if (!email && tokenHashRef.current) {
+      const { error: otpErr } = await supabase.auth.verifyOtp({ token_hash: tokenHashRef.current, type: "recovery" })
+      if (otpErr) {
+        setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
+        setLoading(false)
+        return
+      }
+    }
+
     const { error: updateErr } = await supabase.auth.updateUser({ password })
     setLoading(false)
     if (updateErr) {
-      setError("Şifre güncellenemedi. Bağlantı süresi dolmuş olabilir.")
+      setError("Şifre güncellenemedi. Lütfen tekrar deneyin.")
     } else {
       setDone(true)
       setTimeout(() => router.push("/auth/login"), 2500)
     }
   }
+
+  const fieldClass =
+    "h-12 w-full rounded-xl border border-input bg-card pl-10 pr-3 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-6 py-12">
@@ -108,7 +81,7 @@ export default function ResetPasswordPage() {
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo className="h-14 w-14" />
           <h1 className="mt-4 font-heading text-2xl font-bold text-foreground">Yeni şifre belirle</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Şifrenizi sıfırlamak için aşağıdaki formu doldurun.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Hesabınız için yeni bir şifre belirleyin.</p>
         </div>
 
         {done ? (
@@ -118,71 +91,56 @@ export default function ResetPasswordPage() {
               Şifreniz güncellendi. Giriş sayfasına yönlendiriliyorsunuz…
             </p>
           </div>
-        ) : !ready ? (
-          <div className="flex flex-col items-center gap-4 text-center">
-            {error ? (
-              <>
-                <p className="text-sm text-destructive">{error}</p>
-                <Button variant="outline" className="w-full" onClick={() => router.push("/auth/forgot-password")}>
-                  Yeni sıfırlama talebi oluştur
-                </Button>
-              </>
-            ) : (
-              <>
-                <Loader2 className="size-8 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">Bağlantı doğrulanıyor…</p>
-              </>
-            )}
-          </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type={showPw ? "text" : "password"}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Yeni şifre"
-                className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-10 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPw(v => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              >
-                {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
+            {/* Email — pre-filled from session, read-only */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">E-posta</label>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="email"
+                  value={email}
+                  readOnly
+                  className="h-12 w-full rounded-xl border border-input bg-muted pl-10 pr-3 text-base text-muted-foreground cursor-default outline-none"
+                  placeholder="…"
+                />
+              </div>
             </div>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type={showCf ? "text" : "password"}
-                required
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                placeholder="Şifreyi tekrar girin"
-                className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-10 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
-              />
-              <button
-                type="button"
-                onClick={() => setShowCf(v => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              >
-                {showCf ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
+
+            {/* New password */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Yeni şifre{" "}
+                <span className="font-normal text-muted-foreground">(en az 6 karakter)</span>
+              </label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type={showPw ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  minLength={6}
+                  className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-10 text-base text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
             </div>
-            {confirm && password !== confirm && (
-              <p className="text-xs text-destructive">Şifreler eşleşmiyor.</p>
-            )}
+
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button
-              type="submit"
-              size="lg"
-              disabled={loading || !password || password !== confirm || password.length < 6}
-            >
+
+            <Button type="submit" size="lg" disabled={loading || password.length < 6}>
               {loading ? <Loader2 className="size-5 animate-spin" /> : "Şifreyi güncelle"}
             </Button>
+
             <button
               type="button"
               onClick={() => router.push("/auth/login")}
