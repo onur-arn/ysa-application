@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
-  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2,
+  Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption } from "@/lib/data/messages"
@@ -267,6 +267,13 @@ export function MessagesClient({
     setNewDMOpen(false)
   }
 
+  async function deleteDM(id: string) {
+    const supabase = createClient()
+    await supabase.from("conversation_members").delete()
+      .eq("conversation_id", id).eq("member_name", currentUser.name)
+    setCustomDMs((prev) => prev.filter((d) => d.id !== id))
+  }
+
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
     setCustomDMs((prev) => {
       const last = messages[messages.length - 1]
@@ -519,21 +526,40 @@ export function MessagesClient({
             ))}
           </>
         ) : (
-          filteredDMs.map((d) => (
-            <ConversationRow
-              key={d.id}
-              onClick={() => openConversation(d.id)}
-              initials={d.initials}
-              color={d.color}
-              title={d.name}
-              last={d.lastMessage}
-              time={d.lastTime}
-              unread={d.unread}
-              online={activeUsers.has(d.name)}
-              isPrivate
-              photoUrl={photoMap.get(d.name)}
-            />
-          ))
+          <>
+            {customDMs.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
+              <ConversationRow
+                key={d.id}
+                onClick={() => openConversation(d.id)}
+                initials={d.initials}
+                color={d.color}
+                title={d.name}
+                last={d.lastMessage}
+                time={d.lastTime}
+                unread={d.unread}
+                online={activeUsers.has(d.name)}
+                isPrivate
+                photoUrl={photoMap.get(d.name)}
+                onDelete={() => deleteDM(d.id)}
+                hideTime
+              />
+            ))}
+            {DM_CHATS.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
+              <ConversationRow
+                key={d.id}
+                onClick={() => openConversation(d.id)}
+                initials={d.initials}
+                color={d.color}
+                title={d.name}
+                last={d.lastMessage}
+                time={d.lastTime}
+                unread={d.unread}
+                online={activeUsers.has(d.name)}
+                isPrivate
+                hideTime
+              />
+            ))}
+          </>
         )}
       </div>
 
@@ -558,54 +584,67 @@ export function MessagesClient({
 
 // ── Conversation row ──────────────────────────────────────────────────────────
 function ConversationRow({
-  onClick, initials, color, title, last, time, unread, online, isPrivate, isCustomGroup, photoUrl,
+  onClick, initials, color, title, last, time, unread, online, isPrivate, isCustomGroup, photoUrl, onDelete, hideTime,
 }: {
   onClick: () => void; initials: string; color: string; title: string
   last: string; time: string; unread: number; online?: boolean
   isPrivate?: boolean; isCustomGroup?: boolean; photoUrl?: string
+  onDelete?: () => void; hideTime?: boolean
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors active:bg-secondary"
-    >
-      <div className="relative shrink-0">
-        {photoUrl && !isCustomGroup ? (
-          <img
-            src={photoUrl}
-            alt={initials}
-            className={`size-12 object-cover ${isCustomGroup ? "rounded-full" : "rounded-2xl"}`}
-          />
-        ) : (
-          <span
-            className={`flex size-12 items-center justify-center text-sm font-bold text-white ${
-              isCustomGroup ? "rounded-full" : "rounded-2xl"
-            }`}
-            style={{ backgroundColor: `hsl(${color})` }}
-          >
-            {isCustomGroup ? <Users className="size-5" /> : initials}
-          </span>
-        )}
-        {online && (
-          <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-card bg-emerald-500" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          {isPrivate && <Lock className="size-3 shrink-0 text-muted-foreground" />}
-          <span className={`truncate text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
+    <div className="flex items-center border-b border-border/70">
+      <button
+        onClick={onClick}
+        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors active:bg-secondary"
+      >
+        <div className="relative shrink-0">
+          {photoUrl && !isCustomGroup ? (
+            <img
+              src={photoUrl}
+              alt={initials}
+              className={`size-12 object-cover ${isCustomGroup ? "rounded-full" : "rounded-2xl"}`}
+            />
+          ) : (
+            <span
+              className={`flex size-12 items-center justify-center text-sm font-bold text-white ${
+                isCustomGroup ? "rounded-full" : "rounded-2xl"
+              }`}
+              style={{ backgroundColor: `hsl(${color})` }}
+            >
+              {isCustomGroup ? <Users className="size-5" /> : initials}
+            </span>
+          )}
+          {online && (
+            <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-card bg-emerald-500" />
+          )}
         </div>
-        <p className={`truncate text-sm ${unread > 0 ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{last}</p>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        <span className="text-xs text-muted-foreground">{time}</span>
-        {unread > 0 && (
-          <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-            {unread}
-          </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            {isPrivate && <Lock className="size-3 shrink-0 text-muted-foreground" />}
+            <span className={`truncate text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
+          </div>
+          <p className={`truncate text-sm ${unread > 0 ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{last}</p>
+        </div>
+        {(!hideTime || unread > 0) && (
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {!hideTime && time && <span className="text-xs text-muted-foreground">{time}</span>}
+            {unread > 0 && (
+              <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+                {unread}
+              </span>
+            )}
+          </div>
         )}
-      </div>
-    </button>
+      </button>
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          className="flex shrink-0 items-center justify-center px-3 py-4 text-muted-foreground transition-colors active:text-destructive"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      )}
+    </div>
   )
 }
 
