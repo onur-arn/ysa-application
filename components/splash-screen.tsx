@@ -8,13 +8,8 @@ export function SplashScreen() {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    // Show only once per session
-    if (sessionStorage.getItem("ys-splash")) return
     setVisible(true)
-    const t = setTimeout(() => {
-      setVisible(false)
-      sessionStorage.setItem("ys-splash", "1")
-    }, 2000)
+    const t = setTimeout(() => setVisible(false), 2000)
     return () => clearTimeout(t)
   }, [])
 
