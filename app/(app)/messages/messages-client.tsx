@@ -59,7 +59,16 @@ function mapConversations(
   const groups: CustomGroup[] = []
   const dms: CustomDM[] = []
 
-  for (const c of convRows) {
+  // Sort by last message time descending so newest activity appears first
+  const sortedRows = [...convRows].sort((a, b) => {
+    const msgsA = (a.chat_messages as { created_at: string }[]) ?? []
+    const msgsB = (b.chat_messages as { created_at: string }[]) ?? []
+    const lastA = msgsA.length > 0 ? msgsA[msgsA.length - 1].created_at : (a.created_at as string ?? "")
+    const lastB = msgsB.length > 0 ? msgsB[msgsB.length - 1].created_at : (b.created_at as string ?? "")
+    return lastB.localeCompare(lastA)
+  })
+
+  for (const c of sortedRows) {
     const memberRows = ((c.conversation_members as { member_name: string; is_admin?: boolean }[]) ?? [])
     const adminNames = memberRows.filter((m) => m.is_admin).map((m) => m.member_name)
     // Backward compat: if no is_admin flags set yet, fall back to legacy admin_name column

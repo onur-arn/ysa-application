@@ -32,8 +32,9 @@ type Story = {
 }
 
 interface StoriesBarProps {
-  initialUser?: { name: string; station: string; initials: string }
+  initialUser?: { name: string; station: string; initials: string; photoUrl?: string }
   initialStories?: Record<string, unknown>[]
+  initialPhotoMap?: { id: string; name: string; photo_url: string | null }[]
 }
 
 function mapStoriesFromRaw(raw: Record<string, unknown>[]): Story[] {
@@ -53,6 +54,7 @@ function mapStoriesFromRaw(raw: Record<string, unknown>[]): Story[] {
 export function StoriesBar({
   initialUser,
   initialStories = [],
+  initialPhotoMap = [],
 }: StoriesBarProps) {
   const { t } = useI18n()
   const [stories, setStories]         = useState<Story[]>(() => mapStoriesFromRaw(initialStories))
@@ -60,12 +62,16 @@ export function StoriesBar({
   const [storyIdx, setStoryIdx]       = useState(0)
   const [fromMyButton, setFromMyButton] = useState(false)
   const [editingImage, setEditingImage] = useState<string | null>(null)
-  const [user, setUser] = useState<{ name: string; station: string; initials: string }>(
+  const [user, setUser] = useState<{ name: string; station: string; initials: string; photoUrl?: string }>(
     initialUser ?? { name: "", station: "paris", initials: "" }
   )
+  const photoMap = useState<Map<string, string>>(
+    () => new Map(initialPhotoMap.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
+  )[0]
   const [seenIds, setSeenIds]             = useState<Set<string>>(new Set())
   const [reactionCounts, setReactionCounts] = useState<Map<string, number>>(new Map())
   const [myReactions, setMyReactions]       = useState<Set<string>>(new Set())
+  const [reactionDetails, setReactionDetails] = useState<Map<string, string[]>>(new Map())
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -169,14 +175,19 @@ export function StoriesBar({
       const ids = stories.map(s => s.id)
       const { data } = await supabase.from("story_reactions").select("story_id, user_name").in("story_id", ids)
       if (!data) return
-      const counts = new Map<string, number>()
-      const mine   = new Set<string>()
+      const counts  = new Map<string, number>()
+      const mine    = new Set<string>()
+      const details = new Map<string, string[]>()
       for (const r of data) {
         counts.set(r.story_id, (counts.get(r.story_id) ?? 0) + 1)
         if (r.user_name === user.name) mine.add(r.story_id)
+        const arr = details.get(r.story_id) ?? []
+        if (!arr.includes(r.user_name)) arr.push(r.user_name)
+        details.set(r.story_id, arr)
       }
       setReactionCounts(counts)
       setMyReactions(mine)
+      setReactionDetails(details)
     }
     loadReactions()
   }, [stories.length, user.name])
@@ -265,6 +276,8 @@ export function StoriesBar({
           }`}>
             {myStories.length > 0 ? (
               <img src={myStories[myStories.length - 1].imageUrl} alt="Ma story" className="h-full w-full object-cover" />
+            ) : user.photoUrl ? (
+              <img src={user.photoUrl} alt="Mon profil" className="h-full w-full object-cover" />
             ) : (
               <Plus className="h-6 w-6 text-primary" />
             )}
@@ -413,12 +426,20 @@ export function StoriesBar({
                 {/* Author overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-5 pb-10 pt-20 pointer-events-none">
                   <div className="flex items-center gap-3">
-                    <span
-                      className="flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-                      style={{ backgroundColor: `hsl(${STORY_BG[currentStory.station]})` }}
-                    >
-                      {currentStory.initials}
-                    </span>
+                    {photoMap.get(currentStory.authorName) ? (
+                      <img
+                        src={photoMap.get(currentStory.authorName)}
+                        alt={currentStory.initials}
+                        className="size-10 shrink-0 rounded-full object-cover border border-white/30"
+                      />
+                    ) : (
+                      <span
+                        className="flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
+                        style={{ backgroundColor: `hsl(${STORY_BG[currentStory.station]})` }}
+                      >
+                        {currentStory.initials}
+                      </span>
+                    )}
                     <div>
                       <p className="font-semibold text-white">{currentStory.authorName}</p>
                       <p className="text-xs text-white/70">
@@ -437,6 +458,14 @@ export function StoriesBar({
                       </span>
                     )}
                   </div>
+                  {currentStory.authorName === user.name && (reactionDetails.get(currentStory.id) ?? []).length > 0 && (
+                    <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                      <Heart className="size-3 shrink-0 fill-red-400 text-red-400" />
+                      <span className="text-xs text-white/80">
+                        {(reactionDetails.get(currentStory.id) ?? []).join(", ")}
+                      </span>
+                    </div>
+                  )}
                   {currentStory.authorName === user.name && (
                     <div className="pointer-events-auto mt-4 flex gap-2">
                       <button

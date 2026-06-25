@@ -29,8 +29,10 @@ export function FeedClient({
           name: initialProfile.name ?? "",
           station: initialProfile.station ?? "paris",
           initials: initialProfile.initials ?? "",
+          photoUrl: initialProfile.photo_url ?? undefined,
         } : undefined}
         initialStories={initialStories}
+        initialPhotoMap={initialProfiles}
       />
       <div className="px-4 py-4">
         <PostsFeed
