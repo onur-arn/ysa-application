@@ -652,6 +652,44 @@ export function PostsFeed({
 
   const [posts, setPosts] = useState<Post[]>(() => mapPostsFromRaw(initialPosts))
   const [composeOpen, setComposeOpen] = useState(false)
+  const latestPostTimeRef = useRef<string>("")
+
+  // Keep latestPostTimeRef in sync so polling can fetch only new posts
+  useEffect(() => {
+    if (posts.length > 0) latestPostTimeRef.current = posts[0].createdAt
+  }, [posts])
+
+  // Polling fallback: fetch posts newer than what we have
+  useEffect(() => {
+    async function refetchNew() {
+      const since = latestPostTimeRef.current
+      if (!since) return
+      const supabase = createClient()
+      const { data } = await supabase
+        .from("posts")
+        .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at),polls(id,question,poll_options(id,text,position,poll_votes(option_id,voter_name)))")
+        .gt("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(10)
+      if (data && data.length > 0) {
+        const incoming = mapPostsFromRaw(data as Record<string, unknown>[])
+        setPosts((prev) => {
+          const ids = new Set(prev.map((p) => p.id))
+          const toAdd = incoming.filter((p) => !ids.has(p.id))
+          return toAdd.length > 0 ? [...toAdd, ...prev] : prev
+        })
+      }
+    }
+
+    const interval = setInterval(refetchNew, 30_000)
+    const onVisible = () => { if (document.visibilityState === "visible") refetchNew() }
+    document.addEventListener("visibilitychange", onVisible)
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [])
 
   useEffect(() => {
     const supabase = createClient()
