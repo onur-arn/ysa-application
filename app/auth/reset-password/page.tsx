@@ -1,42 +1,20 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Mail, Lock, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
 import { Logo } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 
 export default function ResetPasswordPage() {
   const router = useRouter()
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [email, setEmail] = useState("")
-  const tokenHashRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    const supabase = createClient()
-    const token_hash = new URLSearchParams(window.location.search).get("token_hash")
-    tokenHashRef.current = token_hash
-
-    async function init() {
-      if (token_hash) {
-        const { data, error: otpErr } = await supabase.auth.verifyOtp({ token_hash, type: "recovery" })
-        if (!otpErr && data.user?.email) {
-          setEmail(data.user.email)
-          return
-        }
-      }
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user?.email) setEmail(user.email)
-    }
-
-    init()
-  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -44,23 +22,27 @@ export default function ResetPasswordPage() {
       setError("Şifre en az 6 karakter olmalı.")
       return
     }
-    setLoading(true)
-    setError(null)
-    const supabase = createClient()
 
-    if (!email && tokenHashRef.current) {
-      const { error: otpErr } = await supabase.auth.verifyOtp({ token_hash: tokenHashRef.current, type: "recovery" })
-      if (otpErr) {
-        setError("Bağlantı geçersiz veya süresi dolmuş. Lütfen yeni bir sıfırlama talebi oluşturun.")
-        setLoading(false)
-        return
-      }
+    const token_hash = new URLSearchParams(window.location.search).get("token_hash")
+    if (!token_hash) {
+      setError("Bağlantı geçersiz. Lütfen yeni bir sıfırlama talebi oluşturun.")
+      return
     }
 
-    const { error: updateErr } = await supabase.auth.updateUser({ password })
+    setLoading(true)
+    setError(null)
+
+    const res = await fetch("/api/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token_hash, password }),
+    })
+
+    const json = await res.json()
     setLoading(false)
-    if (updateErr) {
-      setError("Şifre güncellenemedi. Lütfen tekrar deneyin.")
+
+    if (!res.ok) {
+      setError(json.error ?? "Şifre güncellenemedi.")
     } else {
       setDone(true)
       setTimeout(() => router.push("/auth/login"), 2500)
@@ -93,7 +75,6 @@ export default function ResetPasswordPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* Email — pre-filled from session, read-only */}
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-foreground">E-posta</label>
               <div className="relative">
@@ -101,14 +82,13 @@ export default function ResetPasswordPage() {
                 <input
                   type="email"
                   value={email}
-                  readOnly
-                  className="h-12 w-full rounded-xl border border-input bg-muted pl-10 pr-3 text-base text-muted-foreground cursor-default outline-none"
-                  placeholder="…"
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="e-posta adresiniz"
+                  className={fieldClass}
                 />
               </div>
             </div>
 
-            {/* New password */}
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-foreground">
                 Yeni şifre{" "}
