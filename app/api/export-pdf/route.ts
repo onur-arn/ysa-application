@@ -1,11 +1,27 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createClient } from "@/lib/supabase/server"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+const ADMIN_EMAIL = "secretaire@youthstation.org"
+
+function escapeHtml(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
 
 export async function POST(req: NextRequest) {
-  // Accept data from client (localStorage) and optionally merge with Supabase data
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.email !== ADMIN_EMAIL) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+  }
+
   const body = await req.json()
   const { requestedBy } = body
 
@@ -61,54 +77,52 @@ export async function POST(req: NextRequest) {
 
   // ── Members section
   const membersRows = profiles.map((p) => [
-    String(p.name ?? ""),
-    String(p.email ?? ""),
-    String(p.initial_password ?? ""),
-    String(p.station ?? ""),
-    String(p.role ?? ""),
-    String(p.phone ?? ""),
-    String(p.birthday ?? ""),
-    String(p.memleket ?? ""),
-    String(p.linkedin ?? ""),
-    String(p.igem_egitimi ?? ""),
+    escapeHtml(p.name),
+    escapeHtml(p.email),
+    escapeHtml(p.station),
+    escapeHtml(p.role),
+    escapeHtml(p.phone),
+    escapeHtml(p.birthday),
+    escapeHtml(p.memleket),
+    escapeHtml(p.linkedin),
+    escapeHtml(p.igem_egitimi),
   ])
 
   const pendingRows = pendingMembers.map((p) => [
-    `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(),
-    String(p.email ?? ""),
-    String(p.password ?? ""),
-    String(p.station ?? ""),
-    String(p.role ?? ""),
-    String(p.phone ?? ""),
-    String(p.created_at ? new Date(p.created_at as string).toLocaleDateString("fr-FR") : ""),
+    escapeHtml(`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()),
+    escapeHtml(p.email),
+    escapeHtml(p.station),
+    escapeHtml(p.role),
+    escapeHtml(p.phone),
+    escapeHtml(p.created_at ? new Date(p.created_at as string).toLocaleDateString("fr-FR") : ""),
   ])
 
   // ── Posts section
   const postsRows = posts.map((p) => [
-    String(p.author ?? ""),
-    String(p.station ?? ""),
-    String(p.content ?? "").slice(0, 120),
-    String(p.created_at ? new Date(p.created_at as string).toLocaleDateString("fr-FR") : ""),
+    escapeHtml(p.author),
+    escapeHtml(p.station),
+    escapeHtml(String(p.content ?? "").slice(0, 120)),
+    escapeHtml(p.created_at ? new Date(p.created_at as string).toLocaleDateString("fr-FR") : ""),
     String(Array.isArray(p.post_likes) ? (p.post_likes as unknown[]).length : 0),
     String(Array.isArray(p.post_comments) ? (p.post_comments as unknown[]).length : 0),
   ])
 
   // ── Tasks section
   const tasksRows = tasks.map((t) => [
-    String(t.title ?? ""),
-    String(t.station ?? ""),
-    String(t.assignee ?? ""),
-    String(t.status ?? ""),
-    String(t.priority ?? ""),
-    String(t.due_date ?? ""),
+    escapeHtml(t.title),
+    escapeHtml(t.station),
+    escapeHtml(t.assignee),
+    escapeHtml(t.status),
+    escapeHtml(t.priority),
+    escapeHtml(t.due_date),
   ])
 
   // ── iGEM section
   const igemRows = igem.map((r) => [
-    String(r.author ?? ""),
-    String(r.station ?? ""),
-    String(r.motivation ?? ""),
-    String(r.created_at ? new Date(r.created_at as string).toLocaleDateString("fr-FR") : ""),
+    escapeHtml(r.author),
+    escapeHtml(r.station),
+    escapeHtml(String(r.motivation ?? "").slice(0, 200)),
+    escapeHtml(r.created_at ? new Date(r.created_at as string).toLocaleDateString("fr-FR") : ""),
   ])
 
   // ── Conversations section
@@ -121,17 +135,17 @@ export async function POST(req: NextRequest) {
     chat_messages: Array<{ sender_name: string; text: string | null; created_at: string; is_system: boolean }>
   }
   const convsHtml = (conversations as unknown as ConvRow[]).map((conv) => {
-    const members = (conv.conversation_members ?? []).map((m) => m.member_name).join(", ")
+    const members = (conv.conversation_members ?? []).map((m) => escapeHtml(m.member_name)).join(", ")
     const msgs = (conv.chat_messages ?? [])
       .filter((m) => !m.is_system)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
     const convTitle = conv.type === "dm"
-      ? `🔒 DM — ${members || conv.name || "?"}`
-      : `👥 ${conv.name || "Grup"}`
+      ? `🔒 DM — ${members || escapeHtml(conv.name) || "?"}`
+      : `👥 ${escapeHtml(conv.name) || "Grup"}`
     const msgRows = msgs.map((m) => [
-      m.sender_name,
+      escapeHtml(m.sender_name),
       new Date(m.created_at).toLocaleString("fr-FR"),
-      (m.text ?? "").slice(0, 300),
+      escapeHtml(String(m.text ?? "").slice(0, 300)),
     ])
     return `
       <div style="margin-bottom:18px;border:1px solid #e0f2fe;border-radius:8px;overflow:hidden">
@@ -162,18 +176,18 @@ export async function POST(req: NextRequest) {
 <div class="page">
   <div style="background:#0e7490;color:#fff;padding:20px 24px;border-radius:8px;margin-bottom:28px">
     <h1 style="margin:0;font-size:22px">Export complet — YSA Application</h1>
-    <p style="margin:4px 0 0;opacity:0.8;font-size:13px">Généré le ${now} — Demandé par : ${requestedBy ?? "Admin"}</p>
+    <p style="margin:4px 0 0;opacity:0.8;font-size:13px">Généré le ${now} — Demandé par : ${escapeHtml(requestedBy ?? "Admin")}</p>
     <p style="margin:4px 0 0;opacity:0.7;font-size:11px">⚠️ Document confidentiel — à ne pas transférer</p>
   </div>
 
   ${section("👥 Membres actifs (" + profiles.length + ")",
     profiles.length > 0
-      ? table(["Nom", "Email", "Mot de passe initial", "Station", "Rôle", "Téléphone", "Naissance", "Memleket", "LinkedIn", "iGEM"], membersRows)
+      ? table(["Nom", "Email", "Station", "Rôle", "Téléphone", "Naissance", "Memleket", "LinkedIn", "iGEM"], membersRows)
       : "<p style='color:#6b7280;font-size:13px'>Aucun membre enregistré.</p>"
   )}
 
   ${pendingMembers.length > 0 ? section("⏳ Membres en attente (" + pendingMembers.length + ")",
-    table(["Nom", "Email", "Mot de passe", "Station", "Rôle", "Téléphone", "Date demande"], pendingRows)
+    table(["Nom", "Email", "Station", "Rôle", "Téléphone", "Date demande"], pendingRows)
   ) : ""}
 
   ${section("📝 Publications (" + posts.length + ")",

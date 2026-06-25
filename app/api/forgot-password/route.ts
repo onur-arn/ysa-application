@@ -2,13 +2,17 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { sendMail } from "@/lib/mailer"
 import { signature } from "@/lib/email-signature"
 import { NextRequest, NextResponse } from "next/server"
+import { randomInt } from "crypto"
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://ysa-application.vercel.app"
 
 function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString()
+  return randomInt(100000, 1000000).toString()
 }
 
 export async function POST(request: NextRequest) {
-  const { email, appUrl } = await request.json()
+  const { email } = await request.json()
+  const appUrl = APP_URL
 
   if (!email) {
     return NextResponse.json({ error: "Email requis." }, { status: 400 })

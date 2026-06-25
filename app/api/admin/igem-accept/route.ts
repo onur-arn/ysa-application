@@ -11,16 +11,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
-  const { requestId, authorName, igemDate } = await req.json()
+  const { requestId, igemDate } = await req.json()
   if (!requestId) return NextResponse.json({ error: "Missing requestId" }, { status: 400 })
 
   const admin = createAdminClient()
 
-  // Update the user's profile igem_egitimi
-  if (authorName) {
+  // Fetch author name from DB (not from client) then update their profile
+  const { data: igemReq } = await admin.from("igem_requests").select("author").eq("id", requestId).single()
+  if (igemReq?.author) {
     await admin.from("profiles")
       .update({ igem_egitimi: "evet", igem_tarihi: igemDate ?? null })
-      .eq("name", authorName)
+      .eq("name", igemReq.author)
   }
 
   // Delete the request from the feed

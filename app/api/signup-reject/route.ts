@@ -1,26 +1,32 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sendMail } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createHmac } from "crypto"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET ?? "change-me-signup-secret"
+
+function verifyToken(token: string): Record<string, unknown> | null {
+  const dot = token.lastIndexOf(".")
+  if (dot < 0) return null
+  const data = token.slice(0, dot)
+  const sig  = token.slice(dot + 1)
+  const expected = createHmac("sha256", TOKEN_SECRET).update(data).digest("base64url")
+  if (expected !== sig) return null
+  try { return JSON.parse(Buffer.from(data, "base64url").toString()) } catch { return null }
+}
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token")
   if (!token) return new NextResponse("Token manquant", { status: 400 })
 
-  let pendingId: string | null = null
+  const parsed = verifyToken(token)
+  if (!parsed) return new NextResponse("Token invalide", { status: 400 })
+
+  let pendingId: string | null = (parsed.pendingId as string) ?? null
   let email = ""
   let firstName = ""
   let lastName = ""
-  try {
-    const parsed = JSON.parse(Buffer.from(token, "base64url").toString())
-    pendingId = parsed.pendingId ?? null
-    email     = parsed.email ?? ""
-    firstName = parsed.firstName ?? ""
-    lastName  = parsed.lastName ?? ""
-  } catch {
-    return new NextResponse("Token invalide", { status: 400 })
-  }
 
   if (SUPABASE_ENABLED) {
     try {

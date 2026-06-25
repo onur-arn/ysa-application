@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createHmac } from "crypto"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://youthstation.vercel.app"
+const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET ?? "change-me-signup-secret"
+
+function signToken(payload: object): string {
+  const data = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  const sig = createHmac("sha256", TOKEN_SECRET).update(data).digest("base64url")
+  return `${data}.${sig}`
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
@@ -80,8 +88,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Build approve / reject tokens
-  const token = Buffer.from(JSON.stringify({ pendingId, firstName, lastName, email })).toString("base64url")
+  // Build approve / reject tokens (HMAC-signed, only pendingId needed)
+  const token = signToken({ pendingId })
   const approveUrl = `${APP_URL}/api/signup-approve?token=${token}`
   const rejectUrl  = `${APP_URL}/api/signup-reject?token=${token}`
 
