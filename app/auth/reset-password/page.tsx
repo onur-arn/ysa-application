@@ -16,6 +16,7 @@ function ResetPasswordForm() {
   const [email, setEmail]       = useState(searchParams.get("email") ?? "")
   const [birthday, setBirthday] = useState("")
   const [code, setCode]         = useState(searchParams.get("code") ?? "")
+  const emailFromLink           = !!searchParams.get("email")
 
   const [step1Loading, setStep1Loading] = useState(false)
   const [step1Error, setStep1Error]     = useState<string | null>(null)
@@ -142,9 +143,12 @@ function ResetPasswordForm() {
                       type="email"
                       required
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => !emailFromLink && setEmail(e.target.value)}
+                      readOnly={emailFromLink}
                       placeholder="e-posta adresiniz"
-                      className={fieldClass}
+                      className={emailFromLink
+                        ? "h-12 w-full rounded-xl border border-input bg-muted pl-10 pr-3 text-base text-muted-foreground cursor-default outline-none"
+                        : fieldClass}
                     />
                   </div>
                 </div>
