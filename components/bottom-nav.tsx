@@ -44,7 +44,7 @@ export function BottomNav({ hasUnread = false }: { hasUnread?: boolean }) {
   function navigateTo(href: string) {
     if (href === lastNavigated.current) return
     lastNavigated.current = href
-    router.push(href)
+    router.replace(href)
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLElement>) {
