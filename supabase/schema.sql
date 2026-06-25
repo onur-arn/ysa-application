@@ -409,3 +409,17 @@ alter table events add column if not exists description text;
 alter table events add column if not exists link        text;
 alter table events add column if not exists created_by  uuid references auth.users(id) on delete set null;
 alter table events add column if not exists created_at  timestamptz default now();
+
+-- ── STORY REACTIONS ────────────────────────────────────────────────────────────
+create table if not exists story_reactions (
+  story_id  text not null,
+  user_name text not null,
+  primary key (story_id, user_name)
+);
+alter table story_reactions enable row level security;
+drop policy if exists "Authenticated can read story_reactions"   on story_reactions;
+drop policy if exists "Authenticated can insert story_reactions" on story_reactions;
+drop policy if exists "Authenticated can delete story_reactions" on story_reactions;
+create policy "Authenticated can read story_reactions"   on story_reactions for select to authenticated using (true);
+create policy "Authenticated can insert story_reactions" on story_reactions for insert to authenticated with check (true);
+create policy "Authenticated can delete story_reactions" on story_reactions for delete to authenticated using (true);

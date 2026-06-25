@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Plus, X, ChevronLeft, ChevronRight, Music } from "lucide-react"
+import { Plus, X, ChevronLeft, ChevronRight, Music, Heart } from "lucide-react"
 import { STATIONS_SORTED } from "@/lib/data/stations"
 import { STORY_BG } from "@/lib/data/feed"
 import { useI18n } from "@/lib/i18n/context"
@@ -63,7 +63,9 @@ export function StoriesBar({
   const [user, setUser] = useState<{ name: string; station: string; initials: string }>(
     initialUser ?? { name: "", station: "paris", initials: "" }
   )
-  const [seenIds, setSeenIds] = useState<Set<string>>(new Set())
+  const [seenIds, setSeenIds]             = useState<Set<string>>(new Set())
+  const [reactionCounts, setReactionCounts] = useState<Map<string, number>>(new Map())
+  const [myReactions, setMyReactions]       = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -84,7 +86,8 @@ export function StoriesBar({
     })
   }
 
-  const myStories = stories.filter((s) => s.station === user.station)
+  // Only the current user's own stories appear in the "my story" circle
+  const myStories = stories.filter((s) => s.authorName === user.name)
 
   function openStation(stationId: string, startIdx = 0, myBtn = false) {
     setActive(stationId)
@@ -158,8 +161,46 @@ export function StoriesBar({
     return stories.some(s => s.station === stationId && !seenIds.has(s.id))
   }
 
-  // Active station's stories
-  const activeStories = stories.filter((s) => s.station === active)
+  // Load reactions for all visible stories
+  useEffect(() => {
+    if (stories.length === 0 || !user.name) return
+    async function loadReactions() {
+      const supabase = createClient()
+      const ids = stories.map(s => s.id)
+      const { data } = await supabase.from("story_reactions").select("story_id, user_name").in("story_id", ids)
+      if (!data) return
+      const counts = new Map<string, number>()
+      const mine   = new Set<string>()
+      for (const r of data) {
+        counts.set(r.story_id, (counts.get(r.story_id) ?? 0) + 1)
+        if (r.user_name === user.name) mine.add(r.story_id)
+      }
+      setReactionCounts(counts)
+      setMyReactions(mine)
+    }
+    loadReactions()
+  }, [stories.length, user.name])
+
+  async function toggleLike(storyId: string) {
+    const isLiked = myReactions.has(storyId)
+    const supabase = createClient()
+    if (isLiked) {
+      setMyReactions(prev  => { const n = new Set(prev); n.delete(storyId); return n })
+      setReactionCounts(prev => { const n = new Map(prev); n.set(storyId, Math.max(0, (n.get(storyId) ?? 1) - 1)); return n })
+      await supabase.from("story_reactions").delete().eq("story_id", storyId).eq("user_name", user.name)
+    } else {
+      setMyReactions(prev  => new Set([...prev, storyId]))
+      setReactionCounts(prev => { const n = new Map(prev); n.set(storyId, (n.get(storyId) ?? 0) + 1); return n })
+      await supabase.from("story_reactions").insert({ story_id: storyId, user_name: user.name })
+    }
+  }
+
+  // When opened from "my story" button, show only the user's own stories; otherwise show all station stories
+  const activeStories = active
+    ? (fromMyButton && active === user.station
+        ? stories.filter((s) => s.station === active && s.authorName === user.name)
+        : stories.filter((s) => s.station === active))
+    : []
   const currentStory  = activeStories[storyIdx] ?? null
   const activeStation = STATIONS_SORTED.find((s) => s.id === active)
 
@@ -348,6 +389,27 @@ export function StoriesBar({
                   </button>
                 )}
 
+                {/* Like button */}
+                <div className="pointer-events-auto absolute bottom-36 right-5 flex flex-col items-center gap-1.5">
+                  <button
+                    onClick={() => toggleLike(currentStory.id)}
+                    className="flex size-12 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm active:scale-110 transition-transform"
+                  >
+                    <Heart
+                      className="size-6 transition-colors"
+                      style={{
+                        fill: myReactions.has(currentStory.id) ? "#ef4444" : "transparent",
+                        color: myReactions.has(currentStory.id) ? "#ef4444" : "white",
+                      }}
+                    />
+                  </button>
+                  {(reactionCounts.get(currentStory.id) ?? 0) > 0 && (
+                    <span className="text-xs font-bold text-white drop-shadow">
+                      {reactionCounts.get(currentStory.id)}
+                    </span>
+                  )}
+                </div>
+
                 {/* Author overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-5 pb-10 pt-20 pointer-events-none">
                   <div className="flex items-center gap-3">
@@ -375,7 +437,7 @@ export function StoriesBar({
                       </span>
                     )}
                   </div>
-                  {fromMyButton && currentStory.station === user.station && (
+                  {currentStory.authorName === user.name && (
                     <div className="pointer-events-auto mt-4 flex gap-2">
                       <button
                         onClick={() => { setActive(null); fileRef.current?.click() }}

@@ -164,11 +164,10 @@ export function MessagesClient({
   function updateCustomGroupMessages(id: string, messages: ChatMessage[]) {
     setCustomGroups((prev) => {
       const last = messages[messages.length - 1]
-      return prev.map((g) =>
-        g.id === id
-          ? { ...g, messages, lastMessage: last?.text || g.lastMessage, lastTime: last?.time || g.lastTime }
-          : g
-      )
+      const idx = prev.findIndex((g) => g.id === id)
+      if (idx < 0) return prev
+      const updated = { ...prev[idx], messages, lastMessage: last?.text || prev[idx].lastMessage, lastTime: last?.time || prev[idx].lastTime }
+      return [updated, ...prev.filter((_, i) => i !== idx)]
     })
   }
 
@@ -239,7 +238,7 @@ export function MessagesClient({
     const existingStatic = DM_CHATS.find((d) => d.name === member.name)
     if (existingStatic) { setOpenId(existingStatic.id); setNewDMOpen(false); return }
     const existingCustom = customDMs.find((d) => d.name === member.name)
-    if (existingCustom) { setOpenId(existingCustom.id); setNewDMOpen(false); return }
+    if (existingCustom) { openConversation(existingCustom.id); setNewDMOpen(false); return }
 
     const s = getStation(member.station)
     const supabase = createClient()
@@ -271,13 +270,57 @@ export function MessagesClient({
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
     setCustomDMs((prev) => {
       const last = messages[messages.length - 1]
-      return prev.map((d) =>
-        d.id === id
-          ? { ...d, messages, lastMessage: last?.text || d.lastMessage, lastTime: last?.time || d.lastTime }
-          : d
-      )
+      const idx = prev.findIndex((d) => d.id === id)
+      if (idx < 0) return prev
+      const updated = { ...prev[idx], messages, lastMessage: last?.text || prev[idx].lastMessage, lastTime: last?.time || prev[idx].lastTime }
+      return [updated, ...prev.filter((_, i) => i !== idx)]
     })
   }
+
+  // Refs to avoid stale closures in global realtime subscription
+  const openIdRef      = useRef(openId)
+  const currentNameRef = useRef(currentUser.name)
+  useEffect(() => { openIdRef.current = openId }, [openId])
+  useEffect(() => { currentNameRef.current = currentUser.name }, [currentUser.name])
+
+  // Open a conversation and reset its unread counter
+  function openConversation(id: string) {
+    setOpenId(id)
+    setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
+    setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: 0 } : d))
+  }
+
+  // Global subscription: move-to-top + unread for all conversations
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel("conversations-meta")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
+        const m = payload.new as { id: string; conversation_id: string; sender_name: string; text: string | null; created_at: string; is_system?: boolean }
+        if (m.is_system) return
+        const isOwn  = m.sender_name === currentNameRef.current
+        const isOpen = m.conversation_id === openIdRef.current
+        const time   = new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+        const text   = m.text ?? ""
+
+        setCustomGroups((prev) => {
+          const idx = prev.findIndex((g) => g.id === m.conversation_id)
+          if (idx < 0) return prev
+          const updated = { ...prev[idx], lastMessage: text || prev[idx].lastMessage, lastTime: time,
+            unread: (!isOpen && !isOwn) ? prev[idx].unread + 1 : prev[idx].unread }
+          return [updated, ...prev.filter((_, i) => i !== idx)]
+        })
+        setCustomDMs((prev) => {
+          const idx = prev.findIndex((d) => d.id === m.conversation_id)
+          if (idx < 0) return prev
+          const updated = { ...prev[idx], lastMessage: text || prev[idx].lastMessage, lastTime: time,
+            unread: (!isOpen && !isOwn) ? prev[idx].unread + 1 : prev[idx].unread }
+          return [updated, ...prev.filter((_, i) => i !== idx)]
+        })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const senderInitials = currentUser.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
 
@@ -452,7 +495,7 @@ export function MessagesClient({
             {filteredCustomGroups.map((g) => (
               <ConversationRow
                 key={g.id}
-                onClick={() => setOpenId(g.id)}
+                onClick={() => openConversation(g.id)}
                 initials={g.initials}
                 color={CUSTOM_COLOR}
                 title={g.name}
@@ -479,7 +522,7 @@ export function MessagesClient({
           filteredDMs.map((d) => (
             <ConversationRow
               key={d.id}
-              onClick={() => setOpenId(d.id)}
+              onClick={() => openConversation(d.id)}
               initials={d.initials}
               color={d.color}
               title={d.name}
@@ -550,9 +593,9 @@ function ConversationRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           {isPrivate && <Lock className="size-3 shrink-0 text-muted-foreground" />}
-          <span className="truncate font-semibold text-foreground">{title}</span>
+          <span className={`truncate text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
         </div>
-        <p className="truncate text-sm text-muted-foreground">{last}</p>
+        <p className={`truncate text-sm ${unread > 0 ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{last}</p>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <span className="text-xs text-muted-foreground">{time}</span>
