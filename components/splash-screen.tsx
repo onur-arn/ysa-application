@@ -5,10 +5,9 @@ import { motion, AnimatePresence } from "framer-motion"
 import Image from "next/image"
 
 export function SplashScreen() {
-  const [visible, setVisible] = useState(false)
+  const [visible, setVisible] = useState(true)
 
   useEffect(() => {
-    setVisible(true)
     const t = setTimeout(() => setVisible(false), 2000)
     return () => clearTimeout(t)
   }, [])
