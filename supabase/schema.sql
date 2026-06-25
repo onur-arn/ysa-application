@@ -226,6 +226,7 @@ create table if not exists events (
   station     text,
   description text,
   link        text,
+  end_date    date,
   created_by  uuid references auth.users(id) on delete set null,
   created_at  timestamptz default now()
 );
