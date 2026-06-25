@@ -840,6 +840,17 @@ export function PostsFeed({
         const { id } = payload as { id: string }
         setPosts((prev) => prev.filter((p) => p.id !== id))
       })
+      .on("broadcast", { event: "igem_add" }, ({ payload }) => {
+        const r = payload as { id: string; author: string; initials: string; station: string; motivation: string; created_at: string; created_by?: string }
+        setIgemRequests((prev) => {
+          if (prev.some((x) => x.id === r.id)) return prev
+          return [{ id: r.id, author: r.author ?? "", initials: r.initials ?? "?", station: r.station ?? "intl", motivation: r.motivation ?? "", date: r.created_at, createdBy: r.created_by, comments: [] }, ...prev]
+        })
+      })
+      .on("broadcast", { event: "igem_delete" }, ({ payload }) => {
+        const { id } = payload as { id: string }
+        setIgemRequests((prev) => prev.filter((r) => r.id !== id))
+      })
       .subscribe()
     feedChannelRef.current = channel
 
@@ -933,6 +944,7 @@ export function PostsFeed({
 
   async function deleteIgem(id: string) {
     setIgemRequests(prev => prev.filter(r => r.id !== id))
+    feedChannelRef.current?.send({ type: "broadcast", event: "igem_delete", payload: { id } })
     const res = await fetch("/api/igem/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
