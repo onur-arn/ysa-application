@@ -12,6 +12,7 @@ import Cropper from "react-easy-crop"
 import type { Area } from "react-easy-crop"
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
+import { requestAndSubscribe, unsubscribePush } from "@/lib/push"
 import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
@@ -75,7 +76,16 @@ export function SettingsClient({
     }
   })
 
-  function toggleNotif(key: keyof typeof notifs) {
+  async function toggleNotif(key: keyof typeof notifs) {
+    const turning_on = !notifs[key]
+    if (turning_on) {
+      const result = await requestAndSubscribe()
+      if (result === "denied") return
+    } else {
+      // Only unsubscribe if all notifs will be off
+      const willAllOff = Object.keys(notifs).every((k) => k === key || !notifs[k as keyof typeof notifs])
+      if (willAllOff) await unsubscribePush()
+    }
     setNotifs((prev) => {
       const next = { ...prev, [key]: !prev[key] }
       try { localStorage.setItem("ys-notif-prefs", JSON.stringify(next)) } catch {}
@@ -246,25 +256,9 @@ export function SettingsClient({
 
         {/* Notifications */}
         <Section title={t("settings.notifications")} icon={Bell}>
-          <Toggle
-            label="Nouveau Görev"
-            description="Recevoir une notification quand une tâche est assignée"
-            checked={notifs.gorev}
-            onChange={() => toggleNotif("gorev")}
-          />
-          <Toggle
-            label="Nouveaux messages"
-            description="Être notifié des nouveaux messages reçus"
-            checked={notifs.messages}
-            onChange={() => toggleNotif("messages")}
-          />
-          <Toggle
-            label="Rappel événement J-1"
-            description="Recevoir un rappel la veille d'un événement de ta station"
-            checked={notifs.eventReminder}
-            onChange={() => toggleNotif("eventReminder")}
-            last
-          />
+          <Toggle label="Yeni Görev" checked={notifs.gorev} onChange={() => toggleNotif("gorev")} />
+          <Toggle label="Yeni Mesaj" checked={notifs.messages} onChange={() => toggleNotif("messages")} />
+          <Toggle label="Etkinlik Hatırlatıcısı (J-1)" checked={notifs.eventReminder} onChange={() => toggleNotif("eventReminder")} last />
         </Section>
 
         {/* iGEM */}
@@ -698,13 +692,10 @@ function Row({ label, value, last }: { label: string; value: string; last?: bool
   )
 }
 
-function Toggle({ label, description, checked, onChange, last }: { label: string; description?: string; checked: boolean; onChange: () => void; last?: boolean }) {
+function Toggle({ label, checked, onChange, last }: { label: string; checked: boolean; onChange: () => void; last?: boolean }) {
   return (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3.5 ${last ? "" : "border-b border-border"}`}>
-      <div className="min-w-0 flex-1">
-        <span className="text-foreground">{label}</span>
-        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
-      </div>
+    <div className={`flex items-center justify-between px-4 py-3.5 ${last ? "" : "border-b border-border"}`}>
+      <span className="text-foreground">{label}</span>
       <button
         role="switch"
         aria-checked={checked}
