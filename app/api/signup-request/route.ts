@@ -3,8 +3,8 @@ import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createHmac } from "crypto"
 
-const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://youthstation.vercel.app"
+const SUPABASE_ENABLED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+const APP_URL = process.env.APP_URL ?? "https://youthstation.vercel.app"
 const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET ?? "change-me-signup-secret"
 
 function signToken(payload: object): string {

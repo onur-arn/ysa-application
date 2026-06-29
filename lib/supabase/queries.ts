@@ -2,10 +2,7 @@
 
 import { createClient } from "./client"
 
-export const supabaseEnabled = !!(
-  process.env.NEXT_PUBLIC_SUPABASE_URL &&
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-)
+export const supabaseEnabled = true
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 export async function fetchProfile(userId: string) {

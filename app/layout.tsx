@@ -45,10 +45,16 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const configScript = `window.__YS_CONFIG__=${JSON.stringify({
+    supabaseUrl: process.env.SUPABASE_URL ?? "",
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? "",
+  })};`
+
   return (
     <html lang="tr" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${plusJakarta.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: configScript }} />
       </head>
       <body className="font-sans antialiased bg-background">
         <ThemeProvider>

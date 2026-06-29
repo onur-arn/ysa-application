@@ -3,7 +3,7 @@ import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 
-const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+const SUPABASE_ENABLED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 const ADMIN_EMAIL = "secretaire@youthstation.org"
 
 function escapeHtml(s: unknown): string {

@@ -4,7 +4,7 @@ import { signature } from "@/lib/email-signature"
 import { NextRequest, NextResponse } from "next/server"
 import { randomInt } from "crypto"
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://ysa-application.vercel.app"
+const APP_URL = process.env.APP_URL ?? "https://ysa-application.vercel.app"
 
 function generateCode(): string {
   return randomInt(100000, 1000000).toString()
