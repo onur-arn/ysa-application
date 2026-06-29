@@ -1,5 +1,3 @@
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
-
 function urlBase64ToUint8Array(base64: string) {
   const pad = "=".repeat((4 - (base64.length % 4)) % 4)
   const b64 = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/")
@@ -18,11 +16,14 @@ export async function registerSW(): Promise<ServiceWorkerRegistration | null> {
 
 export async function subscribePush(): Promise<boolean> {
   try {
+    const res = await fetch("/api/push/vapid-key")
+    const { key } = await res.json()
+    if (!key) return false
     const reg = await navigator.serviceWorker.ready
     const existing = await reg.pushManager.getSubscription()
     const sub = existing ?? await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      applicationServerKey: urlBase64ToUint8Array(key),
     })
     await fetch("/api/push/subscribe", {
       method: "POST",
