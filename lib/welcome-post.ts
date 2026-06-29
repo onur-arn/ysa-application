@@ -77,6 +77,7 @@ const CITY_MAP: Record<string, CityEntry> = {
 
 function normalize(s: string) {
   return s
+    .replace(/İ/g, "i").replace(/I/g, "i") // İ turc → i ASCII avant toLowerCase
     .toLowerCase()
     .replace(/ğ/g, "g").replace(/ı/g, "i").replace(/ş/g, "s")
     .replace(/ç/g, "c").replace(/ö/g, "o").replace(/ü/g, "u")
@@ -88,8 +89,9 @@ export function buildWelcomePost(name: string, memleket: string | null, station:
   const m = normalize(memleket ?? "")
 
   let entry: CityEntry | undefined
+  const mNoSpace = m.replace(/\s+/g, "")
   for (const [key, val] of Object.entries(CITY_MAP)) {
-    if (m.includes(key) || key.includes(m.replace(/\s+/g, ""))) {
+    if (m.includes(key) || (mNoSpace.length >= 3 && key.includes(mNoSpace))) {
       entry = val
       break
     }
