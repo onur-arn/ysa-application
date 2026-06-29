@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { sendMail } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createHmac } from "crypto"
+import { buildWelcomePost } from "@/lib/welcome-post"
 
 const SUPABASE_ENABLED = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET ?? "change-me-signup-secret"
@@ -120,6 +121,10 @@ export async function GET(req: NextRequest) {
 
   // Delete pending record
   await admin.from("pending_members").delete().eq("id", pendingId)
+
+  // Post automatic welcome message in the feed
+  const welcomePost = buildWelcomePost(fullName, pending.memleket ?? null, pending.station ?? "paris")
+  await admin.from("posts").insert({ ...welcomePost, created_by: userId })
 
   // Notify the user
   try {
