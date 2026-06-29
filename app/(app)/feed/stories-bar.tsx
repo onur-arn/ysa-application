@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 import { AnimatePresence, motion } from "framer-motion"
-import { Plus, X, ChevronLeft, ChevronRight, Music, Heart } from "lucide-react"
+import { Plus, X, ChevronLeft, ChevronRight, Music, Heart, Volume2, VolumeX } from "lucide-react"
 import { STATIONS_SORTED } from "@/lib/data/stations"
 import { STORY_BG } from "@/lib/data/feed"
 import { useI18n } from "@/lib/i18n/context"
@@ -76,6 +76,7 @@ export function StoriesBar({
   const reactionsChannelRef = useRef<RealtimeChannel | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
+  const [musicBlocked, setMusicBlocked] = useState(false)
 
   // Load seen IDs from localStorage on mount
   useEffect(() => {
@@ -129,6 +130,9 @@ export function StoriesBar({
     const updated = [...stories, newStory]
     setStories(updated)
     setEditingImage(null)
+    // Ouvrir le viewer immédiatement, sans attendre l'insert DB
+    const stationStories = updated.filter((s) => s.station === user.station)
+    openStation(user.station, stationStories.length - 1, true)
     try {
       const supabase = createClient()
       await supabase.from("stories").insert({
@@ -142,8 +146,6 @@ export function StoriesBar({
         music_label: musicLabel ?? null,
       })
     } catch {}
-    const stationStories = updated.filter((s) => s.station === user.station)
-    openStation(user.station, stationStories.length - 1, true)
   }
 
   async function deleteStory(id: string) {
@@ -261,15 +263,28 @@ export function StoriesBar({
   useEffect(() => {
     storyAudioRef.current?.pause()
     storyAudioRef.current = null
+    setMusicBlocked(false)
     if (active && currentStory?.musicPreviewUrl) {
       const audio = new Audio(currentStory.musicPreviewUrl)
       audio.loop = true
       audio.volume = 0.7
-      audio.play().catch(() => {})
+      audio.play().catch(() => setMusicBlocked(true))
       storyAudioRef.current = audio
     }
     return () => { storyAudioRef.current?.pause() }
   }, [active, currentStory?.id])
+
+  function toggleMusic() {
+    const audio = storyAudioRef.current
+    if (!audio) return
+    if (musicBlocked || audio.paused) {
+      audio.play().catch(() => {})
+      setMusicBlocked(false)
+    } else {
+      audio.pause()
+      setMusicBlocked(true)
+    }
+  }
 
   function goNext() {
     if (storyIdx < activeStories.length - 1) {
@@ -444,25 +459,35 @@ export function StoriesBar({
                   </button>
                 )}
 
-                {/* Like button */}
-                <div className="pointer-events-auto absolute bottom-36 right-5 flex flex-col items-center gap-1.5">
-                  <button
-                    onClick={() => toggleLike(currentStory.id)}
-                    className="flex size-12 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm active:scale-110 transition-transform"
-                  >
-                    <Heart
-                      className="size-6 transition-colors"
-                      style={{
-                        fill: myReactions.has(currentStory.id) ? "#ef4444" : "transparent",
-                        color: myReactions.has(currentStory.id) ? "#ef4444" : "white",
-                      }}
-                    />
-                  </button>
-                  {(reactionCounts.get(currentStory.id) ?? 0) > 0 && (
-                    <span className="text-xs font-bold text-white drop-shadow">
-                      {reactionCounts.get(currentStory.id)}
-                    </span>
+                {/* Like + Music buttons */}
+                <div className="pointer-events-auto absolute bottom-36 right-5 flex flex-col items-center gap-3">
+                  {currentStory.musicPreviewUrl && (
+                    <button
+                      onClick={toggleMusic}
+                      className="flex size-12 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm active:scale-110 transition-transform"
+                    >
+                      {musicBlocked ? <VolumeX className="size-6" /> : <Volume2 className="size-6" />}
+                    </button>
                   )}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <button
+                      onClick={() => toggleLike(currentStory.id)}
+                      className="flex size-12 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm active:scale-110 transition-transform"
+                    >
+                      <Heart
+                        className="size-6 transition-colors"
+                        style={{
+                          fill: myReactions.has(currentStory.id) ? "#ef4444" : "transparent",
+                          color: myReactions.has(currentStory.id) ? "#ef4444" : "white",
+                        }}
+                      />
+                    </button>
+                    {(reactionCounts.get(currentStory.id) ?? 0) > 0 && (
+                      <span className="text-xs font-bold text-white drop-shadow">
+                        {reactionCounts.get(currentStory.id)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Author overlay */}
