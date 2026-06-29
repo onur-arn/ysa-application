@@ -67,12 +67,12 @@ export function SettingsClient({
     try {
       const saved = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
       return {
-        gorev:         saved.gorev         ?? true,
-        messages:      saved.messages      ?? true,
-        eventReminder: saved.eventReminder ?? true,
+        gorev:         saved.gorev         ?? false,
+        messages:      saved.messages      ?? false,
+        eventReminder: saved.eventReminder ?? false,
       }
     } catch {
-      return { gorev: true, messages: true, eventReminder: true }
+      return { gorev: false, messages: false, eventReminder: false }
     }
   })
 
