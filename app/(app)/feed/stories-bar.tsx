@@ -130,9 +130,6 @@ export function StoriesBar({
     const updated = [...stories, newStory]
     setStories(updated)
     setEditingImage(null)
-    // Ouvrir le viewer immédiatement, sans attendre l'insert DB
-    const stationStories = updated.filter((s) => s.station === user.station)
-    openStation(user.station, stationStories.length - 1, true)
     try {
       const supabase = createClient()
       await supabase.from("stories").insert({
