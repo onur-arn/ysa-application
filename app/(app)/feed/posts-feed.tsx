@@ -562,11 +562,13 @@ function IgemCard({ id, author, initials, station, motivation, date, photoMap, m
               {initials}
             </span>
           )}
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-semibold text-foreground">{author}</p>
-            <p className="text-xs font-medium" style={{ color: `hsl(${s.color})` }}>{s.name}</p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium" style={{ color: `hsl(${s.color})` }}>{s.name}</span>
+              <span className="text-xs text-muted-foreground">· {timeAgo(date)}</span>
+            </div>
           </div>
-          <span className="ml-auto text-xs text-muted-foreground">{timeAgo(date)}</span>
         </div>
         {motivation && <p className="mt-3 text-sm leading-relaxed text-foreground/80">{motivation}</p>}
       </div>
