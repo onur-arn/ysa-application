@@ -45,22 +45,38 @@ export function AppShell({ children }: { children: ReactNode }) {
   useMidnightLogout()
 
   useEffect(() => {
+    const supabase = createClient()
+    const colors: Record<string, string> = {
+      paris: "199 89% 48%", strasbourg: "262 83% 58%", lyon: "142 71% 45%",
+      bordeaux: "27 87% 60%", marseille: "349 89% 60%", intl: "262 83% 58%",
+      nice: "262 83% 58%", toulouse: "199 89% 48%"
+    }
+
+    let userId = ""
+
     async function loadAvatar() {
-      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      userId = user.id
       const { data: p } = await supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
       if (!p) return
-      // compute station color
-      const colors: Record<string, string> = {
-        paris: "199 89% 48%", strasbourg: "262 83% 58%", lyon: "142 71% 45%",
-        bordeaux: "27 87% 60%", marseille: "349 89% 60%", intl: "262 83% 58%",
-        nice: "262 83% 58%", toulouse: "199 89% 48%"
-      }
       setAvatar({ photoUrl: p.photo_url, initials: p.initials || "?", color: colors[p.station] || "262 83% 58%" })
       setUserName(p.name ?? "")
     }
+
     loadAvatar()
+
+    const channel = supabase
+      .channel("shell-profile")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
+        const p = payload.new as { id: string; name: string; initials: string; station: string; photo_url: string | null }
+        if (p.id !== userId) return
+        setAvatar({ photoUrl: p.photo_url, initials: p.initials || "?", color: colors[p.station] || "262 83% 58%" })
+        setUserName(p.name ?? "")
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   // Listen for new messages from others → show red dot on Mesajlar tab
