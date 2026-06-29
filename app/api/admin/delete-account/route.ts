@@ -15,7 +15,13 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
 
   const admin = createAdminClient()
+
+  // Ban immediately — invalidates their JWT on Supabase auth server right now
+  await admin.auth.admin.updateUserById(userId, { ban_duration: "876000h" })
+
+  // Delete profile and auth user
   await admin.from("profiles").delete().eq("id", userId)
+  await admin.from("push_subscriptions").delete().eq("user_id", userId)
   const { error } = await admin.auth.admin.deleteUser(userId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

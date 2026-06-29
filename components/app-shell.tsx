@@ -62,7 +62,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (!user) return
       userId = user.id
       const { data: p } = await supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
-      if (!p) return
+      if (!p) {
+        // Profile deleted by admin — force sign out immediately
+        await supabase.auth.signOut()
+        window.location.href = "/auth/login"
+        return
+      }
       setAvatar({ photoUrl: p.photo_url, initials: p.initials || "?", color: colors[p.station] || "262 83% 58%" })
       setUserName(p.name ?? "")
     }
