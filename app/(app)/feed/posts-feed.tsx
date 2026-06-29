@@ -830,6 +830,15 @@ export function PostsFeed({
         const old = payload.old as { id: string }
         setIgemRequests((prev) => prev.filter((r) => r.id !== old.id))
       })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
+        const p = payload.new as { id: string; name: string; photo_url: string | null }
+        setPhotoMap(prev => {
+          const next = new Map(prev)
+          if (p.photo_url) { next.set(p.id, p.photo_url); next.set(p.name, p.photo_url) }
+          else { next.delete(p.id); next.delete(p.name) }
+          return next
+        })
+      })
       .subscribe((status, err) => {
         if (status === "CHANNEL_ERROR") console.error("[posts-realtime] channel error:", err)
         if (status === "TIMED_OUT") console.warn("[posts-realtime] timed out")

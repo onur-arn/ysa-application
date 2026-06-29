@@ -334,6 +334,15 @@ export function MessagesClient({
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
       })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
+        const p = payload.new as { name: string; photo_url: string | null }
+        setPhotoMap(prev => {
+          const next = new Map(prev)
+          if (p.photo_url) next.set(p.name, p.photo_url)
+          else next.delete(p.name)
+          return next
+        })
+      })
       .subscribe((status, err) => {
         if (status === "CHANNEL_ERROR") console.error("[conversations-meta] channel error:", err)
         if (status === "TIMED_OUT") console.warn("[conversations-meta] timed out")

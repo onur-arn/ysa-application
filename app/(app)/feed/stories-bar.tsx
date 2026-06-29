@@ -66,9 +66,9 @@ export function StoriesBar({
   const [user, setUser] = useState<{ name: string; station: string; initials: string; photoUrl?: string }>(
     initialUser ?? { name: "", station: "paris", initials: "" }
   )
-  const photoMap = useState<Map<string, string>>(
+  const [photoMap, setPhotoMap] = useState<Map<string, string>>(
     () => new Map(initialPhotoMap.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
-  )[0]
+  )
   const [seenIds, setSeenIds]             = useState<Set<string>>(new Set())
   const [reactionCounts, setReactionCounts] = useState<Map<string, number>>(new Map())
   const [myReactions, setMyReactions]       = useState<Set<string>>(new Set())
@@ -223,6 +223,23 @@ export function StoriesBar({
     reactionsChannelRef.current = ch
     return () => { supabase.removeChannel(ch) }
   }, [stories.length, user.name])
+
+  useEffect(() => {
+    const supabase = createClient()
+    const ch = supabase
+      .channel("stories-profiles")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
+        const p = payload.new as { name: string; photo_url: string | null }
+        setPhotoMap(prev => {
+          const next = new Map(prev)
+          if (p.photo_url) next.set(p.name, p.photo_url)
+          else next.delete(p.name)
+          return next
+        })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
 
   async function toggleLike(storyId: string) {
     const isLiked = myReactions.has(storyId)
