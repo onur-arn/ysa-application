@@ -23,5 +23,5 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const { data: urlData } = admin.storage.from("avatars").getPublicUrl(path)
-  return NextResponse.json({ url: urlData.publicUrl })
+  return NextResponse.json({ url: `${urlData.publicUrl}?t=${Date.now()}` })
 }
