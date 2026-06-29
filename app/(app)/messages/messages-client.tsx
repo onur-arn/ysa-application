@@ -125,8 +125,36 @@ export function MessagesClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
-  const [customGroups, setCustomGroups] = useState<CustomGroup[]>(initialMapped.groups)
-  const [customDMs, setCustomDMs]       = useState<CustomDM[]>(initialMapped.dms)
+
+  // Restore unread counts from localStorage on mount
+  const [customGroups, setCustomGroups] = useState<CustomGroup[]>(() => {
+    try {
+      const lastRead: Record<string, string> = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
+      return initialMapped.groups.map((g) => {
+        const read = lastRead[g.id]
+        if (!read || !g.lastTime) return g
+        // lastTime is HH:MM — compare via raw lastMessage timestamp stored separately
+        // Use the raw conversations to find the actual ISO timestamp
+        const conv = initialConversations.find((c) => (c as Record<string,unknown>).id === g.id)
+        const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean}[] | undefined) ?? []
+        const lastMsgTime = msgs.filter(m => !m.is_system).at(-1)?.created_at ?? ""
+        return { ...g, unread: lastMsgTime > read ? 1 : 0 }
+      })
+    } catch { return initialMapped.groups }
+  })
+  const [customDMs, setCustomDMs] = useState<CustomDM[]>(() => {
+    try {
+      const lastRead: Record<string, string> = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
+      return initialMapped.dms.map((d) => {
+        const read = lastRead[d.id]
+        if (!read || !d.lastTime) return d
+        const conv = initialConversations.find((c) => (c as Record<string,unknown>).id === d.id)
+        const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean}[] | undefined) ?? []
+        const lastMsgTime = msgs.filter(m => !m.is_system).at(-1)?.created_at ?? ""
+        return { ...d, unread: lastMsgTime > read ? 1 : 0 }
+      })
+    } catch { return initialMapped.dms }
+  })
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [newDMOpen, setNewDMOpen]             = useState(false)
   const [photoMap, setPhotoMap]               = useState<Map<string, string>>(
@@ -304,6 +332,11 @@ export function MessagesClient({
     setOpenId(id)
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
     setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: 0 } : d))
+    try {
+      const lastRead = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
+      lastRead[id] = new Date().toISOString()
+      localStorage.setItem("ys-last-read", JSON.stringify(lastRead))
+    } catch {}
   }
 
   // Global subscription: move-to-top + unread for all conversations
