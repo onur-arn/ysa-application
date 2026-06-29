@@ -130,6 +130,8 @@ export function StoriesBar({
     const updated = [...stories, newStory]
     setStories(updated)
     setEditingImage(null)
+    setActive(null)
+    window.scrollTo({ top: 0, behavior: "smooth" })
     try {
       const supabase = createClient()
       await supabase.from("stories").insert({
