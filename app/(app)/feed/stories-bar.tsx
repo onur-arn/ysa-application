@@ -440,13 +440,20 @@ export function StoriesBar({
               ))}
             </div>
 
-            {/* Close */}
-            <button
-              onClick={() => setActive(null)}
-              className="absolute right-4 top-8 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            {/* Close + story counter */}
+            <div className="absolute right-4 top-8 z-10 flex items-center gap-2">
+              {activeStories.length > 1 && (
+                <span className="text-xs font-semibold text-white/70">
+                  {storyIdx + 1} / {activeStories.length}
+                </span>
+              )}
+              <button
+                onClick={() => setActive(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
 
             {currentStory ? (
               <div className="relative flex h-full w-full flex-col">
@@ -535,11 +542,6 @@ export function StoriesBar({
                         </p>
                       )}
                     </div>
-                    {activeStories.length > 1 && (
-                      <span className="ml-auto text-xs text-white/50">
-                        {storyIdx + 1} / {activeStories.length}
-                      </span>
-                    )}
                   </div>
                   {currentStory.authorName === user.name && (reactionDetails.get(currentStory.id) ?? []).length > 0 && (
                     <div className="mt-3 flex items-center gap-1.5 flex-wrap">
