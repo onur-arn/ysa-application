@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users, ChevronDown as CommentsToggle } from "lucide-react"
+import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users, ChevronDown as CommentsToggle, Sparkles } from "lucide-react"
 import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
 import { getStation, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
@@ -507,6 +507,21 @@ function PollBlock({ poll, myVote, onVote }: { poll: Poll; myVote: string | null
 }
 
 // ── iGEM card ─────────────────────────────────────────────────────────────────
+function WelcomeCard({ post }: { post: Post }) {
+  return (
+    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5">
+      <div className="p-4">
+        <div className="mb-3 flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 w-fit">
+          <Sparkles className="size-3.5 text-emerald-600" />
+          <span className="text-xs font-semibold text-emerald-600">Yeni Üye</span>
+        </div>
+        <p className="text-sm leading-relaxed text-foreground">{post.content}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{timeAgo(post.createdAt)}</p>
+      </div>
+    </div>
+  )
+}
+
 type IgemComment = { id: string; author: string; initials: string; station: string; text: string; time: string }
 
 function IgemCard({ id, author, initials, station, motivation, date, photoMap, me, onDelete }: {
@@ -981,6 +996,9 @@ export function PostsFeed({
           onDelete={() => deleteIgem(item.data.id)}
         />
       )
+    }
+    if (item.data.author === "YSA Uygulaması") {
+      return <WelcomeCard key={item.data.id} post={item.data} />
     }
     return (
       <PostCard

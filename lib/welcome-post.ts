@@ -96,8 +96,8 @@ export function buildWelcomePost(name: string, memleket: string | null, station:
   }
 
   const content = entry
-    ? `${entry.adj} ${name} Youth Station Uygulamasına giriş yaptı! ${entry.joke} 👋`
-    : `${name} Youth Station Uygulamasına katıldı! Aramıza hoş geldin! 🎉👋`
+    ? `${entry.adj} ${name} Youth Station Uygulamasına giriş yaptı ! ${entry.joke} 👋`
+    : `${name} Youth Station Uygulamasına katıldı ! Aramıza hoş geldin ! 🎉👋`
 
   return {
     author: "YSA Uygulaması",
