@@ -126,7 +126,10 @@ export function TasksClient({
           }
         }))
       })
-      .subscribe()
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[tasks-realtime] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[tasks-realtime] timed out")
+      })
 
     return () => { supabase.removeChannel(channel) }
   }, [])

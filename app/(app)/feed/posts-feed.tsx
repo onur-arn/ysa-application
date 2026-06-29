@@ -830,7 +830,10 @@ export function PostsFeed({
         const old = payload.old as { id: string }
         setIgemRequests((prev) => prev.filter((r) => r.id !== old.id))
       })
-      .subscribe()
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[posts-realtime] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[posts-realtime] timed out")
+      })
 
     return () => { supabase.removeChannel(channel) }
   }, [])

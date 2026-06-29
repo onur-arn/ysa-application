@@ -213,7 +213,10 @@ export function StoriesBar({
           return n
         })
       })
-      .subscribe()
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[stories-realtime] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[stories-realtime] timed out")
+      })
 
     reactionsChannelRef.current = ch
     return () => { supabase.removeChannel(ch) }

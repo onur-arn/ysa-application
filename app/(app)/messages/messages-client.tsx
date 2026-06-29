@@ -334,7 +334,10 @@ export function MessagesClient({
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
       })
-      .subscribe()
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[conversations-meta] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[conversations-meta] timed out")
+      })
     return () => { supabase.removeChannel(channel) }
   }, [])
 
@@ -1417,7 +1420,10 @@ function ChatView({
           }
         }))
       })
-      .subscribe()
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[chat-realtime] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[chat-realtime] timed out")
+      })
 
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
