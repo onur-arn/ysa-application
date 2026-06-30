@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import webpush from "web-push"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT!,
-  process.env.VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!,
-)
-
 export async function POST(req: NextRequest) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT!,
+    process.env.VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!,
+  )
   const { userId, title, body, url } = await req.json()
   if (!userId || !title) return NextResponse.json({ error: "Missing params" }, { status: 400 })
 
