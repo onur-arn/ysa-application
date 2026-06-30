@@ -11,9 +11,8 @@ import { usePresence } from "@/lib/presence"
 type StationFilter = "all" | StationId
 
 interface DirectoryClientProps {
-  initialCurrentUserId?: string
-  initialCurrentUserStation?: string
   initialProfiles?: Record<string, unknown>[]
+  canChangeRoles?: boolean
 }
 
 function mapProfiles(profiles: Record<string, unknown>[]): Member[] {
@@ -37,9 +36,8 @@ function mapProfiles(profiles: Record<string, unknown>[]): Member[] {
 }
 
 export function DirectoryClient({
-  initialCurrentUserId = "",
-  initialCurrentUserStation = "paris",
   initialProfiles = [],
+  canChangeRoles = false,
 }: DirectoryClientProps) {
   const { t } = useI18n()
   const activeUsers = usePresence()
@@ -49,12 +47,7 @@ export function DirectoryClient({
   const [allMembers, setAllMembers] = useState<Member[]>(() =>
     initialProfiles.length > 0 ? mapProfiles(initialProfiles) : MEMBERS
   )
-  const [currentUser, setCurrentUser] = useState<{ station: StationId; isIntl: boolean }>({
-    station: (initialCurrentUserStation as StationId) ?? "paris",
-    isIntl: initialCurrentUserStation === "intl",
-  })
   const [assignOpen, setAssignOpen] = useState(false)
-
 
   // All stations see all members
   const visibleMembers = allMembers
@@ -160,7 +153,7 @@ export function DirectoryClient({
         {selected && (
           <>
             <MemberDetail member={selected} />
-            {currentUser.isIntl && (
+            {canChangeRoles && (
               <div className="mt-4 border-t border-border pt-4">
                 {!assignOpen ? (
                   <button
