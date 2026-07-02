@@ -2,7 +2,7 @@
 
 Plateforme communautaire et organisationnelle pour la gestion d'équipes et de projets — fil d'actualité, annuaire, agenda, tâches et messagerie réunis en une seule application.
 
-Déployé sur [ysa-application.vercel.app](https://youthstation.vercel.app)
+Déployé sur [youthstation.vercel.app](https://youthstation.vercel.app)
 
 ---
 
