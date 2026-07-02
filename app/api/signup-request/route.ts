@@ -5,7 +5,8 @@ import { createHmac } from "crypto"
 
 const SUPABASE_ENABLED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 const APP_URL = process.env.APP_URL ?? "https://youthstation.vercel.app"
-const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET ?? "change-me-signup-secret"
+const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET
+if (!TOKEN_SECRET) throw new Error("SIGNUP_TOKEN_SECRET manquant dans les variables d'environnement")
 
 function signToken(payload: object): string {
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url")
