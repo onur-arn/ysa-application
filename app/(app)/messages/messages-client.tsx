@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQueryClient, useQuery } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ArrowLeft, Check, Plus,
@@ -25,6 +25,7 @@ import { useCallOptional } from "@/lib/call/call-context"
 import { openDMViaApi } from "@/lib/dm"
 import { prefetchChatMessages } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
+import { fetchUserConversationRows, syncConversationMembership } from "@/lib/queries/conversations"
 import { useChatMessages } from "@/lib/hooks/use-chat-messages"
 
 type Tab = "groups" | "dm"
@@ -187,6 +188,46 @@ export function MessagesClient({
     () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
   )
 
+  const userNameRef = useRef(currentUser.name || initialProfile?.name || "")
+  useEffect(() => {
+    userNameRef.current = currentUser.name || initialProfile?.name || ""
+  }, [currentUser.name, initialProfile?.name])
+
+  // Reload conversations from DB (fixes empty list after refresh)
+  const { data: liveConversations } = useQuery({
+    queryKey: messageKeys.conversations(initialUserId),
+    queryFn: async () => {
+      const supabase = createClient()
+      const name = userNameRef.current || initialProfile?.name || ""
+      if (initialUserId) await syncConversationMembership(supabase, initialUserId, name)
+      return fetchUserConversationRows(supabase, initialUserId, name)
+    },
+    enabled: !!initialUserId,
+    initialData: initialConversations,
+    staleTime: 30_000,
+    refetchOnMount: "always",
+  })
+
+  useEffect(() => {
+    const name = currentUser.name || initialProfile?.name || ""
+    if (!name || !liveConversations?.length) return
+    const { groups, dms } = mapConversations(liveConversations, name)
+    setCustomGroups((prev) => {
+      const unread = new Map(prev.map((g) => [g.id, g.unread]))
+      return groups.map((g) => ({ ...g, unread: unread.get(g.id) ?? g.unread }))
+    })
+    setCustomDMs((prev) => {
+      const unread = new Map(prev.map((d) => [d.id, d.unread]))
+      return dms.map((d) => ({ ...d, unread: unread.get(d.id) ?? d.unread }))
+    })
+  }, [liveConversations, currentUser.name, initialProfile?.name])
+
+  useEffect(() => {
+    const name = currentUser.name || initialProfile?.name || ""
+    if (!initialUserId || !name) return
+    void queryClient.invalidateQueries({ queryKey: messageKeys.conversations(initialUserId) })
+  }, [currentUser.name, initialProfile?.name, initialUserId, queryClient])
+
   // Keep profile name in sync (needed for conversation membership)
   useEffect(() => {
     if (currentUser.name) return
@@ -204,11 +245,6 @@ export function MessagesClient({
       })
     })
   }, [currentUser.name])
-
-  const userNameRef = useRef(currentUser.name || initialProfile?.name || "")
-  useEffect(() => {
-    userNameRef.current = currentUser.name || initialProfile?.name || ""
-  }, [currentUser.name, initialProfile?.name])
 
   const convIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
@@ -329,10 +365,13 @@ export function MessagesClient({
 
     // Add all members (creator gets is_admin = true)
     const allMembers = [...new Set([currentUser.name, ...memberNames])]
+    const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", allMembers)
+    const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
     await supabase.from("conversation_members").insert(
       allMembers.map((member_name) => ({
         conversation_id: conv.id,
         member_name,
+        user_id: member_name === currentUser.name ? initialUserId || idByName.get(member_name) : idByName.get(member_name),
         is_admin: member_name === currentUser.name,
       }))
     )
@@ -368,8 +407,15 @@ export function MessagesClient({
 
   async function addMembersToGroup(id: string, newNames: string[]) {
     const supabase = createClient()
+    const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", newNames)
+    const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
     await supabase.from("conversation_members").insert(
-      newNames.map((member_name) => ({ conversation_id: id, member_name, is_admin: false }))
+      newNames.map((member_name) => ({
+        conversation_id: id,
+        member_name,
+        user_id: idByName.get(member_name),
+        is_admin: false,
+      }))
     )
     setCustomGroups((prev) =>
       prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g)
