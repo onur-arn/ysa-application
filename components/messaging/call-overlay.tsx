@@ -1,7 +1,9 @@
 "use client"
 
-import { Phone, PhoneOff, Video, VideoOff } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Phone, PhoneOff, Video } from "lucide-react"
 import type { CallType } from "@/lib/call/call-context"
+import { formatCallDuration } from "@/lib/call/call-event"
 
 type Session = {
   id: string
@@ -32,11 +34,30 @@ export function CallOverlay({
   onEnd: () => void
 }) {
   const session = incoming ?? active
-  if (!session) return null
+  const [elapsed, setElapsed] = useState(0)
 
   const isIncoming = !!incoming
+  const isConnected = !isIncoming && (session?.status === "active" || !!remoteStream)
+
+  useEffect(() => {
+    if (!isConnected) {
+      setElapsed(0)
+      return
+    }
+    const started = Date.now()
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [isConnected, session?.id])
+
+  if (!session) return null
+
   const peerName = session.callerName === userName ? session.calleeName : session.callerName
   const isVideo = session.callType === "video"
+  const statusText = isIncoming
+    ? "Gelen arama…"
+    : isConnected
+      ? formatCallDuration(elapsed)
+      : "Çalıyor…"
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-white">
@@ -63,9 +84,7 @@ export function CallOverlay({
           {peerName.slice(0, 2).toUpperCase()}
         </div>
         <h2 className="text-xl font-bold">{peerName}</h2>
-        <p className="text-sm text-white/70">
-          {isIncoming ? "Gelen arama…" : isVideo ? "Görüntülü arama" : "Sesli arama"}
-        </p>
+        <p className="text-sm text-white/70">{statusText}</p>
       </div>
 
       <div className="relative z-20 flex items-center justify-center gap-8 pb-12 pt-6">
@@ -75,6 +94,7 @@ export function CallOverlay({
               type="button"
               onClick={onDecline}
               className="flex size-16 items-center justify-center rounded-full bg-red-500 shadow-lg"
+              aria-label="Reddet"
             >
               <PhoneOff className="size-7" />
             </button>
@@ -82,6 +102,7 @@ export function CallOverlay({
               type="button"
               onClick={onAnswer}
               className="flex size-16 items-center justify-center rounded-full bg-emerald-500 shadow-lg"
+              aria-label="Cevapla"
             >
               {isVideo ? <Video className="size-7" /> : <Phone className="size-7" />}
             </button>
@@ -91,6 +112,7 @@ export function CallOverlay({
             type="button"
             onClick={onEnd}
             className="flex size-16 items-center justify-center rounded-full bg-red-500 shadow-lg"
+            aria-label="Kapat"
           >
             <PhoneOff className="size-7" />
           </button>

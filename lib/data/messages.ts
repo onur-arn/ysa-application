@@ -1,4 +1,5 @@
 import type { StationId } from "./stations"
+import { parseCallEvent, callEventPreview } from "@/lib/call/call-event"
 
 export type MessageType = "text" | "image" | "gif" | "audio" | "call"
 
@@ -59,6 +60,9 @@ export function messagePreview(msg: { text?: string; messageType?: MessageType; 
   if (msg.messageType === "audio" || msg.audio) return "🎤 Sesli mesaj"
   if (msg.messageType === "gif" || msg.gif) return "GIF"
   if (msg.messageType === "image" || msg.image) return "📷 Fotoğraf"
-  if (msg.messageType === "call") return msg.text || "📞 Arama"
+  if (msg.messageType === "call") {
+    const event = parseCallEvent(msg.text)
+    return event ? callEventPreview(event) : "📞 Arama"
+  }
   return msg.text || ""
 }

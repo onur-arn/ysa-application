@@ -17,6 +17,8 @@ import { subscribeChannel } from "@/lib/supabase/realtime"
 import { useNavVisibility } from "@/lib/nav-visibility"
 import { Modal } from "@/components/ui/modal"
 import { usePresence } from "@/lib/presence"
+import { CallEventBubble } from "@/components/messaging/call-event-bubble"
+import { parseCallEvent } from "@/lib/call/call-event"
 import { GifPicker } from "@/components/messaging/gif-picker"
 import { AudioMessage, VoiceRecorderBar, useVoiceRecorder } from "@/components/messaging/audio-message"
 import { AttachMenu } from "@/components/messaging/attach-menu"
@@ -1850,6 +1852,24 @@ function ChatView({
           </div>
         )}
         {messages.map((m) => {
+          const callEvent = m.messageType === "call" ? parseCallEvent(m.text) : null
+          if (callEvent) {
+            return (
+              <div key={m.id} className={`flex ${m.self ? "justify-end" : "justify-start"} py-1`}>
+                <CallEventBubble
+                  event={callEvent}
+                  isSelf={!!m.self}
+                  time={m.time}
+                  onCallBack={
+                    isPrivate && conversationId && peerName && call
+                      ? () => call.startCall({ conversationId, peerName, callType: callEvent.callType })
+                      : undefined
+                  }
+                />
+              </div>
+            )
+          }
+
           if (m.system) {
             return (
               <div key={m.id} className="flex justify-center py-1">
