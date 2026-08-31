@@ -18,14 +18,14 @@ export function useChatMessages(
   const query = useQuery({
     queryKey: messageKeys.thread(conversationId ?? ""),
     queryFn: () => fetchChatMessages(conversationId!, senderName),
-    enabled: !!conversationId,
+    enabled: !!conversationId && !conversationId.startsWith("pending-"),
     staleTime: 30_000,
     initialData: initialMessages.length > 0 ? initialMessages : undefined,
     initialDataUpdatedAt: initialMessages.length > 0 ? Date.now() - 15_000 : undefined,
   })
 
   useEffect(() => {
-    if (!conversationId) return
+    if (!conversationId || conversationId.startsWith("pending-")) return
     const supabase = createClient()
 
     const channel = supabase

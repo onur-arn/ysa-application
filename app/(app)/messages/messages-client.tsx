@@ -167,7 +167,24 @@ function mapConversations(
     }
   }
 
-  return { groups, dms }
+  return { groups, dms: dedupeDmsByPeer(dms) }
+}
+
+/** One DM per peer — keep the most recently active conversation. */
+function dedupeDmsByPeer(dms: CustomDM[]): CustomDM[] {
+  const byKey = new Map<string, CustomDM>()
+  for (const d of dms) {
+    const key = (d.peerUserId || d.name).trim().toLowerCase()
+    if (!key) continue
+    const prev = byKey.get(key)
+    if (!prev) {
+      byKey.set(key, d)
+      continue
+    }
+    const newer = (d.lastAt || "") >= (prev.lastAt || "")
+    byKey.set(key, newer ? d : prev)
+  }
+  return [...byKey.values()].sort((a, b) => (b.lastAt || "").localeCompare(a.lastAt || ""))
 }
 
 export function MessagesClient({
@@ -332,9 +349,20 @@ export function MessagesClient({
     })
     setCustomDMs((prev) => {
       const unread = new Map(prev.map((d) => [d.id, d.unread]))
-      return dms
+      const fromLive = dms
         .filter((d) => !hidden.has(d.id))
         .map((d) => ({ ...d, unread: unread.get(d.id) ?? d.unread }))
+      const liveIds = new Set(fromLive.map((d) => d.id))
+      const livePeers = new Set(
+        fromLive.map((d) => (d.peerUserId || d.name).trim().toLowerCase()).filter(Boolean),
+      )
+      // Keep optimistic / just-opened DMs until they appear in the live refetch
+      const pendingLocal = prev.filter((d) => {
+        if (hidden.has(d.id) || liveIds.has(d.id)) return false
+        const key = (d.peerUserId || d.name).trim().toLowerCase()
+        return !key || !livePeers.has(key)
+      })
+      return dedupeDmsByPeer([...fromLive, ...pendingLocal])
     })
   }, [liveConversations, currentUser.name, initialProfile?.name])
 
@@ -584,84 +612,117 @@ export function MessagesClient({
     )
   }
 
+  const openingDmRef = useRef<Set<string>>(new Set())
+
   // ── DM actions ────────────────────────────────────────────────────────────
   async function openOrCreateDM(member: Member) {
-    const existingStatic = DM_CHATS.find((d) => d.name === member.name)
-    if (existingStatic) {
-      softUnhideConv(existingStatic.id)
-      setOpenId(existingStatic.id)
-      router.replace(`${pathname}?open=${existingStatic.id}`, { scroll: false })
-      setComposeOpen(false)
-      setCreateGroupOpen(false)
-      return
-    }
+    const lockKey = member.id || member.name
+    if (!lockKey) return
+    if (openingDmRef.current.has(lockKey)) return
+    openingDmRef.current.add(lockKey)
 
-    const matchDm = (d: CustomDM) =>
-      d.name === member.name || (!!member.id && d.peerUserId === member.id)
+    // Instant UI: leave compose immediately
+    setComposeOpen(false)
+    setCreateGroupOpen(false)
 
-    const existingCustom = customDMs.find(matchDm)
-    if (existingCustom) {
-      softUnhideConv(existingCustom.id)
-      await openConversation(existingCustom.id)
-      setComposeOpen(false)
-      setCreateGroupOpen(false)
-      return
-    }
-
-    // Soft-hidden DMs stay in DB — recover from live rows before creating anything new
-    const name = currentUser.name || initialProfile?.name || ""
-    if (liveConversations?.length && name) {
-      const hiddenMatch = mapConversations(liveConversations, name).dms.find(matchDm)
-      if (hiddenMatch) {
-        softUnhideConv(hiddenMatch.id)
-        setCustomDMs((prev) => (prev.some((d) => d.id === hiddenMatch.id) ? prev : [hiddenMatch, ...prev]))
-        await openConversation(hiddenMatch.id)
-        setComposeOpen(false)
-        setCreateGroupOpen(false)
+    try {
+      const existingStatic = DM_CHATS.find((d) => d.name === member.name)
+      if (existingStatic) {
+        softUnhideConv(existingStatic.id)
+        openConversation(existingStatic.id)
         return
       }
-    }
 
-    if (!member.id) {
-      console.error("[openOrCreateDM] missing member id")
-      return
-    }
+      const matchDm = (d: CustomDM) =>
+        d.name === member.name || (!!member.id && d.peerUserId === member.id)
 
-    const convId = await openDMViaApi(member.id)
-    if (!convId) {
-      console.error("[openOrCreateDM] API failed")
-      return
-    }
+      const existingCustom = customDMs.find(matchDm)
+      if (existingCustom) {
+        softUnhideConv(existingCustom.id)
+        openConversation(existingCustom.id)
+        return
+      }
 
-    softUnhideConv(convId)
+      // Soft-hidden DMs stay in DB — recover from live rows before creating anything new
+      const name = currentUser.name || initialProfile?.name || ""
+      if (liveConversations?.length && name) {
+        const hiddenMatch = mapConversations(liveConversations, name).dms.find(matchDm)
+        if (hiddenMatch) {
+          softUnhideConv(hiddenMatch.id)
+          setCustomDMs((prev) => dedupeDmsByPeer(
+            prev.some((d) => d.id === hiddenMatch.id) ? prev : [hiddenMatch, ...prev],
+          ))
+          openConversation(hiddenMatch.id)
+          return
+        }
+      }
 
-    const s = getStation(member.station)
-    setCustomDMs((prev) => {
-      if (prev.some((d) => d.id === convId || matchDm(d))) {
-        return prev.map((d) =>
+      if (!member.id) {
+        console.error("[openOrCreateDM] missing member id")
+        return
+      }
+
+      // Show a temporary row while API runs so the list doesn't feel empty
+      const s = getStation(member.station)
+      const tempId = `pending-dm-${member.id}`
+      setCustomDMs((prev) => {
+        if (prev.some(matchDm)) return prev
+        return [{
+          id: tempId,
+          name: member.name,
+          initials: member.initials,
+          color: s.color,
+          station: member.station,
+          online: member.online ?? false,
+          lastMessage: "",
+          lastTime: "",
+          lastAt: new Date().toISOString(),
+          unread: 0,
+          messages: [],
+          peerUserId: member.id,
+        }, ...prev]
+      })
+      setOpenId(tempId)
+
+      const convId = await openDMViaApi(member.id)
+      if (!convId) {
+        console.error("[openOrCreateDM] API failed")
+        setCustomDMs((prev) => prev.filter((d) => d.id !== tempId))
+        if (openIdRef.current === tempId) setOpenId(null)
+        return
+      }
+
+      softUnhideConv(convId)
+      setCustomDMs((prev) => {
+        const withoutTemp = prev.filter((d) => d.id !== tempId)
+        const replaced = withoutTemp.map((d) =>
           d.id === convId || matchDm(d)
             ? { ...d, id: convId, peerUserId: member.id, name: member.name }
             : d,
         )
-      }
-      return [{
-        id: convId,
-        name: member.name,
-        initials: member.initials,
-        color: s.color,
-        station: member.station,
-        online: member.online ?? false,
-        lastMessage: "",
-        lastTime: "",
-        lastAt: new Date().toISOString(),
-        unread: 0,
-        messages: [],
-        peerUserId: member.id,
-      }, ...prev]
-    })
-    await openConversation(convId)
-    setComposeOpen(false)
-    setCreateGroupOpen(false)
+        if (replaced.some((d) => d.id === convId || matchDm(d))) {
+          return dedupeDmsByPeer(replaced)
+        }
+        return dedupeDmsByPeer([{
+          id: convId,
+          name: member.name,
+          initials: member.initials,
+          color: s.color,
+          station: member.station,
+          online: member.online ?? false,
+          lastMessage: "",
+          lastTime: "",
+          lastAt: new Date().toISOString(),
+          unread: 0,
+          messages: [],
+          peerUserId: member.id,
+        }, ...replaced])
+      })
+      openConversation(convId)
+      void queryClient.invalidateQueries({ queryKey: messageKeys.conversations(initialUserId) })
+    } finally {
+      openingDmRef.current.delete(lockKey)
+    }
   }
 
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
@@ -680,13 +741,17 @@ export function MessagesClient({
   useEffect(() => { openIdRef.current = openId }, [openId])
   useEffect(() => { currentNameRef.current = currentUser.name }, [currentUser.name])
 
-  // Open a conversation instantly; messages prefetched from cache or network
+  // Open a conversation instantly; hydrate membership in background if needed
   function openConversation(id: string) {
+    setOpenId(id)
     void prefetchChatMessages(queryClient, id, currentUser.name)
-    if (convIdsRef.current.has(id) || customGroups.some((g) => g.id === id) || customDMs.some((d) => d.id === id)) {
-      setOpenId(id)
-    } else {
-      void ensureConversationInState(id).then((ok) => { if (ok) setOpenId(id) })
+    if (
+      !id.startsWith("pending-") &&
+      !convIdsRef.current.has(id) &&
+      !customGroups.some((g) => g.id === id) &&
+      !customDMs.some((d) => d.id === id)
+    ) {
+      void ensureConversationInState(id)
     }
     router.replace(`${pathname}?open=${id}`, { scroll: false })
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
