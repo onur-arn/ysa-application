@@ -12,6 +12,7 @@ type Session = {
   calleeName: string
   callType: CallType
   status: string
+  isGroup?: boolean
 }
 
 /** Outgoing ring: bip-bip … pause … bip-bip */
@@ -119,11 +120,18 @@ export function CallOverlay({
 
   if (!session) return null
 
-  const peerName = session.callerName === userName ? session.calleeName : session.callerName
+  const isGroup = !!session.isGroup || session.calleeName === "__group__"
+  const peerName = isIncoming
+    ? session.callerName
+    : isGroup
+      ? "Grup araması"
+      : session.callerName === userName
+        ? session.calleeName
+        : session.callerName
   const statusText = error
     ? error
     : isIncoming
-      ? "Gelen sesli arama…"
+      ? (isGroup ? "Gelen grup araması…" : "Gelen sesli arama…")
       : isConnected
         ? formatCallDuration(elapsed)
         : "Çalıyor…"
@@ -136,9 +144,12 @@ export function CallOverlay({
             isOutgoingRinging || isIncoming ? "animate-pulse" : ""
           }`}
         >
-          {peerName.slice(0, 2).toUpperCase()}
+          {(isIncoming ? session.callerName : peerName).slice(0, 2).toUpperCase()}
         </div>
         <h2 className="text-xl font-bold">{peerName}</h2>
+        {isGroup && isIncoming && (
+          <p className="text-xs text-white/50">Grup araması</p>
+        )}
         <p className={`text-sm ${error ? "text-red-300" : "text-white/70"}`}>{statusText}</p>
       </div>
 

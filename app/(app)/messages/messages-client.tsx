@@ -7,7 +7,7 @@ import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion"
 import {
   Search, Send, ArrowLeft, Check, Plus,
   Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
-  Phone, Mic, Mail,
+  Phone, Mic, Mail, Camera,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption, messagePreview } from "@/lib/data/messages"
@@ -32,6 +32,7 @@ import { messageKeys } from "@/lib/queries/keys"
 import { insertConversationMembers } from "@/lib/queries/conversations"
 import { useChatMessages, broadcastChatMessage } from "@/lib/hooks/use-chat-messages"
 import { chatDayLabel, sameChatDay } from "@/lib/chat-day"
+import { groupAvatarPublicUrl } from "@/lib/group-avatar"
 
 const CUSTOM_COLOR = "262 83% 58%"
 
@@ -46,6 +47,7 @@ type CustomGroup = {
   lastAt: string
   unread: number
   messages: ChatMessage[]
+  avatarUrl?: string
 }
 
 type CustomDM = {
@@ -146,7 +148,20 @@ function mapConversations(
       : ""
 
     if ((c.type as string) === "group") {
-      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminNames: effectiveAdminNames, memberNames, lastMessage, lastTime, lastAt, unread: 0, messages: [] })
+      const avatarFromDb = (c.avatar_url as string | undefined) || undefined
+      groups.push({
+        id: c.id as string,
+        name: (c.name as string) ?? "",
+        initials: (c.initials as string) ?? "",
+        adminNames: effectiveAdminNames,
+        memberNames,
+        lastMessage,
+        lastTime,
+        lastAt,
+        unread: 0,
+        messages: [],
+        avatarUrl: avatarFromDb || groupAvatarPublicUrl(c.id as string),
+      })
     } else {
       const otherName = memberNames[0] ?? (c.name as string) ?? ""
       const peerUserId = otherMembers[0]?.user_id ?? undefined
@@ -538,7 +553,65 @@ export function MessagesClient({
 
 
   // ── Group actions ─────────────────────────────────────────────────────────
-  async function createGroup(name: string, memberNames: string[]) {
+  async function insertSystemChat(conversationId: string, text: string) {
+    const supabase = createClient()
+    const { data } = await supabase.from("chat_messages").insert({
+      conversation_id: conversationId,
+      sender_name: "",
+      sender_initials: "",
+      text,
+      is_system: true,
+    }).select("id,created_at").single()
+    if (!data) return
+    const msg: ChatMessage = {
+      id: data.id as string,
+      author: "",
+      initials: "",
+      text,
+      time: new Date(data.created_at as string).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
+      createdAt: data.created_at as string,
+      system: true,
+    }
+    queryClient.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) => {
+      if (prev.some((m) => m.id === msg.id)) return prev
+      return [...prev, msg]
+    })
+    void broadcastChatMessage(conversationId, msg)
+    setCustomGroups((prev) => prev.map((g) => {
+      if (g.id !== conversationId) return g
+      return {
+        ...g,
+        messages: g.messages.some((m) => m.id === msg.id) ? g.messages : [...g.messages, msg],
+        lastMessage: text,
+        lastTime: msg.time,
+        lastAt: msg.createdAt || g.lastAt,
+      }
+    }))
+  }
+
+  async function uploadGroupAvatar(conversationId: string, photo: { base64: string; ext: string }) {
+    const res = await fetch("/api/group/avatar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationId,
+        photoBase64: photo.base64,
+        photoExt: photo.ext,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.url) {
+      console.error("[group-avatar]", data.error)
+      return null
+    }
+    return data.url as string
+  }
+
+  async function createGroup(
+    name: string,
+    memberNames: string[],
+    photo?: { base64: string; ext: string } | null,
+  ) {
     const words = name.replace(/[^a-zA-ZÀ-ÿ\s]/g, "").trim().split(/\s+/).filter(Boolean)
     const initials = (words.length >= 2 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase()
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
@@ -552,10 +625,10 @@ export function MessagesClient({
 
     if (error || !conv) {
       console.error("[createGroup] failed:", error?.message)
+      window.alert("Grup oluşturulamadı.")
       return
     }
 
-    // Add all members (creator gets is_admin = true)
     const allMembers = [...new Set([currentUser.name, ...memberNames])]
     const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", allMembers)
     const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
@@ -571,12 +644,30 @@ export function MessagesClient({
     if (!ok) {
       console.error("[createGroup] members insert failed")
       await supabase.from("conversations").delete().eq("id", conv.id)
+      window.alert("Grup üyeleri eklenemedi.")
       return
     }
 
+    let avatarUrl: string | undefined
+    if (photo?.base64) {
+      avatarUrl = (await uploadGroupAvatar(conv.id, photo)) ?? undefined
+    }
+
+    const createdText = `${currentUser.name} grubu oluşturdu`
+    await insertSystemChat(conv.id, createdText)
+
     const newGroup: CustomGroup = {
-      id: conv.id, name, initials, adminNames: [currentUser.name], memberNames,
-      lastMessage: "Grup oluşturuldu", lastTime: time, lastAt: new Date().toISOString(), unread: 0, messages: [],
+      id: conv.id,
+      name,
+      initials,
+      adminNames: [currentUser.name],
+      memberNames,
+      lastMessage: createdText,
+      lastTime: time,
+      lastAt: new Date().toISOString(),
+      unread: 0,
+      messages: [],
+      avatarUrl: avatarUrl || groupAvatarPublicUrl(conv.id, Date.now()),
     }
     setCustomGroups((prev) => [newGroup, ...prev])
     setCreateGroupOpen(false)
@@ -593,9 +684,11 @@ export function MessagesClient({
     setCustomGroups((prev) =>
       prev.map((g) => g.id === id ? { ...g, adminNames: [...new Set([...g.adminNames, memberName])] } : g)
     )
+    await insertSystemChat(id, `${currentUser.name}, ${memberName} kişisini yönetici yaptı`)
   }
 
   async function addMembersToGroup(id: string, newNames: string[]) {
+    if (newNames.length === 0) return
     const supabase = createClient()
     const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", newNames)
     const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
@@ -612,20 +705,30 @@ export function MessagesClient({
     setCustomGroups((prev) =>
       prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g)
     )
+    const list = newNames.join(", ")
+    const text = newNames.length === 1
+      ? `${currentUser.name}, ${list} kişisini ekledi`
+      : `${currentUser.name}, ${list} kişilerini ekledi`
+    await insertSystemChat(id, text)
   }
 
   async function removeMemberFromGroup(id: string, memberName: string) {
-    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
     const supabase = createClient()
     await supabase.from("conversation_members").delete()
       .eq("conversation_id", id).eq("member_name", memberName)
-    await supabase.from("chat_messages").insert({
-      conversation_id: id, sender_name: "", sender_initials: "",
-      text: `Yönetici ${memberName} kişisini gruptan çıkardı`, is_system: true,
-    })
+    await insertSystemChat(id, `${currentUser.name}, ${memberName} kişisini gruptan çıkardı`)
     setCustomGroups((prev) =>
       prev.map((g) => g.id === id ? { ...g, memberNames: g.memberNames.filter((n) => n !== memberName) } : g)
     )
+  }
+
+  async function updateGroupAvatar(id: string, photo: { base64: string; ext: string }) {
+    const url = await uploadGroupAvatar(id, photo)
+    if (!url) {
+      window.alert("Grup fotoğrafı yüklenemedi.")
+      return
+    }
+    setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, avatarUrl: url } : g))
   }
 
   async function leaveGroup(id: string) {
@@ -1025,17 +1128,21 @@ export function MessagesClient({
         onMessagesChange={(msgs) => updateCustomGroupMessages(activeCustomGroup.id, msgs)}
         conversationId={activeCustomGroup.id}
         photoMap={photoMap}
+        headerPhotoUrl={activeCustomGroup.avatarUrl}
+        peerName={activeCustomGroup.name}
         groupSettings={{
           memberNames: activeCustomGroup.memberNames,
           adminNames: activeCustomGroup.adminNames,
           currentUserName: currentUser.name,
           isAdmin: activeCustomGroup.adminNames.includes(currentUser.name),
+          avatarUrl: activeCustomGroup.avatarUrl,
           onAddMembers: (newNames) => addMembersToGroup(activeCustomGroup.id, newNames),
           onRemoveMember: (name) => removeMemberFromGroup(activeCustomGroup.id, name),
           onLeave: () => leaveGroup(activeCustomGroup.id),
           onDeleteGroup: () => deleteGroup(activeCustomGroup.id),
           onRename: (newName) => renameGroup(activeCustomGroup.id, newName),
           onPromoteToAdmin: (name) => promoteToAdmin(activeCustomGroup.id, name),
+          onChangeAvatar: (photo) => updateGroupAvatar(activeCustomGroup.id, photo),
         }}
       />
       {chatExtras}
@@ -1140,6 +1247,7 @@ export function MessagesClient({
                 time={g.lastTime}
                 unread={forcedUnread[g.id] ?? g.unread}
                 isCustomGroup
+                photoUrl={g.avatarUrl}
               />
             )
           }
@@ -1217,8 +1325,8 @@ export function MessagesClient({
         <CreateGroupScreen
           currentUserName={currentUser.name}
           onClose={() => setCreateGroupOpen(false)}
-          onCreate={async (name, members) => {
-            await createGroup(name, members)
+          onCreate={async (name, members, photo) => {
+            await createGroup(name, members, photo)
           }}
         />
       )}
@@ -1303,17 +1411,26 @@ function ConversationRow({
           className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-secondary"
         >
           <div className="relative shrink-0">
-            {photoUrl && !isCustomGroup ? (
+            {photoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={photoUrl} alt={initials} className="size-14 rounded-full object-cover" />
-            ) : (
-              <span
-                className="flex size-14 items-center justify-center rounded-full text-sm font-bold text-white"
-                style={{ backgroundColor: `hsl(${color})` }}
-              >
-                {isCustomGroup ? <Users className="size-6" /> : initials}
-              </span>
-            )}
+              <img
+                src={photoUrl}
+                alt={initials}
+                className="size-14 rounded-full object-cover"
+                onError={(e) => {
+                  const img = e.currentTarget
+                  img.style.display = "none"
+                  const fallback = img.nextElementSibling as HTMLElement | null
+                  if (fallback) fallback.classList.remove("hidden")
+                }}
+              />
+            ) : null}
+            <span
+              className={`flex size-14 items-center justify-center rounded-full text-sm font-bold text-white ${photoUrl ? "hidden" : ""}`}
+              style={{ backgroundColor: `hsl(${color})` }}
+            >
+              {isCustomGroup ? <Users className="size-6" /> : initials}
+            </span>
             {online && (
               <span className="absolute bottom-0 right-0 size-3.5 rounded-full border-2 border-background bg-emerald-500" />
             )}
@@ -1344,9 +1461,10 @@ function ConversationRow({
 
 // ── Group settings panel ──────────────────────────────────────────────────────
 function GroupSettingsPanel({
-  title, initials, isAdmin, adminNames, currentUserName, memberNames, onClose, onAddMembers, onRemoveMember, onLeave, onDeleteGroup, onRename, onPromoteToAdmin,
+  title, initials, isAdmin, adminNames, currentUserName, memberNames, avatarUrl, onClose, onAddMembers, onRemoveMember, onLeave, onDeleteGroup, onRename, onPromoteToAdmin, onChangeAvatar,
 }: {
   title: string; initials: string; isAdmin: boolean; adminNames: string[]; currentUserName: string; memberNames: string[]
+  avatarUrl?: string
   onClose: () => void
   onAddMembers: (newNames: string[]) => void
   onRemoveMember: (name: string) => void
@@ -1354,6 +1472,7 @@ function GroupSettingsPanel({
   onDeleteGroup: () => void
   onRename: (newName: string) => void
   onPromoteToAdmin: (name: string) => void
+  onChangeAvatar?: (photo: { base64: string; ext: string }) => void
 }) {
   const [allMembers, setAllMembers]       = useState<Member[]>(MEMBERS)
   const [addOpen, setAddOpen]             = useState(false)
@@ -1361,6 +1480,9 @@ function GroupSettingsPanel({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editingName, setEditingName]     = useState(false)
   const [newName, setNewName]             = useState(title)
+  const [removeStep, setRemoveStep]       = useState<{ name: string; step: 1 | 2 } | null>(null)
+  const [avatarBusy, setAvatarBusy]       = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     async function load() {
@@ -1409,12 +1531,54 @@ function GroupSettingsPanel({
       <div className="flex-1 overflow-y-auto">
         {/* Group identity */}
         <div className="flex flex-col items-center gap-2 py-8">
-          <span
-            className="flex size-20 items-center justify-center rounded-full text-2xl font-bold text-white"
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ""
+              if (!file || !file.type.startsWith("image/") || !onChangeAvatar) return
+              setAvatarBusy(true)
+              const ext = (file.name.split(".").pop() || "jpg").toLowerCase()
+              const reader = new FileReader()
+              reader.onload = () => {
+                const result = String(reader.result || "")
+                const base64 = result.includes(",") ? result.split(",")[1] : result
+                void Promise.resolve(onChangeAvatar({ base64, ext })).finally(() => setAvatarBusy(false))
+              }
+              reader.onerror = () => setAvatarBusy(false)
+              reader.readAsDataURL(file)
+            }}
+          />
+          <button
+            type="button"
+            disabled={!isAdmin || avatarBusy || !onChangeAvatar}
+            onClick={() => isAdmin && avatarInputRef.current?.click()}
+            className="relative flex size-20 items-center justify-center overflow-hidden rounded-full text-2xl font-bold text-white disabled:opacity-100"
             style={{ backgroundColor: `hsl(${CUSTOM_COLOR})` }}
           >
-            {initials}
-          </span>
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={avatarUrl}
+                alt=""
+                className="size-full object-cover"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+              />
+            ) : (
+              initials
+            )}
+            {isAdmin && (
+              <span className="absolute bottom-1 right-1 flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
+                {avatarBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Camera className="size-3.5" />}
+              </span>
+            )}
+          </button>
+          {isAdmin && (
+            <p className="text-xs text-muted-foreground">Grup fotoğrafını değiştir</p>
+          )}
           {isAdmin && editingName ? (
             <div className="flex items-center gap-2 px-6 w-full">
               <input
@@ -1506,7 +1670,7 @@ function GroupSettingsPanel({
                   )}
                   {isAdmin && (
                     <button
-                      onClick={() => onRemoveMember(m.name)}
+                      onClick={() => setRemoveStep({ name: m.name, step: 1 })}
                       className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-destructive/10 active:text-destructive"
                       aria-label={`${m.name} çıkar`}
                     >
@@ -1517,6 +1681,61 @@ function GroupSettingsPanel({
               )
             })}
           </div>
+
+          {removeStep && (
+            <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              {removeStep.step === 1 ? (
+                <>
+                  <p className="mb-3 text-sm font-medium text-destructive">
+                    {removeStep.name} kişisini gruptan çıkarmak istiyor musunuz?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRemoveStep(null)}
+                      className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
+                    >
+                      İptal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRemoveStep({ name: removeStep.name, step: 2 })}
+                      className="flex-1 rounded-lg bg-destructive/90 py-2 text-sm font-semibold text-white"
+                    >
+                      Devam
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mb-1 text-sm font-semibold text-destructive">Emin misiniz?</p>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    {removeStep.name} gruptan kalıcı olarak çıkarılacak.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRemoveStep(null)}
+                      className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
+                    >
+                      İptal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const name = removeStep.name
+                        setRemoveStep(null)
+                        onRemoveMember(name)
+                      }}
+                      className="flex-1 rounded-lg bg-destructive py-2 text-sm font-semibold text-white"
+                    >
+                      Evet, çıkar
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Add members — admin only */}
           {isAdmin && (
@@ -1744,12 +1963,14 @@ function ChatView({
     adminNames: string[]
     currentUserName: string
     isAdmin: boolean
+    avatarUrl?: string
     onAddMembers: (newNames: string[]) => void
     onRemoveMember: (name: string) => void
     onLeave: () => void
     onDeleteGroup: () => void
     onRename: (newName: string) => void
     onPromoteToAdmin: (name: string) => void
+    onChangeAvatar?: (photo: { base64: string; ext: string }) => void
   }
 }) {
   const { t } = useI18n()
@@ -2126,10 +2347,15 @@ function ChatView({
             <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
           </div>
         </button>
-        {isPrivate && conversationId && peerName && call && (
+        {conversationId && peerName && call && (isPrivate || !!groupSettings) && (
           <button
             type="button"
-            onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
+            onClick={() => call.startCall({
+              conversationId,
+              peerName,
+              callType: "audio",
+              isGroup: !!groupSettings && !isPrivate,
+            })}
             className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground active:bg-secondary"
             aria-label="Sesli arama"
           >
@@ -2168,8 +2394,13 @@ function ChatView({
                     isSelf={!!m.self}
                     time={m.time}
                     onCallBack={
-                      isPrivate && conversationId && peerName && call
-                        ? () => call.startCall({ conversationId, peerName, callType: "audio" })
+                      conversationId && peerName && call && (isPrivate || !!groupSettings)
+                        ? () => call.startCall({
+                          conversationId,
+                          peerName,
+                          callType: "audio",
+                          isGroup: !!groupSettings && !isPrivate,
+                        })
                         : undefined
                     }
                   />
@@ -2368,6 +2599,7 @@ function ChatView({
             adminNames={groupSettings.adminNames}
             currentUserName={groupSettings.currentUserName}
             memberNames={groupSettings.memberNames}
+            avatarUrl={groupSettings.avatarUrl ?? headerPhotoUrl}
             onClose={() => setShowSettings(false)}
             onAddMembers={groupSettings.onAddMembers}
             onRemoveMember={groupSettings.onRemoveMember}
@@ -2375,6 +2607,7 @@ function ChatView({
             onDeleteGroup={groupSettings.onDeleteGroup}
             onRename={groupSettings.onRename}
             onPromoteToAdmin={groupSettings.onPromoteToAdmin}
+            onChangeAvatar={groupSettings.onChangeAvatar}
           />
         )}
       </AnimatePresence>

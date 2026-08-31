@@ -310,6 +310,7 @@ create table if not exists conversations (
   name       text,
   initials   text,
   admin_name text,
+  avatar_url text,
   created_at timestamptz default now()
 );
 alter table conversations add column if not exists admin_name text;

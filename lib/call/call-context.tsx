@@ -6,6 +6,7 @@ import { subscribeChannel } from "@/lib/supabase/realtime"
 import { CallOverlay } from "@/components/messaging/call-overlay"
 import { loadIceServers, prefetchIceServers, getTurnLoadError, isTurnConfigured } from "@/lib/call/ice-servers"
 import { encodeCallEvent, type CallOutcome } from "@/lib/call/call-event"
+import { GROUP_CALL_CALLEE } from "@/lib/group-avatar"
 
 export type CallType = "audio" | "video"
 
@@ -16,10 +17,19 @@ type CallSession = {
   calleeName: string
   callType: CallType
   status: string
+  isGroup?: boolean
+}
+
+type StartCallOpts = {
+  conversationId: string
+  peerName: string
+  callType?: CallType
+  /** Ring all group members instead of a single peer */
+  isGroup?: boolean
 }
 
 type CallContextValue = {
-  startCall: (opts: { conversationId: string; peerName: string; callType?: CallType }) => Promise<void>
+  startCall: (opts: StartCallOpts) => Promise<void>
   incoming: CallSession | null
   active: CallSession | null
   localStream: MediaStream | null
@@ -69,7 +79,6 @@ export function CallProvider({ userName, children }: { userName: string; childre
   useEffect(() => { activeRef.current = active }, [active])
   useEffect(() => { incomingRef.current = incoming }, [incoming])
 
-  // Prefetch TURN so getUserMedia can stay in the user-gesture chain
   useEffect(() => {
     if (userName) void prefetchIceServers()
   }, [userName])
@@ -125,18 +134,33 @@ export function CallProvider({ userName, children }: { userName: string; childre
   ) => {
     if (postedEventRef.current || !session.conversationId || !userName) return
     postedEventRef.current = true
+    const payload = {
+      conversationId: session.conversationId,
+      text: encodeCallEvent({ v: 1, outcome, callType: session.callType, durationSec }),
+      messageType: "call",
+    }
+    try {
+      const res = await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) return
+      console.warn("[call] post via API failed, falling back", await res.text())
+    } catch (e) {
+      console.warn("[call] post via API error", e)
+    }
     const supabase = createClient()
     await supabase.from("chat_messages").insert({
       conversation_id: session.conversationId,
       sender_name: userName,
       sender_initials: userName.slice(0, 2).toUpperCase(),
-      text: encodeCallEvent({ v: 1, outcome, callType: session.callType, durationSec }),
+      text: payload.text,
       message_type: "call",
       is_system: false,
     })
   }, [userName])
 
-  /** Always create a fresh PC; audio-only transceiver. */
   async function buildPc(sessionId: string, stream: MediaStream) {
     resetPc()
 
@@ -172,7 +196,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     return pc
   }
 
-  async function startCall({ conversationId, peerName }: { conversationId: string; peerName: string; callType?: CallType }) {
+  async function startCall({ conversationId, peerName, isGroup }: StartCallOpts) {
     const callType: CallType = "audio"
     if (!userName) {
       setCallError("Profil yükleniyor, tekrar deneyin.")
@@ -183,10 +207,23 @@ export function CallProvider({ userName, children }: { userName: string; childre
     setCallError(null)
     resetPc()
 
-    // TURN/Metered check (usually already prefetched — avoid long await before getUserMedia)
     if (!isTurnConfigured()) {
       await loadIceServers()
       if (!isTurnConfigured()) {
+        // Still leave a missed-call mark in the thread when the attempt fails
+        postedEventRef.current = false
+        await postCallEvent(
+          {
+            id: "failed",
+            conversationId,
+            callerName: userName,
+            calleeName: isGroup ? GROUP_CALL_CALLEE : peerName,
+            callType,
+            status: "missed",
+            isGroup,
+          },
+          "missed",
+        )
         setCallError(
           getTurnLoadError() ??
             "TURN sunucusu hazır değil. Sayfayı yenileyip tekrar deneyin.",
@@ -195,23 +232,36 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
     }
 
-    // Media FIRST — must stay close to the click (Safari / iOS)
     let stream: MediaStream
     try {
       stream = await acquireMedia()
     } catch {
+      postedEventRef.current = false
+      await postCallEvent(
+        {
+          id: "failed",
+          conversationId,
+          callerName: userName,
+          calleeName: isGroup ? GROUP_CALL_CALLEE : peerName,
+          callType,
+          status: "missed",
+          isGroup,
+        },
+        "missed",
+      )
       setCallError("Mikrofon izni gerekli. Tarayıcı ayarlarından izin verin.")
       return
     }
 
-    // Show overlay immediately
+    const calleeName = isGroup ? GROUP_CALL_CALLEE : peerName
     const placeholder: CallSession = {
       id: `pending-${Date.now()}`,
       conversationId,
       callerName: userName,
-      calleeName: peerName,
+      calleeName,
       callType,
       status: "ringing",
+      isGroup: !!isGroup,
     }
     sessionRef.current = placeholder
     isCallerRef.current = true
@@ -227,7 +277,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
       const { data: session, error } = await supabase.from("call_sessions").insert({
         conversation_id: conversationId,
         caller_name: userName,
-        callee_name: peerName,
+        callee_name: calleeName,
         call_type: callType,
         status: "ringing",
       }).select().single()
@@ -240,9 +290,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
         id: session.id,
         conversationId,
         callerName: userName,
-        calleeName: peerName,
+        calleeName,
         callType,
         status: "ringing",
+        isGroup: !!isGroup,
       }
       sessionRef.current = s
       setActive(s)
@@ -260,7 +311,6 @@ export function CallProvider({ userName, children }: { userName: string; childre
         },
       })
 
-      // No answer → missed voice call in chat, then hang up
       ringTimerRef.current = setTimeout(() => {
         void (async () => {
           const current = sessionRef.current
@@ -280,6 +330,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
     } catch (err) {
       console.error("[call] start failed:", err)
       const message = err instanceof Error ? err.message : "Arama başlatılamadı"
+      const current = sessionRef.current
+      if (current?.conversationId) {
+        await postCallEvent(current, "missed")
+      }
       resetPc()
       stream.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null
@@ -372,19 +426,20 @@ export function CallProvider({ userName, children }: { userName: string; childre
     const session = sessionRef.current ?? activeRef.current ?? incomingRef.current
     if (!session) { cleanup(); return }
 
-    // Pending placeholder (DB insert not done yet)
-    if (session.id.startsWith("pending-")) {
-      cleanup()
-      return
-    }
-
-    const supabase = createClient()
     const connected = connectedAtRef.current != null || session.status === "active"
     const outcome: CallOutcome = connected ? "ended" : "missed"
     const durationSec = connected && connectedAtRef.current
       ? Math.round((Date.now() - connectedAtRef.current) / 1000)
       : undefined
 
+    // Pending placeholder — still record missed call in chat
+    if (session.id.startsWith("pending-")) {
+      await postCallEvent(session, "missed")
+      cleanup()
+      return
+    }
+
+    const supabase = createClient()
     await supabase.from("call_sessions").update({
       status: outcome === "missed" ? "missed" : "ended",
       ended_at: new Date().toISOString(),
@@ -406,22 +461,47 @@ export function CallProvider({ userName, children }: { userName: string; childre
     const sessionsChannel = supabase
       .channel(`calls-in-${userName}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "call_sessions" }, (payload) => {
-        const row = payload.new as { id: string; conversation_id: string; caller_name: string; callee_name: string; call_type: CallType; status: string }
-        if (row.callee_name !== userName || row.status !== "ringing") return
-        if (activeRef.current || incomingRef.current) return
-        setIncoming({
-          id: row.id,
-          conversationId: row.conversation_id,
-          callerName: row.caller_name,
-          calleeName: row.callee_name,
-          callType: row.call_type,
-          status: row.status,
-        })
+        void (async () => {
+          const row = payload.new as {
+            id: string
+            conversation_id: string
+            caller_name: string
+            callee_name: string
+            call_type: CallType
+            status: string
+          }
+          if (row.status !== "ringing") return
+          if (row.caller_name === userName) return
+          if (activeRef.current || incomingRef.current) return
+
+          const isDirect = row.callee_name === userName
+          const isGroup = row.callee_name === GROUP_CALL_CALLEE
+          if (!isDirect && !isGroup) return
+
+          if (isGroup) {
+            const { data: mem } = await supabase
+              .from("conversation_members")
+              .select("conversation_id")
+              .eq("conversation_id", row.conversation_id)
+              .eq("member_name", userName)
+              .maybeSingle()
+            if (!mem) return
+          }
+
+          setIncoming({
+            id: row.id,
+            conversationId: row.conversation_id,
+            callerName: row.caller_name,
+            calleeName: row.callee_name,
+            callType: row.call_type,
+            status: row.status,
+            isGroup,
+          })
+        })()
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "call_sessions" }, (payload) => {
         const row = payload.new as { id: string; status: string }
         const incoming = incomingRef.current
-        // Only clear incoming ring UI — never tear down an active caller session on status updates
         if (incoming?.id === row.id && row.status !== "ringing") {
           setIncoming(null)
         }
@@ -435,6 +515,12 @@ export function CallProvider({ userName, children }: { userName: string; childre
 
         const incoming = incomingRef.current
         if (incoming && incoming.id === sig.session_id && (sig.signal_type === "hangup" || sig.signal_type === "decline")) {
+          setIncoming(null)
+          return
+        }
+
+        // Another member answered a group call — stop ringing for others
+        if (incoming && incoming.id === sig.session_id && sig.signal_type === "answer" && incoming.isGroup) {
           setIncoming(null)
           return
         }

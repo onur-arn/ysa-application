@@ -4,6 +4,10 @@ const CONV_BASE =
   "id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin)"
 const CONV_WITH_UID =
   "id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin,user_id)"
+const CONV_WITH_AVATAR =
+  "id,type,name,initials,admin_name,avatar_url,created_at,conversation_members(member_name,is_admin)"
+const CONV_WITH_AVATAR_UID =
+  "id,type,name,initials,admin_name,avatar_url,created_at,conversation_members(member_name,is_admin,user_id)"
 
 const MSG_COLS_RICH =
   "id,conversation_id,sender_name,sender_initials,text,image_url,gif_url,message_type,is_system,created_at"
@@ -11,7 +15,7 @@ const MSG_COLS_MIN =
   "id,conversation_id,sender_name,sender_initials,text,image_url,is_system,created_at"
 
 function isSchemaError(message?: string) {
-  return !!message && /user_id|audio_url|gif_url|message_type|schema cache|42703|PGRST/i.test(message)
+  return !!message && /user_id|audio_url|gif_url|avatar_url|message_type|schema cache|42703|PGRST/i.test(message)
 }
 
 async function membershipIds(
@@ -98,7 +102,7 @@ export async function fetchUserConversationRows(
     let rows: Record<string, unknown>[] | null = null
     let lastErr: string | undefined
 
-    for (const select of [CONV_BASE, CONV_WITH_UID]) {
+    for (const select of [CONV_WITH_AVATAR_UID, CONV_WITH_AVATAR, CONV_WITH_UID, CONV_BASE]) {
       const res = await supabase.from("conversations").select(select).in("id", chunk)
       if (!res.error && res.data) {
         rows = res.data as Record<string, unknown>[]

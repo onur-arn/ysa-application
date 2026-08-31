@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Search, Check, Users, Loader2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { ArrowLeft, Search, Check, Users, Loader2, Camera } from "lucide-react"
 import { MEMBERS, getStation, type Member } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
 
@@ -33,7 +33,7 @@ export function CreateGroupScreen({
 }: {
   currentUserName: string
   onClose: () => void
-  onCreate: (name: string, memberNames: string[]) => void | Promise<void>
+  onCreate: (name: string, memberNames: string[], photo?: { base64: string; ext: string } | null) => void | Promise<void>
 }) {
   const [step, setStep] = useState<"members" | "name">("members")
   const [name, setName] = useState("")
@@ -41,6 +41,9 @@ export function CreateGroupScreen({
   const [selected, setSelected] = useState<string[]>([])
   const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
   const [saving, setSaving] = useState(false)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [photoPayload, setPhotoPayload] = useState<{ base64: string; ext: string } | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -79,10 +82,23 @@ export function CreateGroupScreen({
     if (!trimmed || selected.length === 0 || saving) return
     setSaving(true)
     try {
-      await onCreate(trimmed, selected)
+      await onCreate(trimmed, selected, photoPayload)
     } finally {
       setSaving(false)
     }
+  }
+
+  function onPickPhoto(file: File | null) {
+    if (!file || !file.type.startsWith("image/")) return
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase()
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result || "")
+      const base64 = result.includes(",") ? result.split(",")[1] : result
+      setPhotoPreview(result)
+      setPhotoPayload({ base64, ext })
+    }
+    reader.readAsDataURL(file)
   }
 
   return (
@@ -213,9 +229,29 @@ export function CreateGroupScreen({
       ) : (
         <div className="flex flex-1 flex-col px-5 pt-8">
           <div className="mb-8 flex flex-col items-center gap-4">
-            <span className="flex size-20 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <Users className="size-9" />
-            </span>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="relative flex size-24 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary active:opacity-80"
+            >
+              {photoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photoPreview} alt="" className="size-full object-cover" />
+              ) : (
+                <Users className="size-9" />
+              )}
+              <span className="absolute bottom-1 right-1 flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
+                <Camera className="size-3.5" />
+              </span>
+            </button>
+            <p className="text-xs text-muted-foreground">Grup fotoğrafı ekle (isteğe bağlı)</p>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
