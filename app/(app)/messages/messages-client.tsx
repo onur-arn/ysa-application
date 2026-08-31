@@ -696,38 +696,58 @@ export function MessagesClient({
   }
 
   async function addMembersToGroup(id: string, newNames: string[]) {
-    if (newNames.length === 0) return
-    const supabase = createClient()
-    const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", newNames)
-    const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
-    const ok = await insertConversationMembers(
-      supabase,
-      newNames.map((member_name) => ({
-        conversation_id: id,
-        member_name,
-        user_id: idByName.get(member_name),
-        is_admin: false,
-      })),
-    )
-    if (!ok) return
-    setCustomGroups((prev) =>
-      prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g)
-    )
-    const list = newNames.join(", ")
-    const text = newNames.length === 1
-      ? `${currentUser.name}, ${list} kişisini ekledi`
-      : `${currentUser.name}, ${list} kişilerini ekledi`
-    await insertSystemChat(id, text)
+    const names = [...new Set(newNames.map((n) => n.trim()).filter(Boolean))]
+    if (names.length === 0) return
+
+    try {
+      const res = await fetch("/api/group/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: id, action: "add", memberNames: names }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.error("[addMembers]", data.error)
+        window.alert("Üye eklenemedi. Lütfen tekrar deneyin.")
+        return
+      }
+
+      setCustomGroups((prev) =>
+        prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...names])] } : g),
+      )
+
+      const list = names.join(", ")
+      const text = names.length === 1
+        ? `${currentUser.name}, ${list} kişisini ekledi`
+        : `${currentUser.name}, ${list} kişilerini ekledi`
+      await insertSystemChat(id, text)
+    } catch (e) {
+      console.error("[addMembers]", e)
+      window.alert("Üye eklenemedi. Lütfen tekrar deneyin.")
+    }
   }
 
   async function removeMemberFromGroup(id: string, memberName: string) {
-    const supabase = createClient()
-    await supabase.from("conversation_members").delete()
-      .eq("conversation_id", id).eq("member_name", memberName)
-    await insertSystemChat(id, `${currentUser.name}, ${memberName} kişisini gruptan çıkardı`)
-    setCustomGroups((prev) =>
-      prev.map((g) => g.id === id ? { ...g, memberNames: g.memberNames.filter((n) => n !== memberName) } : g)
-    )
+    try {
+      const res = await fetch("/api/group/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: id, action: "remove", memberNames: [memberName] }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.error("[removeMember]", data.error)
+        window.alert("Üye çıkarılamadı.")
+        return
+      }
+      await insertSystemChat(id, `${currentUser.name}, ${memberName} kişisini gruptan çıkardı`)
+      setCustomGroups((prev) =>
+        prev.map((g) => g.id === id ? { ...g, memberNames: g.memberNames.filter((n) => n !== memberName) } : g),
+      )
+    } catch (e) {
+      console.error("[removeMember]", e)
+      window.alert("Üye çıkarılamadı.")
+    }
   }
 
   async function updateGroupAvatar(id: string, photo: { base64: string; ext: string }) {
@@ -1474,8 +1494,8 @@ function GroupSettingsPanel({
   title: string; initials: string; isAdmin: boolean; adminNames: string[]; currentUserName: string; memberNames: string[]
   avatarUrl?: string
   onClose: () => void
-  onAddMembers: (newNames: string[]) => void
-  onRemoveMember: (name: string) => void
+  onAddMembers: (newNames: string[]) => void | Promise<void>
+  onRemoveMember: (name: string) => void | Promise<void>
   onLeave: () => void
   onDeleteGroup: () => void
   onRename: (newName: string) => void
@@ -1815,7 +1835,10 @@ function GroupSettingsPanel({
           <AddMembersModal
             availableMembers={nonMembers}
             onClose={() => setAddOpen(false)}
-            onAdd={(newNames) => { onAddMembers(newNames); setAddOpen(false) }}
+            onAdd={async (newNames) => {
+              setAddOpen(false)
+              await onAddMembers(newNames)
+            }}
           />
         )}
       </AnimatePresence>
@@ -1829,10 +1852,11 @@ function AddMembersModal({
 }: {
   availableMembers: Member[]
   onClose: () => void
-  onAdd: (names: string[]) => void
+  onAdd: (names: string[]) => void | Promise<void>
 }) {
   const [search, setSearch]   = useState("")
   const [selected, setSelected] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
 
   const filtered = availableMembers
     .filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
@@ -1918,10 +1942,16 @@ function AddMembersModal({
 
         <div className="shrink-0 border-t border-border p-4">
           <button
-            onClick={() => selected.length > 0 && onAdd(selected)}
-            disabled={selected.length === 0}
-            className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40"
+            type="button"
+            disabled={selected.length === 0 || saving}
+            onClick={() => {
+              if (selected.length === 0 || saving) return
+              setSaving(true)
+              void Promise.resolve(onAdd(selected)).finally(() => setSaving(false))
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40"
           >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : null}
             {selected.length > 0 ? `Ekle (${selected.length})` : "Üye seç"}
           </button>
         </div>
