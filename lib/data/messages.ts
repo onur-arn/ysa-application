@@ -21,6 +21,8 @@ export type ChatMessage = {
   initials: string
   text: string
   time: string
+  /** ISO timestamp for day separators */
+  createdAt?: string
   self?: boolean
   image?: string
   gif?: string

@@ -42,22 +42,28 @@ function parsePoll(rawPoll: RawPoll): ChatPoll | undefined {
 }
 
 export function rowToChatMessage(m: RawMsg, senderName: string, poll?: ChatPoll): ChatMessage {
-  // Legacy fallback: audio stored in image_url when audio_url column was missing
+  const urlLooksAudio = (u?: string | null) =>
+    !!u && /\.(webm|m4a|ogg|mp3|wav|aac)(\?|$)/i.test(u)
+  const isAudio =
+    m.message_type === "audio" ||
+    !!m.audio_url ||
+    urlLooksAudio(m.image_url) ||
+    (m.text ?? "").startsWith("🎤")
   const audio =
     m.audio_url ??
-    (m.message_type === "audio" ? m.image_url : undefined) ??
-    undefined
+    (isAudio ? (m.image_url ?? undefined) : undefined)
   return {
     id: m.id,
     author: m.sender_name,
     initials: m.sender_initials,
-    text: m.text ?? "",
+    text: isAudio ? "" : (m.text ?? ""),
     time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
+    createdAt: m.created_at,
     self: m.sender_name === senderName,
-    image: m.message_type === "audio" ? undefined : (m.image_url ?? undefined),
+    image: isAudio ? undefined : (m.image_url ?? undefined),
     gif: m.gif_url ?? undefined,
     audio: audio ?? undefined,
-    messageType: (m.message_type as ChatMessage["messageType"]) ?? undefined,
+    messageType: isAudio ? "audio" : ((m.message_type as ChatMessage["messageType"]) ?? undefined),
     system: m.is_system,
     poll,
   }

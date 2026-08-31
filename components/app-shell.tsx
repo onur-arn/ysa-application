@@ -127,35 +127,52 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Unread badge — skip when already on messages (conversations-meta handles it there)
+  // Unread badge + desktop notification when away from messages
   useEffect(() => {
-    if (!userName || pathname.startsWith("/messages")) return
+    if (!userName) return
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      void Notification.requestPermission()
+    }
     const supabase = createClient()
     const channel = supabase
       .channel("shell-unread")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
-        const msg = payload.new as { sender_name?: string; text?: string }
+        const msg = payload.new as { sender_name?: string; text?: string; message_type?: string; conversation_id?: string }
         if (msg.sender_name === userName) return
-        setHasUnread(true)
+        if (!pathname.startsWith("/messages")) setHasUnread(true)
         try {
           const prefs = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
-          if (prefs.messages !== false && document.visibilityState === "hidden") {
+          if (prefs.messages === false) return
+          // Notify when tab hidden OR user is not inside that conversation
+          const onMessages = pathname.startsWith("/messages")
+          if (onMessages && document.visibilityState === "visible") return
+          const body = msg.message_type === "audio" || msg.text?.startsWith("🎤")
+            ? `${msg.sender_name}: 🎤 Sesli mesaj`
+            : msg.text
+              ? `${msg.sender_name}: ${msg.text}`
+              : `${msg.sender_name} bir mesaj gönderdi`
+          const show = () => {
+            if (typeof Notification === "undefined" || Notification.permission !== "granted") return
             navigator.serviceWorker?.ready.then((reg) => {
-              reg.showNotification("Yeni Mesaj", {
-                body: msg.text ? `${msg.sender_name}: ${msg.text}` : `${msg.sender_name} bir mesaj gönderdi`,
+              void reg.showNotification("Yeni Mesaj", {
+                body,
                 icon: "/icon.png",
                 badge: "/icon.png",
-                data: { url: "/messages" },
+                tag: msg.conversation_id ? `msg-${msg.conversation_id}` : "msg",
+                data: { url: msg.conversation_id ? `/messages?open=${msg.conversation_id}` : "/messages" },
               })
+            }).catch(() => {
+              new Notification("Yeni Mesaj", { body, icon: "/icon.png" })
             })
           }
+          show()
         } catch {}
       })
     void subscribeChannel(supabase, channel)
     return () => { supabase.removeChannel(channel) }
   }, [userName, pathname])
 
-  // Clear dot when user navigates to messages
+  // Clear nav dot when user navigates to messages
   useEffect(() => {
     if (pathname.startsWith("/messages")) setHasUnread(false)
   }, [pathname])

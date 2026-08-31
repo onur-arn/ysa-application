@@ -25,13 +25,13 @@ import { AttachMenu } from "@/components/messaging/attach-menu"
 import { ComposeScreen } from "@/components/messaging/compose-screen"
 import { CreateGroupScreen } from "@/components/messaging/create-group-screen"
 import { MemberProfileSheet } from "@/components/messaging/member-profile-sheet"
-import { uploadChatAudio } from "@/lib/chat-media"
 import { useCallOptional } from "@/lib/call/call-context"
 import { openDMViaApi } from "@/lib/dm"
 import { prefetchChatMessages } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
 import { insertConversationMembers } from "@/lib/queries/conversations"
 import { useChatMessages, broadcastChatMessage } from "@/lib/hooks/use-chat-messages"
+import { chatDayLabel, sameChatDay } from "@/lib/chat-day"
 
 const CUSTOM_COLOR = "262 83% 58%"
 
@@ -584,16 +584,6 @@ export function MessagesClient({
     await openConversation(conv.id)
   }
 
-  function updateCustomGroupMessages(id: string, messages: ChatMessage[]) {
-    setCustomGroups((prev) => {
-      const last = messages[messages.length - 1]
-      const idx = prev.findIndex((g) => g.id === id)
-      if (idx < 0) return prev
-      const updated = { ...prev[idx], messages, lastMessage: last?.text || prev[idx].lastMessage, lastTime: last?.time || prev[idx].lastTime }
-      return [updated, ...prev.filter((_, i) => i !== idx)]
-    })
-  }
-
   async function promoteToAdmin(id: string, memberName: string) {
     const supabase = createClient()
     await supabase.from("conversation_members")
@@ -749,12 +739,52 @@ export function MessagesClient({
     }
   }
 
+  function updateCustomGroupMessages(id: string, messages: ChatMessage[]) {
+    setCustomGroups((prev) => {
+      const last = messages[messages.length - 1]
+      const idx = prev.findIndex((g) => g.id === id)
+      if (idx < 0) return prev
+      const preview = last
+        ? messagePreview({
+            text: last.text,
+            messageType: last.messageType,
+            image: last.image,
+            gif: last.gif,
+            audio: last.audio,
+          })
+        : prev[idx].lastMessage
+      const updated = {
+        ...prev[idx],
+        messages,
+        lastMessage: preview || prev[idx].lastMessage,
+        lastTime: last?.time || prev[idx].lastTime,
+        lastAt: last?.createdAt || new Date().toISOString(),
+      }
+      return [updated, ...prev.filter((_, i) => i !== idx)]
+    })
+  }
+
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
     setCustomDMs((prev) => {
       const last = messages[messages.length - 1]
       const idx = prev.findIndex((d) => d.id === id)
       if (idx < 0) return prev
-      const updated = { ...prev[idx], messages, lastMessage: last?.text || prev[idx].lastMessage, lastTime: last?.time || prev[idx].lastTime }
+      const preview = last
+        ? messagePreview({
+            text: last.text,
+            messageType: last.messageType,
+            image: last.image,
+            gif: last.gif,
+            audio: last.audio,
+          })
+        : prev[idx].lastMessage
+      const updated = {
+        ...prev[idx],
+        messages,
+        lastMessage: preview || prev[idx].lastMessage,
+        lastTime: last?.time || prev[idx].lastTime,
+        lastAt: last?.createdAt || new Date().toISOString(),
+      }
       return [updated, ...prev.filter((_, i) => i !== idx)]
     })
   }
@@ -838,26 +868,65 @@ export function MessagesClient({
         const time   = new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
         const preview = messagePreview({
           text: m.text ?? "",
-          messageType: m.message_type as ChatMessage["messageType"],
+          messageType: (m.message_type as ChatMessage["messageType"])
+            ?? (m.audio_url ? "audio" : undefined),
           image: m.image_url ?? undefined,
           gif: m.gif_url ?? undefined,
           audio: m.audio_url ?? undefined,
         })
 
+        const bumpUnread = !isOpen && !isOwn
+
         setCustomGroups((prev) => {
           const idx = prev.findIndex((g) => g.id === m.conversation_id)
           if (idx < 0) return prev
-          const updated = { ...prev[idx], lastMessage: preview || prev[idx].lastMessage, lastTime: time,
-            unread: (!isOpen && !isOwn) ? prev[idx].unread + 1 : prev[idx].unread }
+          const updated = {
+            ...prev[idx],
+            lastMessage: preview || prev[idx].lastMessage,
+            lastTime: time,
+            lastAt: m.created_at,
+            unread: bumpUnread ? prev[idx].unread + 1 : prev[idx].unread,
+          }
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
         setCustomDMs((prev) => {
           const idx = prev.findIndex((d) => d.id === m.conversation_id)
           if (idx < 0) return prev
-          const updated = { ...prev[idx], lastMessage: preview || prev[idx].lastMessage, lastTime: time,
-            unread: (!isOpen && !isOwn) ? prev[idx].unread + 1 : prev[idx].unread }
+          const updated = {
+            ...prev[idx],
+            lastMessage: preview || prev[idx].lastMessage,
+            lastTime: time,
+            lastAt: m.created_at,
+            unread: bumpUnread ? prev[idx].unread + 1 : prev[idx].unread,
+          }
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
+
+        if (bumpUnread) {
+          try {
+            const prefs = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
+            if (prefs.messages === false) return
+            const title = "Yeni Mesaj"
+            const body = preview
+              ? `${m.sender_name}: ${preview}`
+              : `${m.sender_name} bir mesaj gönderdi`
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              navigator.serviceWorker?.ready.then((reg) => {
+                void reg.showNotification(title, {
+                  body,
+                  icon: "/icon.png",
+                  badge: "/icon.png",
+                  tag: `msg-${m.conversation_id}`,
+                  data: { url: `/messages?open=${m.conversation_id}` },
+                })
+              }).catch(() => {
+                new Notification(title, { body, icon: "/icon.png", tag: `msg-${m.conversation_id}` })
+              })
+            } else if (typeof Notification !== "undefined" && Notification.permission === "default") {
+              void Notification.requestPermission()
+            }
+          } catch { /* ignore */ }
+        }
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
         const p = payload.new as { name: string; photo_url: string | null }
@@ -1725,6 +1794,7 @@ function ChatView({
       return
     }
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    const createdAt = new Date().toISOString()
     const messageType = attached ? "image" : "text"
     const text = draft.trim()
     const image = attached ?? undefined
@@ -1736,6 +1806,7 @@ function ChatView({
       initials: senderInitials,
       text,
       time,
+      createdAt,
       self: true,
       image,
       messageType,
@@ -1769,6 +1840,7 @@ function ChatView({
         initials: senderInitials,
         text,
         time,
+        createdAt: (data.createdAt as string) || createdAt,
         self: true,
         image,
         messageType,
@@ -1872,50 +1944,83 @@ function ChatView({
 
   async function sendAudio(blob: Blob) {
     if (!conversationId || conversationId.startsWith("pending-")) return
+    if (!senderName.trim()) {
+      window.alert("Profil adınız eksik.")
+      return
+    }
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    const createdAt = new Date().toISOString()
+    const tempId = `temp-audio-${Date.now()}`
+    const localUrl = URL.createObjectURL(blob)
+
+    const optimistic: ChatMessage = {
+      id: tempId,
+      author: senderName,
+      initials: senderInitials,
+      text: "",
+      time,
+      createdAt,
+      self: true,
+      audio: localUrl,
+      messageType: "audio",
+    }
+    setMessages((prev) => [...prev, optimistic])
     setUploading(true)
+
     try {
-      const url = await uploadChatAudio(conversationId, blob)
-      if (!url) return
-      const supabase = createClient()
-      const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
-      const base = {
-        conversation_id: conversationId,
-        sender_name: senderName,
-        sender_initials: senderInitials,
-        message_type: "audio",
-      }
-      let inserted: { id: string } | null = null
-      const primary = await supabase.from("chat_messages").insert({
-        ...base,
-        audio_url: url,
-      }).select("id").single()
-      if (!primary.error && primary.data) {
-        inserted = primary.data
-      } else {
-        console.warn("[chat] audio_url insert failed, falling back:", primary.error?.message)
-        const fallback = await supabase.from("chat_messages").insert({
-          ...base,
-          image_url: url,
-          text: "🎤 Sesli mesaj",
-        }).select("id").single()
-        if (!fallback.error && fallback.data) inserted = fallback.data
-      }
-      if (!inserted) {
-        console.error("[chat] audio send failed")
+      const form = new FormData()
+      form.append("file", blob, `voice.${blob.type.includes("mp4") ? "m4a" : "webm"}`)
+      form.append("conversationId", conversationId)
+      const upRes = await fetch("/api/chat/upload-audio", { method: "POST", body: form })
+      const upData = await upRes.json().catch(() => ({}))
+      if (!upRes.ok || !upData.url) {
+        console.error("[chat] audio upload failed:", upData.error)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert("Ses yüklenemedi. Lütfen tekrar deneyin.")
         return
       }
+      const url = upData.url as string
+
+      const res = await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          audioUrl: url,
+          messageType: "audio",
+          text: "",
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.id) {
+        console.error("[chat] audio send failed:", data.error)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert("Sesli mesaj gönderilemedi.")
+        return
+      }
+
       const newMsg: ChatMessage = {
-        id: inserted.id,
+        id: data.id as string,
         author: senderName,
         initials: senderInitials,
         text: "",
         time,
+        createdAt: (data.createdAt as string) || createdAt,
         self: true,
         audio: url,
         messageType: "audio",
       }
-      setMessages((prev) => prev.some((m) => m.id === inserted!.id) ? prev : [...prev, newMsg])
+      setMessages((prev) => {
+        const updated = prev.map((m) => (m.id === tempId ? newMsg : m))
+        onMessagesChange?.(updated)
+        return updated
+      })
       void broadcastChatMessage(conversationId, newMsg)
+    } catch (e) {
+      console.error("[chat] audio:", e)
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      window.alert("Sesli mesaj gönderilemedi.")
+      URL.revokeObjectURL(localUrl)
     } finally {
       setUploading(false)
     }
@@ -2052,90 +2157,113 @@ function ChatView({
             <Loader2 className="size-6 animate-spin text-muted-foreground" />
           </div>
         )}
-        {messages.map((m) => {
+        {messages.map((m, idx) => {
+          const prev = messages[idx - 1]
+          const dayIso = m.createdAt
+          const showDay = !!dayIso && (!prev?.createdAt || !sameChatDay(prev.createdAt, dayIso))
+          const daySep = showDay ? (
+            <div key={`day-${m.id}`} className="flex justify-center py-3">
+              <span className="rounded-full bg-secondary/90 px-3 py-1 text-[11px] font-medium capitalize text-muted-foreground shadow-sm">
+                {chatDayLabel(dayIso)}
+              </span>
+            </div>
+          ) : null
+
           const callEvent = m.messageType === "call" ? parseCallEvent(m.text) : null
           if (callEvent) {
             return (
-              <div key={m.id} className={`flex ${m.self ? "justify-end" : "justify-start"} py-1`}>
-                <CallEventBubble
-                  event={callEvent}
-                  isSelf={!!m.self}
-                  time={m.time}
-                  onCallBack={
-                    isPrivate && conversationId && peerName && call
-                      ? () => call.startCall({ conversationId, peerName, callType: "audio" })
-                      : undefined
-                  }
-                />
-              </div>
-            )
-          }
-
-          if (m.system) {
-            return (
-              <div key={m.id} className="flex justify-center py-1">
-                <span className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
-                  {m.text}
-                </span>
-              </div>
-            )
-          }
-
-          if (m.poll) {
-            return (
-              <div key={m.id} className={`flex flex-col gap-1 ${m.self ? "items-end" : "items-start"}`}>
-                <div className="flex items-center gap-1.5 px-1">
-                  {!m.self && (() => {
-                    const photo = photoMap?.get(m.author)
-                    return photo
-                      ? <img src={photo} alt={m.initials} className="size-5 rounded-full object-cover" />
-                      : <span className="flex size-5 items-center justify-center rounded-full bg-secondary text-[9px] font-bold text-secondary-foreground">{m.initials}</span>
-                  })()}
-                  <span className="text-xs font-semibold text-foreground">{m.self ? "Sen" : m.author}</span>
-                  <span className="text-[10px] text-muted-foreground">{m.time}</span>
-                </div>
-                <div className="w-full max-w-[85%]">
-                  <ChatPollBlock
-                    poll={m.poll}
-                    voterName={senderName}
-                    onVote={(optId) => voteOnPoll(m.id, optId)}
+              <div key={m.id}>
+                {daySep}
+                <div className={`flex ${m.self ? "justify-end" : "justify-start"} py-1`}>
+                  <CallEventBubble
+                    event={callEvent}
+                    isSelf={!!m.self}
+                    time={m.time}
+                    onCallBack={
+                      isPrivate && conversationId && peerName && call
+                        ? () => call.startCall({ conversationId, peerName, callType: "audio" })
+                        : undefined
+                    }
                   />
                 </div>
               </div>
             )
           }
 
-          return (
-            <div key={m.id} className={`flex ${m.self ? "justify-end" : "justify-start"}`}>
-              <div className={`flex max-w-[78%] gap-2 ${m.self ? "flex-row-reverse" : ""}`}>
-                {!m.self && (() => {
-                  const photo = photoMap?.get(m.author)
-                  return photo
-                    ? <img src={photo} alt={m.initials} className="mt-auto size-7 shrink-0 rounded-full object-cover" />
-                    : <span className="mt-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{m.initials}</span>
-                })()}
-                <div
-                  className={`rounded-2xl px-3.5 py-2 ${
-                    m.self
-                      ? "rounded-br-[5px] bg-primary text-primary-foreground"
-                      : "rounded-bl-[5px] bg-card text-foreground shadow-sm"
-                  }`}
-                >
-                  {m.image && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={m.image} alt="" className="mb-1 max-h-48 rounded-lg" />
-                  )}
-                  {m.gif && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={m.gif} alt="" className="mb-1 max-h-48 rounded-lg" />
-                  )}
-                  {m.audio && <AudioMessage src={m.audio} self={m.self} />}
-                  {m.text && <p className="text-[15px] leading-relaxed">{m.text}</p>}
-                  <span
-                    className={`mt-0.5 block text-right text-[10px] ${m.self ? "text-primary-foreground/70" : "text-muted-foreground"}`}
-                  >
-                    {m.time}
+          if (m.system) {
+            return (
+              <div key={m.id}>
+                {daySep}
+                <div className="flex justify-center py-1">
+                  <span className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                    {m.text}
                   </span>
+                </div>
+              </div>
+            )
+          }
+
+          if (m.poll) {
+            return (
+              <div key={m.id}>
+                {daySep}
+                <div className={`flex flex-col gap-1 ${m.self ? "items-end" : "items-start"}`}>
+                  <div className="flex items-center gap-1.5 px-1">
+                    {!m.self && (() => {
+                      const photo = photoMap?.get(m.author)
+                      return photo
+                        ? <img src={photo} alt={m.initials} className="size-5 rounded-full object-cover" />
+                        : <span className="flex size-5 items-center justify-center rounded-full bg-secondary text-[9px] font-bold text-secondary-foreground">{m.initials}</span>
+                    })()}
+                    <span className="text-xs font-semibold text-foreground">{m.self ? "Sen" : m.author}</span>
+                    <span className="text-[10px] text-muted-foreground">{m.time}</span>
+                  </div>
+                  <div className="w-full max-w-[85%]">
+                    <ChatPollBlock
+                      poll={m.poll}
+                      voterName={senderName}
+                      onVote={(optId) => voteOnPoll(m.id, optId)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          return (
+            <div key={m.id}>
+              {daySep}
+              <div className={`flex ${m.self ? "justify-end" : "justify-start"}`}>
+                <div className={`flex max-w-[78%] gap-2 ${m.self ? "flex-row-reverse" : ""}`}>
+                  {!m.self && (() => {
+                    const photo = photoMap?.get(m.author)
+                    return photo
+                      ? <img src={photo} alt={m.initials} className="mt-auto size-7 shrink-0 rounded-full object-cover" />
+                      : <span className="mt-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{m.initials}</span>
+                  })()}
+                  <div
+                    className={`rounded-2xl px-3.5 py-2 ${
+                      m.self
+                        ? "rounded-br-[5px] bg-primary text-primary-foreground"
+                        : "rounded-bl-[5px] bg-card text-foreground shadow-sm"
+                    }`}
+                  >
+                    {m.image && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.image} alt="" className="mb-1 max-h-48 rounded-lg" />
+                    )}
+                    {m.gif && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.gif} alt="" className="mb-1 max-h-48 rounded-lg" />
+                    )}
+                    {m.audio && <AudioMessage src={m.audio} self={m.self} />}
+                    {m.text && !m.audio && <p className="text-[15px] leading-relaxed">{m.text}</p>}
+                    <span
+                      className={`mt-0.5 block text-right text-[10px] ${m.self ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+                    >
+                      {m.time}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
