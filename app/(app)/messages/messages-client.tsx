@@ -30,7 +30,7 @@ import { useCallOptional } from "@/lib/call/call-context"
 import { openDMViaApi } from "@/lib/dm"
 import { prefetchChatMessages } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
-import { fetchUserConversationRows, syncConversationMembership, insertConversationMembers } from "@/lib/queries/conversations"
+import { insertConversationMembers } from "@/lib/queries/conversations"
 import { useChatMessages, broadcastChatMessage } from "@/lib/hooks/use-chat-messages"
 
 const CUSTOM_COLOR = "262 83% 58%"
@@ -330,21 +330,42 @@ export function MessagesClient({
     userNameRef.current = currentUser.name || initialProfile?.name || ""
   }, [currentUser.name, initialProfile?.name])
 
-  // Reload conversations from DB (fixes empty list after refresh)
+  // If SSR brought conversations but RQ cache still has [] from a prior failed fetch, restore it
+  useEffect(() => {
+    if (!initialUserId || initialConversations.length === 0) return
+    queryClient.setQueryData(
+      messageKeys.conversations(initialUserId),
+      (old: Record<string, unknown>[] | undefined) =>
+        old && old.length > 0 ? old : initialConversations,
+    )
+  }, [initialUserId, initialConversations, queryClient])
+
+  // Reload conversations from DB via reliable API (never cache an empty wipe over real data)
   const { data: liveConversations } = useQuery({
     queryKey: messageKeys.conversations(initialUserId),
-    queryFn: async () => {
-      const supabase = createClient()
-      const name = userNameRef.current || initialProfile?.name || ""
-      if (initialUserId) await syncConversationMembership(supabase, initialUserId, name)
-      return fetchUserConversationRows(supabase, initialUserId, name)
+    queryFn: async (): Promise<Record<string, unknown>[]> => {
+      const res = await fetch("/api/conversations/list", { cache: "no-store" })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error((body as { error?: string }).error || `HTTP ${res.status}`)
+      }
+      const rows = ((body as { conversations?: Record<string, unknown>[] }).conversations) ?? []
+      // Guard: don't publish [] over a non-empty cache if the API glitched
+      if (rows.length === 0) {
+        const prev = queryClient.getQueryData<Record<string, unknown>[]>(
+          messageKeys.conversations(initialUserId),
+        )
+        if (prev && prev.length > 0) return prev
+      }
+      return rows
     },
     enabled: !!initialUserId,
-    initialData: initialConversations,
-    staleTime: 10_000,
+    initialData: initialConversations.length > 0 ? initialConversations : undefined,
+    staleTime: 15_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
-    refetchInterval: 8_000,
+    refetchInterval: 12_000,
+    retry: 2,
   })
 
   useEffect(() => {
@@ -364,21 +385,24 @@ export function MessagesClient({
     setCustomDMs((prev) => {
       const unread = new Map(prev.map((d) => [d.id, d.unread]))
       const messages = new Map(prev.map((d) => [d.id, d.messages]))
-      const fromLive = dms
-        .filter((d) => !hidden.has(d.id))
-        .map((d) => ({
-          ...d,
-          unread: unread.get(d.id) ?? d.unread,
-          messages: messages.get(d.id)?.length ? messages.get(d.id)! : d.messages,
-        }))
+      // If soft-hide would wipe the whole inbox, ignore it (corrupt localStorage)
+      const notHidden = dms.filter((d) => !hidden.has(d.id))
+      const base = notHidden.length > 0 || dms.length === 0 ? notHidden : dms
+      if (notHidden.length === 0 && dms.length > 0) {
+        try { localStorage.removeItem(HIDDEN_CONVS_KEY) } catch { /* ignore */ }
+      }
+      const fromLive = base.map((d) => ({
+        ...d,
+        unread: unread.get(d.id) ?? d.unread,
+        messages: messages.get(d.id)?.length ? messages.get(d.id)! : d.messages,
+      }))
       const liveIds = new Set(fromLive.map((d) => d.id))
       const livePeers = new Set(
         fromLive.map((d) => (d.peerUserId || d.name).trim().toLowerCase()).filter(Boolean),
       )
-      // Keep local DMs not yet visible in live refetch (and never drop the open thread)
       const openIdNow = openIdRef.current
       const pendingLocal = prev.filter((d) => {
-        if (hidden.has(d.id) || liveIds.has(d.id)) return false
+        if (liveIds.has(d.id)) return false
         if (d.id === openIdNow) return true
         const key = (d.peerUserId || d.name).trim().toLowerCase()
         return !key || !livePeers.has(key)
@@ -1891,6 +1915,7 @@ function ChatView({
         messageType: "audio",
       }
       setMessages((prev) => prev.some((m) => m.id === inserted!.id) ? prev : [...prev, newMsg])
+      void broadcastChatMessage(conversationId, newMsg)
     } finally {
       setUploading(false)
     }

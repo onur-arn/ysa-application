@@ -1,8 +1,10 @@
-
 import { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchUserConversationRows } from "@/lib/queries/conversations"
 import { MessagesClient } from "./messages-client"
+
+export const dynamic = "force-dynamic"
 
 export default async function MessagesPage() {
   const supabase = await createClient()
@@ -18,8 +20,19 @@ export default async function MessagesPage() {
   const userName = (profileRes.data?.name as string) ?? ""
 
   let convRows: Record<string, unknown>[] = []
-  if (user?.id) {
-    convRows = await fetchUserConversationRows(supabase, user.id, userName)
+  if (user?.id && userName.trim()) {
+    try {
+      // Service role: avoids RLS / schema quirks that emptied the inbox on remount
+      const admin = createAdminClient()
+      convRows = await fetchUserConversationRows(admin, user.id, userName)
+    } catch (e) {
+      console.error("[messages/page] load:", e)
+      try {
+        convRows = await fetchUserConversationRows(supabase, user.id, userName)
+      } catch (e2) {
+        console.error("[messages/page] fallback:", e2)
+      }
+    }
   }
 
   return (
