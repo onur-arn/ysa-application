@@ -168,7 +168,9 @@ export function useVoiceRecorder() {
       if (timerRef.current) clearInterval(timerRef.current)
       recorder.onstop = () => {
         recorder.stream.getTracks().forEach((t) => t.stop())
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
+        // Strip ";codecs=…" — Supabase Storage rejects that Content-Type (415)
+        const cleanType = (recorder.mimeType || "audio/webm").split(";")[0].trim() || "audio/webm"
+        const blob = new Blob(chunksRef.current, { type: cleanType })
         mediaRef.current = null
         setRecording(false)
         setSeconds(0)

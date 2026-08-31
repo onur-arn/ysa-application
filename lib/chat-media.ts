@@ -4,8 +4,9 @@ export async function uploadChatAudio(conversationId: string, blob: Blob): Promi
   const supabase = createClient()
   const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm"
   const path = `chat/${conversationId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+  const contentType = (blob.type || "audio/webm").split(";")[0].trim() || "audio/webm"
   const { error } = await supabase.storage.from("chat-audio").upload(path, blob, {
-    contentType: blob.type || "audio/webm",
+    contentType,
     upsert: true,
   })
   if (error) {

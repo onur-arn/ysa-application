@@ -926,7 +926,7 @@ export function PostsFeed({
       imageUrl,
       poll: pollWithIds,
       createdAt: new Date().toISOString(),
-      createdBy: userId,
+      createdBy: me.id,
       likedBy: [],
       comments: [],
     }
@@ -942,7 +942,7 @@ export function PostsFeed({
         station: me.station || "intl",
         content,
         image_url: imageUrl ?? null,
-        created_by: userId || null,
+        created_by: me.id || null,
       })
       if (error) {
         console.error("[addPost] insert:", error.message)

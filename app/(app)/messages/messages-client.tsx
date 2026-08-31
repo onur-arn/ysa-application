@@ -1969,12 +1969,15 @@ function ChatView({
 
     try {
       const form = new FormData()
-      form.append("file", blob, `voice.${blob.type.includes("mp4") ? "m4a" : "webm"}`)
+      const cleanType = (blob.type || "audio/webm").split(";")[0].trim() || "audio/webm"
+      const ext = cleanType.includes("mp4") ? "m4a" : cleanType.includes("ogg") ? "ogg" : "webm"
+      const file = new File([blob], `voice.${ext}`, { type: cleanType })
+      form.append("file", file)
       form.append("conversationId", conversationId)
       const upRes = await fetch("/api/chat/upload-audio", { method: "POST", body: form })
       const upData = await upRes.json().catch(() => ({}))
       if (!upRes.ok || !upData.url) {
-        console.error("[chat] audio upload failed:", upData.error)
+        console.error("[chat] audio upload failed:", upData.error || upData.detail)
         setMessages((prev) => prev.filter((m) => m.id !== tempId))
         window.alert("Ses yüklenemedi. Lütfen tekrar deneyin.")
         return
@@ -2162,7 +2165,7 @@ function ChatView({
           const dayIso = m.createdAt
           const showDay = !!dayIso && (!prev?.createdAt || !sameChatDay(prev.createdAt, dayIso))
           const daySep = showDay ? (
-            <div key={`day-${m.id}`} className="flex justify-center py-3">
+            <div className="flex justify-center py-3">
               <span className="rounded-full bg-secondary/90 px-3 py-1 text-[11px] font-medium capitalize text-muted-foreground shadow-sm">
                 {chatDayLabel(dayIso)}
               </span>
