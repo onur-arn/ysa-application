@@ -15,6 +15,7 @@ export function GifPicker({ open, onClose, onSelect }: {
   const [gifs, setGifs] = useState<GifItem[]>([])
   const [loading, setLoading] = useState(false)
   const [hint, setHint] = useState<string | null>(null)
+  const [provider, setProvider] = useState<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -31,8 +32,9 @@ export function GifPicker({ open, onClose, onSelect }: {
       .then((r) => r.json())
       .then((d) => {
         setGifs(d.gifs ?? [])
+        setProvider(d.provider ?? null)
         if (d.hint) setHint(d.hint)
-        else if (d.fallback) setHint("GIF limités — ajoutez TENOR_API_KEY pour plus de choix")
+        else if (d.fallback) setHint("GIF limités — ajoutez GIPHY_API_KEY sur Vercel")
       })
       .catch((err) => {
         if (err.name !== "AbortError") setGifs([])
@@ -48,6 +50,7 @@ export function GifPicker({ open, onClose, onSelect }: {
       setSearchQuery("")
       setGifs([])
       setHint(null)
+      setProvider(null)
     }
   }, [open])
 
@@ -107,6 +110,11 @@ export function GifPicker({ open, onClose, onSelect }: {
             </div>
           )}
         </div>
+        {provider === "giphy" && (
+          <p className="border-t border-border py-2 text-center text-[10px] font-medium tracking-wide text-muted-foreground">
+            Powered by GIPHY
+          </p>
+        )}
       </div>
     </div>
   )
