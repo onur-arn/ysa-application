@@ -3,11 +3,11 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { useQueryClient, useQuery } from "@tanstack/react-query"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion"
 import {
   Search, Send, ArrowLeft, Check, Plus,
   Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
-  Phone, Mic,
+  Phone, Mic, Mail,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption, messagePreview } from "@/lib/data/messages"
@@ -206,6 +206,7 @@ export function MessagesClient({
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [profileMember, setProfileMember] = useState<Member | null>(null)
   const [profileDirectory, setProfileDirectory] = useState<Member[]>([])
+  const [forcedUnread, setForcedUnread] = useState<Record<string, number>>({})
 
   // Hide app header + bottom nav in chat / compose / group create / profile
   const urlOpen = searchParams.get("open")
@@ -754,11 +755,28 @@ export function MessagesClient({
       void ensureConversationInState(id)
     }
     router.replace(`${pathname}?open=${id}`, { scroll: false })
+    setForcedUnread((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
     setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: 0 } : d))
     try {
       const lastRead = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
       lastRead[id] = new Date().toISOString()
+      localStorage.setItem("ys-last-read", JSON.stringify(lastRead))
+    } catch {}
+  }
+
+  function markUnread(id: string) {
+    setForcedUnread((prev) => ({ ...prev, [id]: 1 }))
+    setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: Math.max(1, g.unread) } : g))
+    setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: Math.max(1, d.unread) } : d))
+    try {
+      const lastRead = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
+      lastRead[id] = "1970-01-01T00:00:00.000Z"
       localStorage.setItem("ys-last-read", JSON.stringify(lastRead))
     } catch {}
   }
@@ -1022,12 +1040,13 @@ export function MessagesClient({
                 key={g.id}
                 onClick={() => openConversation(g.id)}
                 onPrefetch={() => prefetchThread(g.id)}
+                onMarkUnread={() => markUnread(g.id)}
                 initials={g.initials}
                 color={CUSTOM_COLOR}
                 title={g.name}
                 last={g.lastMessage}
                 time={g.lastTime}
-                unread={g.unread}
+                unread={forcedUnread[g.id] ?? g.unread}
                 isCustomGroup
               />
             )
@@ -1039,12 +1058,13 @@ export function MessagesClient({
                 key={g.id}
                 onClick={() => openConversation(g.id)}
                 onPrefetch={() => prefetchThread(g.id)}
+                onMarkUnread={() => markUnread(g.id)}
                 initials={getStation(g.id).short}
                 color={getStation(g.id).color}
                 title={g.title}
                 last={g.lastMessage}
                 time={g.lastTime}
-                unread={g.unread}
+                unread={forcedUnread[g.id] ?? g.unread}
               />
             )
           }
@@ -1057,15 +1077,16 @@ export function MessagesClient({
               onPrefetch={() => prefetchThread(d.id)}
               onDelete={isPersisted ? () => {
                 if (window.confirm("Bu sohbeti listenizden silmek istiyor musunuz? (Karşı taraf için kalır)")) {
-                  hideConversation(d.id)
+                  void hideConversation(d.id)
                 }
               } : undefined}
+              onMarkUnread={() => markUnread(d.id)}
               initials={d.initials}
               color={d.color}
               title={d.name}
               last={d.lastMessage}
               time={d.lastTime}
-              unread={d.unread}
+              unread={forcedUnread[d.id] ?? d.unread}
               online={activeUsers.has(d.name)}
               isPrivate
               photoUrl={photoMap.get(d.name)}
@@ -1122,65 +1143,109 @@ export function MessagesClient({
 }
 
 // ── Conversation row ──────────────────────────────────────────────────────────
+const SWIPE_ACTION = 88
+
 function ConversationRow({
-  onClick, onPrefetch, initials, color, title, last, time, unread, online, isPrivate, isCustomGroup, photoUrl, onDelete, hideTime,
+  onClick, onPrefetch, initials, color, title, last, time, unread, online, isPrivate, isCustomGroup, photoUrl, onDelete, onMarkUnread, hideTime,
 }: {
   onClick: () => void; onPrefetch?: () => void; initials: string; color: string; title: string
   last: string; time: string; unread: number; online?: boolean
   isPrivate?: boolean; isCustomGroup?: boolean; photoUrl?: string
-  onDelete?: () => void; hideTime?: boolean
+  onDelete?: () => void; onMarkUnread?: () => void; hideTime?: boolean
 }) {
+  const x = useMotionValue(0)
+  const dragged = useRef(false)
+
+  function snapBack() {
+    void animate(x, 0, { type: "spring", stiffness: 420, damping: 36 })
+  }
+
   return (
-    <div className="flex items-center">
-      <button
-        onClick={onClick}
-        onPointerDown={() => onPrefetch?.()}
-        onTouchStart={() => onPrefetch?.()}
-        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-secondary"
-      >
-        <div className="relative shrink-0">
-          {photoUrl && !isCustomGroup ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl} alt={initials} className="size-14 rounded-full object-cover" />
-          ) : (
-            <span
-              className="flex size-14 items-center justify-center rounded-full text-sm font-bold text-white"
-              style={{ backgroundColor: `hsl(${color})` }}
-            >
-              {isCustomGroup ? <Users className="size-6" /> : initials}
-            </span>
-          )}
-          {online && (
-            <span className="absolute bottom-0 right-0 size-3.5 rounded-full border-2 border-background bg-emerald-500" />
-          )}
+    <div className="relative overflow-hidden">
+      {onDelete && (
+        <div className="absolute inset-y-0 left-0 flex w-[88px] flex-col items-center justify-center gap-1 bg-destructive text-destructive-foreground">
+          <Trash2 className="size-5" />
+          <span className="text-[10px] font-semibold">Sil</span>
         </div>
-        <div className="min-w-0 flex-1 border-b border-border/50 py-2.5">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className={`truncate text-[15px] text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
-            {!hideTime && time && (
-              <span className={`shrink-0 text-[11px] ${unread > 0 ? "font-semibold text-primary" : "text-muted-foreground"}`}>{time}</span>
-            )}
-          </div>
-          <div className="mt-0.5 flex items-center gap-2">
-            <p className={`min-w-0 flex-1 truncate text-[13px] ${unread > 0 ? "font-medium text-foreground" : "text-muted-foreground"}`}>
-              {isCustomGroup ? `👥 ${last || "Grup"}` : last || (isPrivate ? "Yeni sohbet" : "")}
-            </p>
-            {unread > 0 && (
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-                {unread}
+      )}
+      {onMarkUnread && (
+        <div className="absolute inset-y-0 right-0 flex w-[88px] flex-col items-center justify-center gap-1 bg-sky-500 text-white">
+          <Mail className="size-5" />
+          <span className="text-[10px] font-semibold">Okunmadı</span>
+        </div>
+      )}
+      <motion.div
+        drag="x"
+        dragDirectionLock
+        dragConstraints={{
+          left: onMarkUnread ? -SWIPE_ACTION : 0,
+          right: onDelete ? SWIPE_ACTION : 0,
+        }}
+        dragElastic={0.12}
+        style={{ x }}
+        onDragStart={() => { dragged.current = true }}
+        onDragEnd={(_, info) => {
+          const ox = info.offset.x
+          const vx = info.velocity.x
+          if (onDelete && (ox > SWIPE_ACTION * 0.55 || vx > 550)) {
+            x.set(0)
+            onDelete()
+          } else if (onMarkUnread && (ox < -SWIPE_ACTION * 0.55 || vx < -550)) {
+            x.set(0)
+            onMarkUnread()
+          } else {
+            snapBack()
+          }
+          window.setTimeout(() => { dragged.current = false }, 80)
+        }}
+        className="relative z-10 bg-background"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (dragged.current) return
+            onClick()
+          }}
+          onPointerDown={() => onPrefetch?.()}
+          onTouchStart={() => onPrefetch?.()}
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-secondary"
+        >
+          <div className="relative shrink-0">
+            {photoUrl && !isCustomGroup ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={photoUrl} alt={initials} className="size-14 rounded-full object-cover" />
+            ) : (
+              <span
+                className="flex size-14 items-center justify-center rounded-full text-sm font-bold text-white"
+                style={{ backgroundColor: `hsl(${color})` }}
+              >
+                {isCustomGroup ? <Users className="size-6" /> : initials}
               </span>
             )}
+            {online && (
+              <span className="absolute bottom-0 right-0 size-3.5 rounded-full border-2 border-background bg-emerald-500" />
+            )}
           </div>
-        </div>
-      </button>
-      {onDelete && (
-        <button
-          onClick={onDelete}
-          className="flex shrink-0 items-center justify-center px-3 py-4 text-muted-foreground transition-colors active:text-destructive"
-        >
-          <Trash2 className="size-4" />
+          <div className="min-w-0 flex-1 border-b border-border/50 py-2.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className={`truncate text-[15px] text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
+              {!hideTime && time && (
+                <span className={`shrink-0 text-[11px] ${unread > 0 ? "font-semibold text-primary" : "text-muted-foreground"}`}>{time}</span>
+              )}
+            </div>
+            <div className="mt-0.5 flex items-center gap-2">
+              <p className={`min-w-0 flex-1 truncate text-[13px] ${unread > 0 ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+                {isCustomGroup ? `👥 ${last || "Grup"}` : last || (isPrivate ? "Yeni sohbet" : "")}
+              </p>
+              {unread > 0 && (
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {unread}
+                </span>
+              )}
+            </div>
+          </div>
         </button>
-      )}
+      </motion.div>
     </div>
   )
 }
