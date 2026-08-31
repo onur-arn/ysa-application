@@ -36,13 +36,19 @@ export default async function MessagesPage() {
     }
 
     if (convIds.length > 0) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("conversations")
         .select("id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin),chat_messages(id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at)")
         .in("id", convIds)
-        .order("created_at", { foreignTable: "chat_messages", ascending: false })
-        .limit(1, { foreignTable: "chat_messages" })
-      convRows = (data ?? []) as Record<string, unknown>[]
+
+      if (!error && data) {
+        // Keep only the latest message per conversation for the list preview
+        convRows = data.map((conv) => {
+          const msgs = (conv.chat_messages as { created_at: string }[]) ?? []
+          const sorted = [...msgs].sort((a, b) => b.created_at.localeCompare(a.created_at))
+          return { ...conv, chat_messages: sorted.slice(0, 1) }
+        }) as Record<string, unknown>[]
+      }
     }
   }
 

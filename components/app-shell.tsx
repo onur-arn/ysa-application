@@ -9,6 +9,7 @@ import { useMidnightLogout } from "@/lib/use-midnight-logout"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
 import { PresenceProvider } from "@/lib/presence"
 import { CallProvider } from "@/lib/call/call-context"
+import { registerSW } from "@/lib/push"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 
 const PAGE_TITLES: { path: string; label: string }[] = [
