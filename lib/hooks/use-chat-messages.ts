@@ -20,6 +20,7 @@ export function useChatMessages(
     queryFn: () => fetchChatMessages(conversationId!, senderName),
     enabled: !!conversationId && !conversationId.startsWith("pending-"),
     staleTime: 30_000,
+    retry: 1,
     initialData: initialMessages.length > 0 ? initialMessages : undefined,
     initialDataUpdatedAt: initialMessages.length > 0 ? Date.now() - 15_000 : undefined,
   })

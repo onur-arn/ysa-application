@@ -170,7 +170,7 @@ function mapConversations(
   return { groups, dms: dedupeDmsByPeer(dms) }
 }
 
-/** One DM per peer — keep the most recently active conversation. */
+/** One DM per peer — keep the most recently active conversation (messages win over empty). */
 function dedupeDmsByPeer(dms: CustomDM[]): CustomDM[] {
   const byKey = new Map<string, CustomDM>()
   for (const d of dms) {
@@ -179,6 +179,12 @@ function dedupeDmsByPeer(dms: CustomDM[]): CustomDM[] {
     const prev = byKey.get(key)
     if (!prev) {
       byKey.set(key, d)
+      continue
+    }
+    const dHasMsg = !!(d.lastMessage && d.lastAt)
+    const prevHasMsg = !!(prev.lastMessage && prev.lastAt)
+    if (dHasMsg !== prevHasMsg) {
+      byKey.set(key, dHasMsg ? d : prev)
       continue
     }
     const newer = (d.lastAt || "") >= (prev.lastAt || "")
@@ -1693,6 +1699,7 @@ function ChatView({
 
   async function send() {
     if (!draft.trim() && !attached) return
+    if (conversationId?.startsWith("pending-")) return
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
     const messageType = attached ? "image" : "text"
     const text = draft.trim()
@@ -1723,7 +1730,7 @@ function ChatView({
       text: text || null,
       image_url: image ?? null,
       message_type: messageType,
-    }).select().single()
+    }).select("id").single()
 
     if (error || !inserted) {
       console.error("[chat] send failed:", error?.message)
@@ -1753,7 +1760,7 @@ function ChatView({
   }
 
   async function sendGif(rawUrl: string) {
-    if (!conversationId || !rawUrl) return
+    if (!conversationId || conversationId.startsWith("pending-") || !rawUrl) return
     const url = rawUrl.startsWith("//") ? `https:${rawUrl}` : rawUrl
     setShowGifPicker(false)
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
@@ -1823,33 +1830,50 @@ function ChatView({
   }
 
   async function sendAudio(blob: Blob) {
-    if (!conversationId) return
+    if (!conversationId || conversationId.startsWith("pending-")) return
     setUploading(true)
     try {
       const url = await uploadChatAudio(conversationId, blob)
       if (!url) return
       const supabase = createClient()
       const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
-      const { data: inserted } = await supabase.from("chat_messages").insert({
+      const base = {
         conversation_id: conversationId,
         sender_name: senderName,
         sender_initials: senderInitials,
-        audio_url: url,
         message_type: "audio",
-      }).select().single()
-      if (inserted) {
-        const newMsg: ChatMessage = {
-          id: inserted.id,
-          author: senderName,
-          initials: senderInitials,
-          text: "",
-          time,
-          self: true,
-          audio: url,
-          messageType: "audio",
-        }
-        setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
       }
+      let inserted: { id: string } | null = null
+      const primary = await supabase.from("chat_messages").insert({
+        ...base,
+        audio_url: url,
+      }).select("id").single()
+      if (!primary.error && primary.data) {
+        inserted = primary.data
+      } else {
+        console.warn("[chat] audio_url insert failed, falling back:", primary.error?.message)
+        const fallback = await supabase.from("chat_messages").insert({
+          ...base,
+          image_url: url,
+          text: "🎤 Sesli mesaj",
+        }).select("id").single()
+        if (!fallback.error && fallback.data) inserted = fallback.data
+      }
+      if (!inserted) {
+        console.error("[chat] audio send failed")
+        return
+      }
+      const newMsg: ChatMessage = {
+        id: inserted.id,
+        author: senderName,
+        initials: senderInitials,
+        text: "",
+        time,
+        self: true,
+        audio: url,
+        messageType: "audio",
+      }
+      setMessages((prev) => prev.some((m) => m.id === inserted!.id) ? prev : [...prev, newMsg])
     } finally {
       setUploading(false)
     }

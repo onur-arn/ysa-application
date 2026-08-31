@@ -129,11 +129,17 @@ export async function findOrCreateDM(
     }
   }
 
-  // Final race check: if duplicates appeared, keep oldest and drop this one
+  // Final race check: if duplicates appeared, keep oldest and drop this one — but only if empty
   const afterIds = [...new Set([...myConvIds, conv.id as string])]
   const winner = await findExistingSharedDmId(supabase, afterIds, target.id, themName)
   if (winner && winner !== conv.id) {
-    await supabase.from("conversations").delete().eq("id", conv.id)
+    const { count } = await supabase
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", conv.id)
+    if (!count) {
+      await supabase.from("conversations").delete().eq("id", conv.id)
+    }
     return winner
   }
 

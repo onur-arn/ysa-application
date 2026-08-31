@@ -19,6 +19,13 @@ type RawMsg = {
   created_at: string
 }
 
+const SELECT_FULL =
+  "id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))"
+const SELECT_NO_AUDIO =
+  "id,sender_name,sender_initials,text,image_url,gif_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))"
+const SELECT_MIN =
+  "id,sender_name,sender_initials,text,image_url,is_system,created_at"
+
 function parsePoll(rawPoll: RawPoll): ChatPoll | undefined {
   if (!rawPoll) return undefined
   return {
@@ -35,6 +42,11 @@ function parsePoll(rawPoll: RawPoll): ChatPoll | undefined {
 }
 
 export function rowToChatMessage(m: RawMsg, senderName: string, poll?: ChatPoll): ChatMessage {
+  // Legacy fallback: audio stored in image_url when audio_url column was missing
+  const audio =
+    m.audio_url ??
+    (m.message_type === "audio" ? m.image_url : undefined) ??
+    undefined
   return {
     id: m.id,
     author: m.sender_name,
@@ -42,9 +54,9 @@ export function rowToChatMessage(m: RawMsg, senderName: string, poll?: ChatPoll)
     text: m.text ?? "",
     time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
     self: m.sender_name === senderName,
-    image: m.image_url ?? undefined,
+    image: m.message_type === "audio" ? undefined : (m.image_url ?? undefined),
     gif: m.gif_url ?? undefined,
-    audio: m.audio_url ?? undefined,
+    audio: audio ?? undefined,
     messageType: (m.message_type as ChatMessage["messageType"]) ?? undefined,
     system: m.is_system,
     poll,
@@ -53,17 +65,38 @@ export function rowToChatMessage(m: RawMsg, senderName: string, poll?: ChatPoll)
 
 export async function fetchChatMessages(conversationId: string, senderName: string): Promise<ChatMessage[]> {
   const supabase = createClient()
-  const { data } = await supabase
-    .from("chat_messages")
-    .select("id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: false })
-    .limit(80)
 
-  if (!data) return []
+  let data: Record<string, unknown>[] | null = null
+  let errorMessage: string | undefined
+
+  for (const select of [SELECT_FULL, SELECT_NO_AUDIO, SELECT_MIN]) {
+    const res = await supabase
+      .from("chat_messages")
+      .select(select)
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: false })
+      .limit(80)
+
+    if (!res.error && res.data) {
+      data = res.data as Record<string, unknown>[]
+      break
+    }
+    errorMessage = res.error?.message
+    // Missing column / schema cache — try a leaner select
+    if (res.error && /audio_url|gif_url|message_type|schema cache|42703|PGRST/i.test(res.error.message)) {
+      continue
+    }
+    break
+  }
+
+  if (!data) {
+    console.error("[chat] fetch failed:", errorMessage)
+    throw new Error(errorMessage || "Mesajlar yüklenemedi")
+  }
+
   return [...data].reverse().map((m) =>
     rowToChatMessage(
-      m as RawMsg,
+      m as unknown as RawMsg,
       senderName,
       parsePoll((m as Record<string, unknown>).message_polls as RawPoll),
     ),
