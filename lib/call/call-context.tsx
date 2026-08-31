@@ -102,13 +102,17 @@ export function CallProvider({ userName, children }: { userName: string; childre
     )
   }, [userName])
 
-  const cleanup = useCallback(() => {
-    clearRingTimer()
+  const resetPc = useCallback(() => {
     if (iceTimerRef.current) clearTimeout(iceTimerRef.current)
     iceTimerRef.current = null
     iceBatchRef.current = []
     pcRef.current?.close()
     pcRef.current = null
+  }, [])
+
+  const cleanup = useCallback(() => {
+    clearRingTimer()
+    resetPc()
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
     setLocalStream(null)
@@ -120,7 +124,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     setActive(null)
     setIncoming(null)
     setCallError(null)
-  }, [clearRingTimer])
+  }, [clearRingTimer, resetPc])
 
   const postCallEvent = useCallback(async (
     session: CallSession,
@@ -140,8 +144,9 @@ export function CallProvider({ userName, children }: { userName: string; childre
     })
   }, [userName])
 
-  async function buildPc(sessionId: string, stream: MediaStream) {
-    if (pcRef.current) return pcRef.current
+  /** Always create a fresh PC; fixed m-line order audio → video (avoids SDP renegotiation errors). */
+  async function buildPc(sessionId: string, stream: MediaStream, callType: CallType) {
+    resetPc()
 
     const iceServers = await loadIceServers()
     const pc = new RTCPeerConnection({ iceServers })
@@ -162,7 +167,24 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
     }
 
-    stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+    const audioTrack = stream.getAudioTracks()[0]
+    const videoTrack = stream.getVideoTracks()[0]
+
+    if (audioTrack) {
+      pc.addTransceiver(audioTrack, { direction: "sendrecv", streams: [stream] })
+    } else {
+      pc.addTransceiver("audio", { direction: "recvonly" })
+    }
+
+    // Keep a video m-line whenever the call is video, even if camera failed → stable SDP order
+    if (callType === "video") {
+      if (videoTrack) {
+        pc.addTransceiver(videoTrack, { direction: "sendrecv", streams: [stream] })
+      } else {
+        pc.addTransceiver("video", { direction: "recvonly" })
+      }
+    }
+
     localStreamRef.current = stream
     setLocalStream(stream)
     pcRef.current = pc
@@ -177,6 +199,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     if (activeRef.current || incomingRef.current) return
 
     setCallError(null)
+    resetPc()
 
     // TURN/Metered check (usually already prefetched — avoid long await before getUserMedia)
     if (!isTurnConfigured()) {
@@ -242,14 +265,17 @@ export function CallProvider({ userName, children }: { userName: string; childre
       sessionRef.current = s
       setActive(s)
 
-      const pc = await buildPc(session.id, stream)
+      const pc = await buildPc(session.id, stream, callType)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       await supabase.from("call_signals").insert({
         session_id: session.id,
         sender_name: userName,
         signal_type: "offer",
-        payload: offer,
+        payload: {
+          type: offer.type,
+          sdp: offer.sdp,
+        },
       })
 
       ringTimerRef.current = setTimeout(() => {
@@ -270,12 +296,15 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }, RING_TIMEOUT_MS)
     } catch (err) {
       console.error("[call] start failed:", err)
-      setCallError(err instanceof Error ? err.message : "Arama başlatılamadı")
+      const message = err instanceof Error ? err.message : "Arama başlatılamadı"
+      resetPc()
       stream.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null
       setLocalStream(null)
       sessionRef.current = null
+      isCallerRef.current = false
       setActive(null)
+      setCallError(message)
     }
   }
 
@@ -305,7 +334,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     clearRingTimer()
 
     try {
-      const pc = await buildPc(session.id, stream)
+      const pc = await buildPc(session.id, stream, session.callType)
 
       const { data: offerSig } = await supabase
         .from("call_signals")
@@ -316,21 +345,28 @@ export function CallProvider({ userName, children }: { userName: string; childre
         .limit(1)
         .maybeSingle()
 
-      if (offerSig?.payload) {
-        await pc.setRemoteDescription(offerSig.payload as RTCSessionDescriptionInit)
+      const remote = offerSig?.payload as RTCSessionDescriptionInit | undefined
+      if (remote?.type === "offer" && remote.sdp) {
+        await pc.setRemoteDescription({ type: "offer", sdp: remote.sdp })
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
         await supabase.from("call_signals").insert({
           session_id: session.id,
           sender_name: userName,
           signal_type: "answer",
-          payload: answer,
+          payload: {
+            type: answer.type,
+            sdp: answer.sdp,
+          },
         })
+      } else {
+        throw new Error("Teklif bulunamadı")
       }
     } catch (err) {
       console.error("[call] answer failed:", err)
-      setCallError("Bağlantı kurulamadı")
+      resetPc()
       stream.getTracks().forEach((t) => t.stop())
+      setCallError("Bağlantı kurulamadı")
     }
   }
 
@@ -431,7 +467,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
           sessionRef.current = live
           setActive(live)
           try {
-            if (pc) await pc.setRemoteDescription(sig.payload as RTCSessionDescriptionInit)
+            const remote = sig.payload as RTCSessionDescriptionInit
+            if (pc && remote?.type === "answer" && remote.sdp && pc.signalingState === "have-local-offer") {
+              await pc.setRemoteDescription({ type: "answer", sdp: remote.sdp })
+            }
           } catch (err) {
             console.error("[call] setRemoteDescription failed:", err)
           }
