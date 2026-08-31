@@ -1863,7 +1863,7 @@ function ChatView({
   }
 
   return (
-    <div className="fixed inset-0 z-50 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
+    <div className="fixed inset-0 z-50 mx-auto flex max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)]">
       {/* Header — BeReal-like: tap name/avatar → profile; calls on the right */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/95 px-2 py-2 backdrop-blur">
         <button type="button" onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
@@ -2013,7 +2013,7 @@ function ChatView({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="shrink-0 border-t border-border bg-card px-3 pt-2 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
         <VoiceRecorderBar
           recording={voice.recording}
           seconds={voice.seconds}
