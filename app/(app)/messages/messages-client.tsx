@@ -352,13 +352,23 @@ export function MessagesClient({
     const hidden = readHiddenConvIds()
     setCustomGroups((prev) => {
       const unread = new Map(prev.map((g) => [g.id, g.unread]))
-      return groups.map((g) => ({ ...g, unread: unread.get(g.id) ?? g.unread }))
+      const messages = new Map(prev.map((g) => [g.id, g.messages]))
+      return groups.map((g) => ({
+        ...g,
+        unread: unread.get(g.id) ?? g.unread,
+        messages: messages.get(g.id)?.length ? messages.get(g.id)! : g.messages,
+      }))
     })
     setCustomDMs((prev) => {
       const unread = new Map(prev.map((d) => [d.id, d.unread]))
+      const messages = new Map(prev.map((d) => [d.id, d.messages]))
       const fromLive = dms
         .filter((d) => !hidden.has(d.id))
-        .map((d) => ({ ...d, unread: unread.get(d.id) ?? d.unread }))
+        .map((d) => ({
+          ...d,
+          unread: unread.get(d.id) ?? d.unread,
+          messages: messages.get(d.id)?.length ? messages.get(d.id)! : d.messages,
+        }))
       const liveIds = new Set(fromLive.map((d) => d.id))
       const livePeers = new Set(
         fromLive.map((d) => (d.peerUserId || d.name).trim().toLowerCase()).filter(Boolean),
