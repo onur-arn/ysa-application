@@ -330,6 +330,13 @@ create table if not exists conversation_members (
   primary key (conversation_id, member_name)
 );
 alter table conversation_members add column if not exists is_admin boolean not null default false;
+alter table conversation_members add column if not exists user_id uuid references auth.users(id) on delete cascade;
+create index if not exists conversation_members_user_id_idx on conversation_members(user_id);
+-- Backfill user_id from profile names (legacy rows)
+update conversation_members cm
+set user_id = p.id
+from profiles p
+where cm.user_id is null and p.name = cm.member_name;
 alter table conversation_members enable row level security;
 drop policy if exists "Authenticated can manage conv members" on conversation_members;
 create policy "Authenticated can manage conv members" on conversation_members for all to authenticated using (true) with check (true);

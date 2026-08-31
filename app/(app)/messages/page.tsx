@@ -17,13 +17,23 @@ export default async function MessagesPage() {
   const userName = (profileRes.data?.name as string) ?? ""
 
   let convRows: Record<string, unknown>[] = []
-  if (userName) {
-    const { data: memberRows } = await supabase
+  if (user?.id) {
+    const { data: memberRows, error: memberErr } = await supabase
       .from("conversation_members")
       .select("conversation_id")
-      .eq("member_name", userName)
+      .eq("user_id", user.id)
 
-    const convIds = (memberRows ?? []).map((r: Record<string, unknown>) => r.conversation_id as string)
+    let convIds = memberErr
+      ? []
+      : (memberRows ?? []).map((r: Record<string, unknown>) => r.conversation_id as string)
+
+    if (convIds.length === 0 && userName) {
+      const { data: legacyRows } = await supabase
+        .from("conversation_members")
+        .select("conversation_id")
+        .eq("member_name", userName)
+      convIds = (legacyRows ?? []).map((r: Record<string, unknown>) => r.conversation_id as string)
+    }
 
     if (convIds.length > 0) {
       const { data } = await supabase

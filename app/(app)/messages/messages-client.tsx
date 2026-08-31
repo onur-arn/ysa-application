@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useRef, useEffect, useMemo } from "react"
-import { useSearchParams } from "next/navigation"
+import { useState, useRef, useEffect, useMemo, useCallback } from "react"
+import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ArrowLeft, Check, Plus,
@@ -20,6 +20,7 @@ import { AudioMessage, VoiceRecorderBar, useVoiceRecorder } from "@/components/m
 import { AttachMenu } from "@/components/messaging/attach-menu"
 import { uploadChatAudio } from "@/lib/chat-media"
 import { useCallOptional } from "@/lib/call/call-context"
+import { openDMViaApi } from "@/lib/dm"
 
 type Tab = "groups" | "dm"
 
@@ -119,6 +120,8 @@ export function MessagesClient({
 }: MessagesClientProps) {
   const { t } = useI18n()
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const { setHideNav } = useNavVisibility()
   const activeUsers = usePresence()
   const [tab, setTab] = useState<Tab>("groups")
@@ -178,80 +181,112 @@ export function MessagesClient({
     () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
   )
 
+  // Keep profile name in sync (needed for conversation membership)
+  useEffect(() => {
+    if (currentUser.name) return
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from("profiles").select("name,station").eq("id", user.id).single().then(({ data }) => {
+        if (!data?.name) return
+        setCurrentUser((prev) => ({
+          ...prev,
+          name: data.name,
+          station: (data.station as StationId) ?? prev.station,
+          isIntl: data.station === "intl",
+        }))
+      })
+    })
+  }, [currentUser.name])
+
+  const userNameRef = useRef(currentUser.name || initialProfile?.name || "")
+  useEffect(() => {
+    userNameRef.current = currentUser.name || initialProfile?.name || ""
+  }, [currentUser.name, initialProfile?.name])
+
+  const convIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    convIdsRef.current = new Set([
+      ...customGroups.map((g) => g.id),
+      ...customDMs.map((d) => d.id),
+    ])
+  }, [customGroups, customDMs])
+
+  const ensureConversationInState = useCallback(async (convId: string): Promise<boolean> => {
+    if (convIdsRef.current.has(convId)) return true
+
+    const supabase = createClient()
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("id,type,name,initials")
+      .eq("id", convId)
+      .maybeSingle()
+
+    if (!conv) return false
+
+    const { data: members } = await supabase
+      .from("conversation_members")
+      .select("member_name")
+      .eq("conversation_id", convId)
+
+    const userName = userNameRef.current
+    const memberNames = (members ?? []).map((m) => m.member_name).filter((n) => n !== userName)
+
+    if (conv.type === "group") {
+      setCustomGroups((prev) => {
+        if (prev.some((g) => g.id === convId)) return prev
+        return [{
+          id: conv.id as string,
+          name: (conv.name as string) ?? "",
+          initials: (conv.initials as string) ?? "",
+          adminNames: [],
+          memberNames,
+          lastMessage: "",
+          lastTime: "",
+          unread: 0,
+          messages: [],
+        }, ...prev]
+      })
+    } else {
+      const otherName = memberNames[0] ?? (conv.name as string) ?? ""
+      setCustomDMs((prev) => {
+        if (prev.some((d) => d.id === convId)) return prev
+        return [{
+          id: conv.id as string,
+          name: otherName,
+          initials: otherName.slice(0, 2).toUpperCase(),
+          color: CUSTOM_COLOR,
+          station: "paris",
+          online: false,
+          lastMessage: "",
+          lastTime: "",
+          unread: 0,
+          messages: [],
+        }, ...prev]
+      })
+    }
+    return true
+  }, [])
+
+  const closeConversation = useCallback(() => {
+    setOpenId(null)
+    router.replace(pathname, { scroll: false })
+  }, [router, pathname])
+
   // Open conversation from URL (?open=convId) — e.g. from Rehber
   useEffect(() => {
     const convId = searchParams.get("open")
     if (!convId) return
 
     setTab("dm")
-
-    const userName = currentUser.name || initialProfile?.name || ""
-
-    function openKnown() {
-      setOpenId(convId)
-    }
-
-    if (customGroups.some((g) => g.id === convId) || customDMs.some((d) => d.id === convId)) {
-      openKnown()
-      return
-    }
-
     let cancelled = false
 
-    async function loadAndOpen() {
-      const supabase = createClient()
-      const { data: conv } = await supabase
-        .from("conversations")
-        .select("id,type,name,initials,conversation_members(member_name)")
-        .eq("id", convId)
-        .maybeSingle()
+    ensureConversationInState(convId).then((ok) => {
+      if (!cancelled && ok) setOpenId(convId)
+    })
 
-      if (cancelled || !conv) return
-
-      const memberNames = ((conv.conversation_members as { member_name: string }[]) ?? [])
-        .map((m) => m.member_name)
-        .filter((n) => n !== userName)
-
-      if (conv.type === "group") {
-        setCustomGroups((prev) => {
-          if (prev.some((g) => g.id === convId)) return prev
-          return [{
-            id: conv.id as string,
-            name: (conv.name as string) ?? "",
-            initials: (conv.initials as string) ?? "",
-            adminNames: [],
-            memberNames,
-            lastMessage: "",
-            lastTime: "",
-            unread: 0,
-            messages: [],
-          }, ...prev]
-        })
-      } else {
-        const otherName = memberNames[0] ?? (conv.name as string) ?? ""
-        setCustomDMs((prev) => {
-          if (prev.some((d) => d.id === convId)) return prev
-          return [{
-            id: conv.id as string,
-            name: otherName,
-            initials: otherName.slice(0, 2).toUpperCase(),
-            color: CUSTOM_COLOR,
-            station: "paris",
-            online: false,
-            lastMessage: "",
-            lastTime: "",
-            unread: 0,
-            messages: [],
-          }, ...prev]
-        })
-      }
-
-      setOpenId(convId)
-    }
-
-    loadAndOpen()
     return () => { cancelled = true }
-  }, [searchParams, customGroups, customDMs, currentUser.name, initialProfile?.name])
+  }, [searchParams, ensureConversationInState])
 
 
   // ── Group actions ─────────────────────────────────────────────────────────
@@ -340,14 +375,14 @@ export function MessagesClient({
     await supabase.from("conversation_members").delete()
       .eq("conversation_id", id).eq("member_name", currentUser.name)
     setCustomGroups((prev) => prev.filter((g) => g.id !== id))
-    setOpenId(null)
+    closeConversation()
   }
 
   async function deleteGroup(id: string) {
     const supabase = createClient()
     await supabase.from("conversations").delete().eq("id", id)
     setCustomGroups((prev) => prev.filter((g) => g.id !== id))
-    setOpenId(null)
+    closeConversation()
   }
 
   async function renameGroup(id: string, newName: string) {
@@ -365,34 +400,47 @@ export function MessagesClient({
   // ── DM actions ────────────────────────────────────────────────────────────
   async function openOrCreateDM(member: Member) {
     const existingStatic = DM_CHATS.find((d) => d.name === member.name)
-    if (existingStatic) { setOpenId(existingStatic.id); setNewDMOpen(false); return }
-    const existingCustom = customDMs.find((d) => d.name === member.name)
-    if (existingCustom) { openConversation(existingCustom.id); setNewDMOpen(false); return }
-
-    const s = getStation(member.station)
-    const supabase = createClient()
-    const { data: conv, error } = await supabase
-      .from("conversations")
-      .insert({ type: "dm", name: member.name, initials: member.initials })
-      .select()
-      .single()
-
-    if (error || !conv) {
-      console.error("[openOrCreateDM] failed:", error?.message)
+    if (existingStatic) {
+      setOpenId(existingStatic.id)
+      router.replace(`${pathname}?open=${existingStatic.id}`, { scroll: false })
+      setNewDMOpen(false)
       return
     }
-    await supabase.from("conversation_members").insert([
-      { conversation_id: conv.id, member_name: currentUser.name },
-      { conversation_id: conv.id, member_name: member.name },
-    ])
-
-    const newDM: CustomDM = {
-      id: conv.id, name: member.name, initials: member.initials,
-      color: s.color, station: member.station, online: member.online ?? false,
-      lastMessage: "", lastTime: "", unread: 0, messages: [],
+    const existingCustom = customDMs.find((d) => d.name === member.name)
+    if (existingCustom) {
+      await openConversation(existingCustom.id)
+      setNewDMOpen(false)
+      return
     }
-    setCustomDMs((prev) => [newDM, ...prev])
-    setOpenId(conv.id)
+
+    if (!member.id) {
+      console.error("[openOrCreateDM] missing member id")
+      return
+    }
+
+    const convId = await openDMViaApi(member.id)
+    if (!convId) {
+      console.error("[openOrCreateDM] API failed")
+      return
+    }
+
+    const s = getStation(member.station)
+    setCustomDMs((prev) => {
+      if (prev.some((d) => d.id === convId)) return prev
+      return [{
+        id: convId,
+        name: member.name,
+        initials: member.initials,
+        color: s.color,
+        station: member.station,
+        online: member.online ?? false,
+        lastMessage: "",
+        lastTime: "",
+        unread: 0,
+        messages: [],
+      }, ...prev]
+    })
+    await openConversation(convId)
     setNewDMOpen(false)
   }
 
@@ -413,8 +461,11 @@ export function MessagesClient({
   useEffect(() => { currentNameRef.current = currentUser.name }, [currentUser.name])
 
   // Open a conversation and reset its unread counter
-  function openConversation(id: string) {
+  async function openConversation(id: string) {
+    const ok = await ensureConversationInState(id)
+    if (!ok) return
     setOpenId(id)
+    router.replace(`${pathname}?open=${id}`, { scroll: false })
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
     setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: 0 } : d))
     try {
@@ -500,7 +551,7 @@ export function MessagesClient({
   if (activeCustomGroup) {
     return (
       <ChatView
-        onBack={() => setOpenId(null)}
+        onBack={closeConversation}
         title={activeCustomGroup.name}
         subtitle={`${activeCustomGroup.memberNames.length + 1} üye`}
         color={CUSTOM_COLOR}
@@ -532,7 +583,7 @@ export function MessagesClient({
     const dmOnline = activeUsers.has(activeCustomDM.name)
     return (
       <ChatView
-        onBack={() => setOpenId(null)}
+        onBack={closeConversation}
         title={activeCustomDM.name}
         subtitle={dmOnline ? t("messages.online") : t("messages.offline")}
         color={activeCustomDM.color}
@@ -554,7 +605,7 @@ export function MessagesClient({
   if (activeStationGroup || activeDM) {
     return (
       <ChatView
-        onBack={() => setOpenId(null)}
+        onBack={closeConversation}
         title={activeStationGroup ? getStation(activeStationGroup.id).name : activeDM!.name}
         subtitle={
           activeStationGroup
@@ -642,7 +693,7 @@ export function MessagesClient({
             {filteredCustomGroups.map((g) => (
               <ConversationRow
                 key={g.id}
-                onClick={() => openConversation(g.id)}
+                onClick={() => void openConversation(g.id)}
                 initials={g.initials}
                 color={CUSTOM_COLOR}
                 title={g.name}
@@ -655,7 +706,7 @@ export function MessagesClient({
             {filteredStationGroups.map((g) => (
               <ConversationRow
                 key={g.id}
-                onClick={() => setOpenId(g.id)}
+                onClick={() => void openConversation(g.id)}
                 initials={getStation(g.id).short}
                 color={getStation(g.id).color}
                 title={g.title}
@@ -670,7 +721,7 @@ export function MessagesClient({
             {customDMs.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
               <ConversationRow
                 key={d.id}
-                onClick={() => openConversation(d.id)}
+                onClick={() => void openConversation(d.id)}
                 initials={d.initials}
                 color={d.color}
                 title={d.name}
@@ -686,7 +737,7 @@ export function MessagesClient({
             {DM_CHATS.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
               <ConversationRow
                 key={d.id}
-                onClick={() => openConversation(d.id)}
+                onClick={() => void openConversation(d.id)}
                 initials={d.initials}
                 color={d.color}
                 title={d.name}

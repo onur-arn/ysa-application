@@ -2,34 +2,38 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/client"
 import type { StationId } from "@/lib/data/stations"
 
-export type DmMember = {
+export type DmParticipant = {
+  id: string
   name: string
   initials: string
-  station: StationId | string
+  station?: StationId | string
 }
 
-/** Find an existing DM with `member`, or create one. Returns conversation id. */
+/** @deprecated use DmParticipant */
+export type DmMember = DmParticipant
+
+/** Find an existing DM with `target`, or create one. Returns conversation id. */
 export async function findOrCreateDM(
   supabase: SupabaseClient,
-  currentUserName: string,
-  member: DmMember,
+  current: DmParticipant,
+  target: DmParticipant,
 ): Promise<string | null> {
-  const me = currentUserName.trim()
-  const them = member.name.trim()
-  if (!me || !them || me === them) return null
+  const meName = current.name.trim()
+  const themName = target.name.trim()
+  if (!current.id || !target.id || current.id === target.id) return null
+  if (!meName || !themName) return null
 
-  const { data: myMemberships, error: memErr } = await supabase
-    .from("conversation_members")
-    .select("conversation_id")
-    .eq("member_name", me)
+  const [{ data: byUserId, error: userIdErr }, { data: byName }] = await Promise.all([
+    supabase.from("conversation_members").select("conversation_id").eq("user_id", current.id),
+    supabase.from("conversation_members").select("conversation_id").eq("member_name", meName),
+  ])
 
-  if (memErr) {
-    console.error("[findOrCreateDM] memberships:", memErr.message)
-  }
+  const myConvIds = [...new Set([
+    ...(!userIdErr ? (byUserId ?? []) : []).map((m) => m.conversation_id as string),
+    ...(byName ?? []).map((m) => m.conversation_id as string),
+  ])]
 
-  const myConvIds = (myMemberships ?? []).map((m) => m.conversation_id as string)
-
-  if (!memErr && myConvIds.length > 0) {
+  if (myConvIds.length > 0) {
     const { data: dmConvs, error: dmErr } = await supabase
       .from("conversations")
       .select("id")
@@ -41,31 +45,24 @@ export async function findOrCreateDM(
     } else {
       const dmIds = (dmConvs ?? []).map((c) => c.id as string)
       if (dmIds.length > 0) {
-        const { data: shared, error: sharedErr } = await supabase
-          .from("conversation_members")
-          .select("conversation_id")
-          .eq("member_name", them)
-          .in("conversation_id", dmIds)
-          .limit(1)
-          .maybeSingle()
-
-        if (sharedErr) {
-          console.error("[findOrCreateDM] shared lookup:", sharedErr.message)
-        } else if (shared?.conversation_id) {
-          return shared.conversation_id as string
-        }
+        const [{ data: sharedById, error: idErr }, { data: sharedByName }] = await Promise.all([
+          supabase.from("conversation_members").select("conversation_id").in("conversation_id", dmIds).eq("user_id", target.id).limit(1).maybeSingle(),
+          supabase.from("conversation_members").select("conversation_id").in("conversation_id", dmIds).eq("member_name", themName).limit(1).maybeSingle(),
+        ])
+        const sharedId = (!idErr && sharedById?.conversation_id) ?? sharedByName?.conversation_id
+        if (sharedId) return sharedId as string
       }
     }
   }
 
   const initials =
-    member.initials?.trim() ||
-    them.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() ||
+    target.initials?.trim() ||
+    themName.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() ||
     "?"
 
   const { data: conv, error } = await supabase
     .from("conversations")
-    .insert({ type: "dm", name: them, initials })
+    .insert({ type: "dm", name: themName, initials })
     .select("id")
     .single()
 
@@ -75,23 +72,44 @@ export async function findOrCreateDM(
   }
 
   const { error: membersErr } = await supabase.from("conversation_members").insert([
-    { conversation_id: conv.id, member_name: me },
-    { conversation_id: conv.id, member_name: them },
+    { conversation_id: conv.id, member_name: meName, user_id: current.id },
+    { conversation_id: conv.id, member_name: themName, user_id: target.id },
   ])
 
   if (membersErr) {
-    console.error("[findOrCreateDM] members:", membersErr.message)
-    await supabase.from("conversations").delete().eq("id", conv.id)
-    return null
+    const legacy = await supabase.from("conversation_members").insert([
+      { conversation_id: conv.id, member_name: meName },
+      { conversation_id: conv.id, member_name: themName },
+    ])
+    if (legacy.error) {
+      console.error("[findOrCreateDM] members:", legacy.error.message)
+      await supabase.from("conversations").delete().eq("id", conv.id)
+      return null
+    }
   }
 
   return conv.id as string
 }
 
+/** Open or create a DM via server API (admin client, most reliable). */
+export async function openDMViaApi(targetUserId: string): Promise<string | null> {
+  const res = await fetch("/api/dm/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.convId) {
+    console.error("[openDMViaApi]", data.error ?? res.status)
+    return null
+  }
+  return data.convId as string
+}
+
 /** Browser convenience wrapper */
 export async function findOrCreateDMFromBrowser(
-  currentUserName: string,
-  member: DmMember,
+  current: DmParticipant,
+  target: DmParticipant,
 ): Promise<string | null> {
-  return findOrCreateDM(createClient(), currentUserName, member)
+  return findOrCreateDM(createClient(), current, target)
 }

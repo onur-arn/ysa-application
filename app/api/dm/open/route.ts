@@ -28,11 +28,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Üye bulunamadı" }, { status: 404 })
   }
 
-  const convId = await findOrCreateDM(createAdminClient(), me.name, {
-    name: target.name,
-    initials: target.initials ?? "",
-    station: target.station ?? "paris",
-  })
+  const convId = await findOrCreateDM(
+    createAdminClient(),
+    { id: user.id, name: me.name, initials: me.initials ?? "" },
+    { id: targetUserId, name: target.name, initials: target.initials ?? "", station: target.station ?? "paris" },
+  )
 
   if (!convId) {
     return NextResponse.json({ error: "Sohbet açılamadı" }, { status: 500 })

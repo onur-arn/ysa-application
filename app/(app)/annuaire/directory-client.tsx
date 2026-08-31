@@ -9,7 +9,7 @@ import { Modal } from "@/components/ui/modal"
 import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
 import { isAdminEmail } from "@/lib/admin"
-import { findOrCreateDMFromBrowser } from "@/lib/dm"
+import { openDMViaApi } from "@/lib/dm"
 
 type StationFilter = "all" | StationId
 
@@ -119,11 +119,7 @@ export function DirectoryClient({
     setMessaging(true)
     setMessageError(null)
     try {
-      const convId = await findOrCreateDMFromBrowser(myName, {
-        name: member.name,
-        initials: member.initials,
-        station: member.station,
-      })
+      const convId = await openDMViaApi(member.id)
       if (!convId) {
         setMessageError("Sohbet açılamadı. Lütfen tekrar deneyin.")
         return
