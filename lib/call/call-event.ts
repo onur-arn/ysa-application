@@ -35,23 +35,18 @@ export function formatCallDuration(sec: number): string {
   return `${m}:${r.toString().padStart(2, "0")}`
 }
 
-export function callEventLabel(p: CallEventPayload, isSelf: boolean): string {
-  const kind = p.callType === "video" ? "görüntülü arama" : "sesli arama"
-  if (p.outcome === "missed") {
-    return isSelf ? `Cevapsız ${kind}` : `Cevapsız ${kind}`
-  }
-  if (p.outcome === "declined") {
-    return isSelf ? "Arama reddedildi" : "Reddedilen arama"
-  }
+export function callEventLabel(p: CallEventPayload, _isSelf: boolean): string {
+  if (p.outcome === "missed") return "Cevapsız sesli arama"
+  if (p.outcome === "declined") return "Reddedilen sesli arama"
   const dur = p.durationSec != null ? ` · ${formatCallDuration(p.durationSec)}` : ""
-  return `${p.callType === "video" ? "Görüntülü arama" : "Sesli arama"}${dur}`
+  return `Sesli arama${dur}`
 }
 
 export function callEventPreview(p: CallEventPayload): string {
-  if (p.outcome === "missed") return "📞 Cevapsız arama"
+  if (p.outcome === "missed") return "📞 Cevapsız sesli arama"
   if (p.outcome === "declined") return "📞 Reddedilen arama"
   if (p.durationSec != null) {
-    return `📞 ${p.callType === "video" ? "Görüntülü" : "Sesli"} arama · ${formatCallDuration(p.durationSec)}`
+    return `📞 Sesli arama · ${formatCallDuration(p.durationSec)}`
   }
-  return p.callType === "video" ? "📞 Görüntülü arama" : "📞 Sesli arama"
+  return "📞 Sesli arama"
 }

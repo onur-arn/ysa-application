@@ -1,6 +1,6 @@
 "use client"
 
-import { Phone, PhoneMissed, Video } from "lucide-react"
+import { Phone, PhoneMissed } from "lucide-react"
 import {
   callEventLabel,
   formatCallDuration,
@@ -19,7 +19,7 @@ export function CallEventBubble({
   onCallBack?: () => void
 }) {
   const failed = event.outcome === "missed" || event.outcome === "declined"
-  const Icon = event.callType === "video" ? Video : failed ? PhoneMissed : Phone
+  const Icon = failed ? PhoneMissed : Phone
 
   return (
     <button

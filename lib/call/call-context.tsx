@@ -31,7 +31,7 @@ type CallContextValue = {
 }
 
 const CallContext = createContext<CallContextValue | null>(null)
-const RING_TIMEOUT_MS = 40_000
+const RING_TIMEOUT_MS = 35_000
 
 export function useCallOptional() {
   return useContext(CallContext)
@@ -43,16 +43,8 @@ export function useCall() {
   return ctx
 }
 
-async function acquireMedia(withVideo: boolean): Promise<MediaStream> {
-  try {
-    return await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo })
-  } catch (err) {
-    if (withVideo) {
-      // Fallback: video unavailable → audio only
-      return await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-    }
-    throw err
-  }
+async function acquireMedia(): Promise<MediaStream> {
+  return await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
 }
 
 export function CallProvider({ userName, children }: { userName: string; children: ReactNode }) {
@@ -144,8 +136,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
     })
   }, [userName])
 
-  /** Always create a fresh PC; fixed m-line order audio → video (avoids SDP renegotiation errors). */
-  async function buildPc(sessionId: string, stream: MediaStream, callType: CallType) {
+  /** Always create a fresh PC; audio-only transceiver. */
+  async function buildPc(sessionId: string, stream: MediaStream) {
     resetPc()
 
     const iceServers = await loadIceServers()
@@ -168,21 +160,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
     }
 
     const audioTrack = stream.getAudioTracks()[0]
-    const videoTrack = stream.getVideoTracks()[0]
-
     if (audioTrack) {
       pc.addTransceiver(audioTrack, { direction: "sendrecv", streams: [stream] })
     } else {
       pc.addTransceiver("audio", { direction: "recvonly" })
-    }
-
-    // Keep a video m-line whenever the call is video, even if camera failed → stable SDP order
-    if (callType === "video") {
-      if (videoTrack) {
-        pc.addTransceiver(videoTrack, { direction: "sendrecv", streams: [stream] })
-      } else {
-        pc.addTransceiver("video", { direction: "recvonly" })
-      }
     }
 
     localStreamRef.current = stream
@@ -191,7 +172,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
     return pc
   }
 
-  async function startCall({ conversationId, peerName, callType }: { conversationId: string; peerName: string; callType: CallType }) {
+  async function startCall({ conversationId, peerName }: { conversationId: string; peerName: string; callType?: CallType }) {
+    const callType: CallType = "audio"
     if (!userName) {
       setCallError("Profil yükleniyor, tekrar deneyin.")
       return
@@ -216,9 +198,9 @@ export function CallProvider({ userName, children }: { userName: string; childre
     // Media FIRST — must stay close to the click (Safari / iOS)
     let stream: MediaStream
     try {
-      stream = await acquireMedia(callType === "video")
+      stream = await acquireMedia()
     } catch {
-      setCallError("Mikrofon / kamera izni gerekli. Tarayıcı ayarlarından izin verin.")
+      setCallError("Mikrofon izni gerekli. Tarayıcı ayarlarından izin verin.")
       return
     }
 
@@ -265,7 +247,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
       sessionRef.current = s
       setActive(s)
 
-      const pc = await buildPc(session.id, stream, callType)
+      const pc = await buildPc(session.id, stream)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       await supabase.from("call_signals").insert({
@@ -278,6 +260,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
         },
       })
 
+      // No answer → missed voice call in chat, then hang up
       ringTimerRef.current = setTimeout(() => {
         void (async () => {
           const current = sessionRef.current
@@ -316,15 +299,15 @@ export function CallProvider({ userName, children }: { userName: string; childre
 
     let stream: MediaStream
     try {
-      stream = await acquireMedia(session.callType === "video")
+      stream = await acquireMedia()
     } catch {
-      setCallError("Mikrofon / kamera izni gerekli.")
+      setCallError("Mikrofon izni gerekli.")
       return
     }
 
     const supabase = createClient()
     await supabase.from("call_sessions").update({ status: "active" }).eq("id", session.id)
-    const live = { ...session, status: "active" }
+    const live = { ...session, status: "active", callType: "audio" as CallType }
     sessionRef.current = live
     isCallerRef.current = false
     connectedAtRef.current = Date.now()
@@ -334,7 +317,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     clearRingTimer()
 
     try {
-      const pc = await buildPc(session.id, stream, session.callType)
+      const pc = await buildPc(session.id, stream)
 
       const { data: offerSig } = await supabase
         .from("call_signals")

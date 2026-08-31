@@ -84,7 +84,7 @@ export function BottomNav({ hasUnread = false }: { hasUnread?: boolean }) {
     <nav
       ref={navRef}
       data-no-pull-refresh
-      className="fixed bottom-6 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-border/60 bg-card/92 shadow-xl shadow-black/[0.08] backdrop-blur-2xl touch-none select-none"
+      className="fixed bottom-6 left-4 right-4 z-30 mx-auto max-w-md rounded-2xl border border-border/60 bg-card/92 shadow-xl shadow-black/[0.08] backdrop-blur-2xl touch-none select-none"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Send, ArrowLeft, Check, Plus,
   Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
-  Phone, Video, Mic,
+  Phone, Mic,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption, messagePreview } from "@/lib/data/messages"
@@ -191,10 +191,12 @@ export function MessagesClient({
   const [profileDirectory, setProfileDirectory] = useState<Member[]>([])
 
   // Hide app header + bottom nav in chat / compose / group create / profile
+  const urlOpen = searchParams.get("open")
   useEffect(() => {
-    setHideNav(openId !== null || composeOpen || createGroupOpen || !!profileMember)
+    const immersive = openId !== null || !!urlOpen || composeOpen || createGroupOpen || !!profileMember
+    setHideNav(immersive)
     return () => setHideNav(false)
-  }, [openId, composeOpen, createGroupOpen, profileMember, setHideNav])
+  }, [openId, urlOpen, composeOpen, createGroupOpen, profileMember, setHideNav])
 
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
@@ -1773,7 +1775,7 @@ function ChatView({
   }
 
   return (
-    <div className="fixed inset-0 z-40 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
+    <div className="fixed inset-0 z-50 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
       {/* Header — BeReal-like: tap name/avatar → profile; calls on the right */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/95 px-2 py-2 backdrop-blur">
         <button type="button" onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
@@ -1813,24 +1815,14 @@ function ChatView({
           </div>
         </button>
         {isPrivate && conversationId && peerName && call && (
-          <div className="flex shrink-0 gap-0.5">
-            <button
-              type="button"
-              onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
-              className="flex size-9 items-center justify-center rounded-full text-foreground active:bg-secondary"
-              aria-label="Sesli arama"
-            >
-              <Phone className="size-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => call.startCall({ conversationId, peerName, callType: "video" })}
-              className="flex size-9 items-center justify-center rounded-full text-foreground active:bg-secondary"
-              aria-label="Görüntülü arama"
-            >
-              <Video className="size-5" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
+            className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground active:bg-secondary"
+            aria-label="Sesli arama"
+          >
+            <Phone className="size-5" />
+          </button>
         )}
       </div>
 
@@ -1852,7 +1844,7 @@ function ChatView({
                   time={m.time}
                   onCallBack={
                     isPrivate && conversationId && peerName && call
-                      ? () => call.startCall({ conversationId, peerName, callType: callEvent.callType })
+                      ? () => call.startCall({ conversationId, peerName, callType: "audio" })
                       : undefined
                   }
                 />
@@ -1933,7 +1925,7 @@ function ChatView({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <VoiceRecorderBar
           recording={voice.recording}
           seconds={voice.seconds}
