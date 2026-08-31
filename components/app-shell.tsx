@@ -28,6 +28,43 @@ function BottomNavWrapper({ hasUnread }: { hasUnread: boolean }) {
   return <BottomNav hasUnread={hasUnread} />
 }
 
+function AppHeader({ pageTitle, onSettings, avatar }: {
+  pageTitle: string
+  onSettings: boolean
+  avatar: { photoUrl?: string | null; initials: string; color: string } | null
+}) {
+  const { hideNav } = useNavVisibility()
+  if (hideNav) return null
+  return (
+    <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/50 bg-background/85 px-5 py-3 backdrop-blur-xl">
+      <h1 className="font-heading text-[1.35rem] font-bold tracking-[-0.01em] text-foreground">
+        {pageTitle}
+      </h1>
+      <div className="flex items-center gap-2">
+        {!onSettings && (
+          <Link
+            href="/ayarlar"
+            className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full ring-2 ring-border/60 transition-all hover:ring-primary/40"
+            aria-label="Ayarlar"
+          >
+            {avatar?.photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatar.photoUrl} alt="Profil" className="size-full object-cover" />
+            ) : (
+              <span
+                className="flex size-full items-center justify-center text-[11px] font-bold text-white"
+                style={{ backgroundColor: `hsl(${avatar?.color ?? "258 70% 55%"})` }}
+              >
+                {avatar?.initials ?? "?"}
+              </span>
+            )}
+          </Link>
+        )}
+      </div>
+    </header>
+  )
+}
+
 function MainWrapper({ children }: { children: ReactNode }) {
   const { hideNav } = useNavVisibility()
   return (
@@ -129,32 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <PresenceProvider userName={userName}>
     <CallProvider userName={userName}>
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background">
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/50 bg-background/85 px-5 py-3 backdrop-blur-xl">
-        <h1 className="font-heading text-[1.35rem] font-bold tracking-[-0.01em] text-foreground">
-          {pageTitle}
-        </h1>
-        <div className="flex items-center gap-2">
-          {!onSettings && (
-            <Link
-              href="/ayarlar"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full overflow-hidden ring-2 ring-border/60 hover:ring-primary/40 transition-all"
-              aria-label="Ayarlar"
-            >
-              {avatar?.photoUrl ? (
-                <img src={avatar.photoUrl} alt="Profil" className="size-full object-cover" />
-              ) : (
-                <span
-                  className="flex size-full items-center justify-center text-[11px] font-bold text-white"
-                  style={{ backgroundColor: `hsl(${avatar?.color ?? "258 70% 55%"})` }}
-                >
-                  {avatar?.initials ?? "?"}
-                </span>
-              )}
-            </Link>
-          )}
-        </div>
-      </header>
-
+      <AppHeader pageTitle={pageTitle} onSettings={onSettings} avatar={avatar} />
       <MainWrapper>{children}</MainWrapper>
       <BottomNavWrapper hasUnread={hasUnread} />
     </div>

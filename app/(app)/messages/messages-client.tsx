@@ -23,6 +23,7 @@ import { GifPicker } from "@/components/messaging/gif-picker"
 import { AudioMessage, VoiceRecorderBar, useVoiceRecorder } from "@/components/messaging/audio-message"
 import { AttachMenu } from "@/components/messaging/attach-menu"
 import { ComposeScreen } from "@/components/messaging/compose-screen"
+import { CreateGroupScreen } from "@/components/messaging/create-group-screen"
 import { MemberProfileSheet } from "@/components/messaging/member-profile-sheet"
 import { uploadChatAudio } from "@/lib/chat-media"
 import { useCallOptional } from "@/lib/call/call-context"
@@ -59,6 +60,37 @@ type CustomDM = {
   lastAt: string
   unread: number
   messages: ChatMessage[]
+  peerUserId?: string
+}
+
+const HIDDEN_CONVS_KEY = "ys-hidden-convs"
+
+function readHiddenConvIds(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_CONVS_KEY) ?? "[]") as string[]
+    return new Set(Array.isArray(raw) ? raw : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeHiddenConvIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(HIDDEN_CONVS_KEY, JSON.stringify([...ids]))
+  } catch { /* ignore */ }
+}
+
+function softHideConv(id: string) {
+  const next = readHiddenConvIds()
+  next.add(id)
+  writeHiddenConvIds(next)
+}
+
+function softUnhideConv(id: string) {
+  const next = readHiddenConvIds()
+  if (!next.has(id)) return
+  next.delete(id)
+  writeHiddenConvIds(next)
 }
 
 type CurrentUser = { station: StationId; name: string; isIntl: boolean }
@@ -87,13 +119,14 @@ function mapConversations(
   })
 
   for (const c of sortedRows) {
-    const memberRows = ((c.conversation_members as { member_name: string; is_admin?: boolean }[]) ?? [])
+    const memberRows = ((c.conversation_members as { member_name: string; is_admin?: boolean; user_id?: string | null }[]) ?? [])
     const adminNames = memberRows.filter((m) => m.is_admin).map((m) => m.member_name)
     // Backward compat: if no is_admin flags set yet, fall back to legacy admin_name column
     const effectiveAdminNames = adminNames.length > 0
       ? adminNames
       : (c.admin_name ? [(c.admin_name as string)] : [])
-    const memberNames = memberRows.map((m) => m.member_name).filter((n) => n !== userName)
+    const otherMembers = memberRows.filter((m) => m.member_name !== userName)
+    const memberNames = otherMembers.map((m) => m.member_name)
 
     // Derive last message from embedded chat_messages (sorted asc, last is the latest)
     const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; gif_url?: string | null; audio_url?: string | null; message_type?: string | null; is_system: boolean; created_at: string }[]) ?? []
@@ -116,7 +149,21 @@ function mapConversations(
       groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminNames: effectiveAdminNames, memberNames, lastMessage, lastTime, lastAt, unread: 0, messages: [] })
     } else {
       const otherName = memberNames[0] ?? (c.name as string) ?? ""
-      dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, lastAt, unread: 0, messages: [] })
+      const peerUserId = otherMembers[0]?.user_id ?? undefined
+      dms.push({
+        id: c.id as string,
+        name: otherName,
+        initials: otherName.slice(0, 2).toUpperCase(),
+        color: CUSTOM_COLOR,
+        station: "paris",
+        online: false,
+        lastMessage,
+        lastTime,
+        lastAt,
+        unread: 0,
+        messages: [],
+        peerUserId: peerUserId || undefined,
+      })
     }
   }
 
@@ -139,14 +186,15 @@ export function MessagesClient({
   const [search, setSearch] = useState("")
   const [openId, setOpenId] = useState<string | null>(null)
   const [composeOpen, setComposeOpen] = useState(false)
+  const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [profileMember, setProfileMember] = useState<Member | null>(null)
   const [profileDirectory, setProfileDirectory] = useState<Member[]>([])
 
-  // Hide bottom nav when a conversation / compose / profile is open
+  // Hide app header + bottom nav in chat / compose / group create / profile
   useEffect(() => {
-    setHideNav(openId !== null || composeOpen || !!profileMember)
+    setHideNav(openId !== null || composeOpen || createGroupOpen || !!profileMember)
     return () => setHideNav(false)
-  }, [openId, composeOpen, profileMember, setHideNav])
+  }, [openId, composeOpen, createGroupOpen, profileMember, setHideNav])
 
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
@@ -178,18 +226,20 @@ export function MessagesClient({
   })
   const [customDMs, setCustomDMs] = useState<CustomDM[]>(() => {
     try {
+      const hidden = readHiddenConvIds()
       const lastRead: Record<string, string> = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
-      return initialMapped.dms.map((d) => {
-        const read = lastRead[d.id]
-        if (!read || !d.lastTime) return d
-        const conv = initialConversations.find((c) => (c as Record<string,unknown>).id === d.id)
-        const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean}[] | undefined) ?? []
-        const lastMsgTime = msgs.filter(m => !m.is_system).at(-1)?.created_at ?? ""
-        return { ...d, unread: lastMsgTime > read ? 1 : 0 }
-      })
+      return initialMapped.dms
+        .filter((d) => !hidden.has(d.id))
+        .map((d) => {
+          const read = lastRead[d.id]
+          if (!read || !d.lastTime) return d
+          const conv = initialConversations.find((c) => (c as Record<string,unknown>).id === d.id)
+          const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean}[] | undefined) ?? []
+          const lastMsgTime = msgs.filter(m => !m.is_system).at(-1)?.created_at ?? ""
+          return { ...d, unread: lastMsgTime > read ? 1 : 0 }
+        })
     } catch { return initialMapped.dms }
   })
-  const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [photoMap, setPhotoMap]               = useState<Map<string, string>>(
     () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
   )
@@ -273,13 +323,16 @@ export function MessagesClient({
     const name = currentUser.name || initialProfile?.name || ""
     if (!name || !liveConversations?.length) return
     const { groups, dms } = mapConversations(liveConversations, name)
+    const hidden = readHiddenConvIds()
     setCustomGroups((prev) => {
       const unread = new Map(prev.map((g) => [g.id, g.unread]))
       return groups.map((g) => ({ ...g, unread: unread.get(g.id) ?? g.unread }))
     })
     setCustomDMs((prev) => {
       const unread = new Map(prev.map((d) => [d.id, d.unread]))
-      return dms.map((d) => ({ ...d, unread: unread.get(d.id) ?? d.unread }))
+      return dms
+        .filter((d) => !hidden.has(d.id))
+        .map((d) => ({ ...d, unread: unread.get(d.id) ?? d.unread }))
     })
   }, [liveConversations, currentUser.name, initialProfile?.name])
 
@@ -444,6 +497,8 @@ export function MessagesClient({
     }
     setCustomGroups((prev) => [newGroup, ...prev])
     setCreateGroupOpen(false)
+    setComposeOpen(false)
+    await openConversation(conv.id)
   }
 
   function updateCustomGroupMessages(id: string, messages: ChatMessage[]) {
@@ -529,16 +584,38 @@ export function MessagesClient({
   async function openOrCreateDM(member: Member) {
     const existingStatic = DM_CHATS.find((d) => d.name === member.name)
     if (existingStatic) {
+      softUnhideConv(existingStatic.id)
       setOpenId(existingStatic.id)
       router.replace(`${pathname}?open=${existingStatic.id}`, { scroll: false })
       setComposeOpen(false)
+      setCreateGroupOpen(false)
       return
     }
-    const existingCustom = customDMs.find((d) => d.name === member.name)
+
+    const matchDm = (d: CustomDM) =>
+      d.name === member.name || (!!member.id && d.peerUserId === member.id)
+
+    const existingCustom = customDMs.find(matchDm)
     if (existingCustom) {
+      softUnhideConv(existingCustom.id)
       await openConversation(existingCustom.id)
       setComposeOpen(false)
+      setCreateGroupOpen(false)
       return
+    }
+
+    // Soft-hidden DMs stay in DB — recover from live rows before creating anything new
+    const name = currentUser.name || initialProfile?.name || ""
+    if (liveConversations?.length && name) {
+      const hiddenMatch = mapConversations(liveConversations, name).dms.find(matchDm)
+      if (hiddenMatch) {
+        softUnhideConv(hiddenMatch.id)
+        setCustomDMs((prev) => (prev.some((d) => d.id === hiddenMatch.id) ? prev : [hiddenMatch, ...prev]))
+        await openConversation(hiddenMatch.id)
+        setComposeOpen(false)
+        setCreateGroupOpen(false)
+        return
+      }
     }
 
     if (!member.id) {
@@ -552,9 +629,17 @@ export function MessagesClient({
       return
     }
 
+    softUnhideConv(convId)
+
     const s = getStation(member.station)
     setCustomDMs((prev) => {
-      if (prev.some((d) => d.id === convId)) return prev
+      if (prev.some((d) => d.id === convId || matchDm(d))) {
+        return prev.map((d) =>
+          d.id === convId || matchDm(d)
+            ? { ...d, id: convId, peerUserId: member.id, name: member.name }
+            : d,
+        )
+      }
       return [{
         id: convId,
         name: member.name,
@@ -567,10 +652,12 @@ export function MessagesClient({
         lastAt: new Date().toISOString(),
         unread: 0,
         messages: [],
+        peerUserId: member.id,
       }, ...prev]
     })
     await openConversation(convId)
     setComposeOpen(false)
+    setCreateGroupOpen(false)
   }
 
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
@@ -608,16 +695,11 @@ export function MessagesClient({
   }
 
   async function hideConversation(id: string) {
+    // Soft-hide only: keep membership so reopening always lands on the same DM
+    softHideConv(id)
     setCustomDMs((prev) => prev.filter((d) => d.id !== id))
     setCustomGroups((prev) => prev.filter((g) => g.id !== id))
     if (openId === id) closeConversation()
-    try {
-      await fetch("/api/dm/hide", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: id }),
-      })
-    } catch { /* rollback optional */ }
   }
 
   // Filtered subscription: only our conversations (avoids TIMED_OUT from global fan-out)
@@ -928,28 +1010,34 @@ export function MessagesClient({
         )}
       </div>
 
-      <CreateGroupModal
-        open={createGroupOpen}
-        currentUserName={currentUser.name}
-        onClose={() => setCreateGroupOpen(false)}
-        onCreate={async (name, members) => {
-          await createGroup(name, members)
-          setCreateGroupOpen(false)
-          setComposeOpen(false)
-        }}
-      />
-
-      {composeOpen && (
+      {composeOpen && !createGroupOpen && (
         <ComposeScreen
           currentUserName={currentUser.name}
           currentUserId={initialUserId}
-          existingDmNames={[
-            ...DM_CHATS.map((d) => d.name),
-            ...customDMs.map((d) => d.name),
-          ]}
+          existingDmNames={(() => {
+            const names = new Set([
+              ...DM_CHATS.map((d) => d.name),
+              ...customDMs.map((d) => d.name),
+            ])
+            const myName = currentUser.name || initialProfile?.name || ""
+            if (liveConversations?.length && myName) {
+              for (const d of mapConversations(liveConversations, myName).dms) names.add(d.name)
+            }
+            return [...names]
+          })()}
           onClose={() => setComposeOpen(false)}
           onSelectContact={(m) => void openOrCreateDM(m)}
           onCreateGroup={() => setCreateGroupOpen(true)}
+        />
+      )}
+
+      {createGroupOpen && (
+        <CreateGroupScreen
+          currentUserName={currentUser.name}
+          onClose={() => setCreateGroupOpen(false)}
+          onCreate={async (name, members) => {
+            await createGroup(name, members)
+          }}
         />
       )}
 
@@ -1404,122 +1492,6 @@ function AddMembersModal({
   )
 }
 
-// ── Create group modal ────────────────────────────────────────────────────────
-function CreateGroupModal({
-  open, currentUserName, onClose, onCreate,
-}: {
-  open: boolean
-  currentUserName: string
-  onClose: () => void
-  onCreate: (name: string, memberNames: string[]) => void | Promise<void>
-}) {
-  const [name, setName]             = useState("")
-  const [memberSearch, setMemberSearch] = useState("")
-  const [selected, setSelected]     = useState<string[]>([])
-  const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
-
-  useEffect(() => {
-    async function load() {
-      const supabase = createClient()
-      const { data: profiles } = await supabase.from("profiles").select("id,name,initials,station,role,email,phone,birthday,linkedin,memleket,photo_url,igem_egitimi")
-      if (profiles && profiles.length > 0) {
-        const mapped: Member[] = profiles.map((p) => ({
-          id: p.id, name: p.name ?? "", initials: p.initials ?? "",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          role: ((p.role as string) ?? "") as any, station: (p.station ?? "paris") as StationId,
-          city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
-          birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
-          memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
-          photoUrl: p.photo_url ?? undefined,
-        }))
-        setAllMembers([...MEMBERS, ...mapped])
-      }
-    }
-    load()
-  }, [])
-
-  const filtered = allMembers
-    .filter((m) => m.name && m.name !== currentUserName && m.name.toLowerCase().includes(memberSearch.toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  return (
-    <Modal open={open} onClose={onClose} title="Yeni grup">
-      <div className="flex flex-col gap-3">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Grup adı…"
-          className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-        />
-
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={memberSearch}
-            onChange={(e) => setMemberSearch(e.target.value)}
-            placeholder="Üye ara…"
-            className="h-10 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-          />
-        </div>
-
-        {selected.length > 0 && (
-          <p className="text-xs font-medium text-primary">{selected.length} üye seçildi</p>
-        )}
-
-        <div className="overflow-hidden rounded-xl border border-border">
-          {filtered.map((m) => {
-            const s = getStation(m.station)
-            const isSelected = selected.includes(m.name)
-            return (
-              <button
-                key={m.id}
-                onClick={() => setSelected((prev) =>
-                  prev.includes(m.name) ? prev.filter((n) => n !== m.name) : [...prev, m.name]
-                )}
-                className={`flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors ${
-                  isSelected ? "bg-primary/5" : "active:bg-secondary"
-                }`}
-              >
-                {m.photoUrl ? (
-                  <img src={m.photoUrl} alt={m.initials} className="size-9 shrink-0 rounded-full object-cover" />
-                ) : (
-                  <span
-                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ backgroundColor: `hsl(${s.color})` }}
-                  >
-                    {m.initials}
-                  </span>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
-                </div>
-                <div className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                  isSelected ? "border-primary bg-primary" : "border-border"
-                }`}>
-                  {isSelected && <Check className="size-3 text-white" />}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="sticky bottom-0 -mx-5 mt-4 border-t border-border bg-card px-5 pb-0 pt-4">
-        <button
-          onClick={() => { if (name.trim() && selected.length > 0) onCreate(name.trim(), selected) }}
-          disabled={!name.trim() || selected.length === 0}
-          className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40"
-        >
-          {selected.length > 0
-            ? `Grup oluştur (${selected.length} üye)`
-            : "Grup oluştur"}
-        </button>
-      </div>
-    </Modal>
-  )
-}
-
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
@@ -1801,7 +1773,7 @@ function ChatView({
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-14 z-30 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
+    <div className="fixed inset-0 z-40 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
       {/* Header — BeReal-like: tap name/avatar → profile; calls on the right */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/95 px-2 py-2 backdrop-blur">
         <button type="button" onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">

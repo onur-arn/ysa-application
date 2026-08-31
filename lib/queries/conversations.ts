@@ -4,7 +4,7 @@ const CHAT_MSG_FULL =
   "id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at"
 const CHAT_MSG_MIN = "id,sender_name,sender_initials,text,image_url,is_system,created_at"
 
-const CONV_SELECT = `id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin)`
+const CONV_SELECT = `id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin,user_id)`
 
 export async function fetchUserConversationRows(
   supabase: SupabaseClient,
