@@ -8,7 +8,7 @@ export default async function AnnuairePage() {
 
   const [profileRes, allProfilesRes] = await Promise.all([
     user
-      ? supabase.from("profiles").select("id,station").eq("id", user.id).single()
+      ? supabase.from("profiles").select("id,station,name,email").eq("id", user.id).single()
       : Promise.resolve({ data: null }),
     supabase.from("profiles").select("id,name,initials,station,role,phone,email,birthday,linkedin,memleket,photo_url,igem_egitimi"),
   ])
@@ -16,6 +16,8 @@ export default async function AnnuairePage() {
   return (
     <DirectoryClient
       initialCurrentUserId={user?.id ?? ""}
+      initialCurrentUserName={(profileRes.data?.name as string) ?? ""}
+      initialCurrentUserEmail={user?.email ?? (profileRes.data?.email as string) ?? ""}
       initialCurrentUserStation={(profileRes.data?.station as string) ?? "paris"}
       initialProfiles={(allProfilesRes.data ?? []) as Record<string, unknown>[]}
     />

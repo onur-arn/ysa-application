@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
@@ -103,6 +104,7 @@ export function MessagesClient({
   initialConversations = [],
 }: MessagesClientProps) {
   const { t } = useI18n()
+  const searchParams = useSearchParams()
   const { setHideNav } = useNavVisibility()
   const activeUsers = usePresence()
   const [tab, setTab] = useState<Tab>("groups")
@@ -113,7 +115,71 @@ export function MessagesClient({
   useEffect(() => {
     setHideNav(openId !== null)
     return () => setHideNav(false)
-  }, [openId])
+  }, [openId, setHideNav])
+
+  // Open conversation from URL (?open=convId) — e.g. from Rehber
+  useEffect(() => {
+    const convId = searchParams.get("open")
+    if (!convId) return
+
+    setTab("dm")
+    setOpenId(convId)
+
+    const inGroups = customGroups.some((g) => g.id === convId)
+    const inDms = customDMs.some((d) => d.id === convId)
+    if (inGroups || inDms) return
+
+    async function loadConv() {
+      const supabase = createClient()
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("id,type,name,initials,conversation_members(member_name)")
+        .eq("id", convId)
+        .maybeSingle()
+      if (!conv) return
+
+      const memberNames = ((conv.conversation_members as { member_name: string }[]) ?? [])
+        .map((m) => m.member_name)
+        .filter((n) => n !== currentUser.name)
+
+      if (conv.type === "group") {
+        setCustomGroups((prev) => {
+          if (prev.some((g) => g.id === convId)) return prev
+          return [{
+            id: conv.id as string,
+            name: (conv.name as string) ?? "",
+            initials: (conv.initials as string) ?? "",
+            adminNames: [],
+            memberNames,
+            lastMessage: "",
+            lastTime: "",
+            unread: 0,
+            messages: [],
+          }, ...prev]
+        })
+      } else {
+        const otherName = memberNames[0] ?? (conv.name as string) ?? ""
+        setCustomDMs((prev) => {
+          if (prev.some((d) => d.id === convId)) return prev
+          return [{
+            id: conv.id as string,
+            name: otherName,
+            initials: otherName.slice(0, 2).toUpperCase(),
+            color: CUSTOM_COLOR,
+            station: "paris",
+            online: false,
+            lastMessage: "",
+            lastTime: "",
+            unread: 0,
+            messages: [],
+          }, ...prev]
+        })
+      }
+    }
+
+    loadConv()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
     name: initialProfile?.name ?? "",

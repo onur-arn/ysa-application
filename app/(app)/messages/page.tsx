@@ -1,4 +1,5 @@
 
+import { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { MessagesClient } from "./messages-client"
 
@@ -37,11 +38,13 @@ export default async function MessagesPage() {
   }
 
   return (
-    <MessagesClient
-      initialUserId={user?.id ?? ""}
-      initialProfile={profileRes.data as { name: string; initials: string; station: string } | null}
-      initialProfiles={(allProfilesRes.data ?? []) as { id: string; name: string; photo_url: string | null }[]}
-      initialConversations={convRows}
-    />
+    <Suspense fallback={<div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">Yükleniyor…</div>}>
+      <MessagesClient
+        initialUserId={user?.id ?? ""}
+        initialProfile={profileRes.data as { name: string; initials: string; station: string } | null}
+        initialProfiles={(allProfilesRes.data ?? []) as { id: string; name: string; photo_url: string | null }[]}
+        initialConversations={convRows}
+      />
+    </Suspense>
   )
 }

@@ -1,17 +1,22 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check, MessageCircle, Trash2, Loader2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { MEMBERS, STATIONS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
+import { MEMBERS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
 import { Modal } from "@/components/ui/modal"
 import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
+import { isAdminEmail } from "@/lib/admin"
+import { findOrCreateDM } from "@/lib/dm"
 
 type StationFilter = "all" | StationId
 
 interface DirectoryClientProps {
   initialCurrentUserId?: string
+  initialCurrentUserName?: string
+  initialCurrentUserEmail?: string
   initialCurrentUserStation?: string
   initialProfiles?: Record<string, unknown>[]
 }
@@ -38,11 +43,15 @@ function mapProfiles(profiles: Record<string, unknown>[]): Member[] {
 
 export function DirectoryClient({
   initialCurrentUserId = "",
+  initialCurrentUserName = "",
+  initialCurrentUserEmail = "",
   initialCurrentUserStation = "paris",
   initialProfiles = [],
 }: DirectoryClientProps) {
   const { t } = useI18n()
+  const router = useRouter()
   const activeUsers = usePresence()
+  const isAdmin = isAdminEmail(initialCurrentUserEmail)
   const [search, setSearch] = useState("")
   const [stationFilter, setStationFilter] = useState<StationFilter>("all")
   const [selected, setSelected] = useState<Member | null>(null)
@@ -54,6 +63,9 @@ export function DirectoryClient({
     isIntl: initialCurrentUserStation === "intl",
   })
   const [assignOpen, setAssignOpen] = useState(false)
+  const [messaging, setMessaging] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
 
   // All stations see all members
@@ -94,6 +106,40 @@ export function DirectoryClient({
       setSelected((prev) => prev?.id === member.id ? { ...prev, role } : prev)
     } catch {}
     setAssignOpen(false)
+  }
+
+  async function startMessage(member: Member) {
+    if (!initialCurrentUserName || member.id === initialCurrentUserId) return
+    setMessaging(true)
+    try {
+      const convId = await findOrCreateDM(initialCurrentUserName, {
+        name: member.name,
+        initials: member.initials,
+        station: member.station,
+      })
+      if (convId) {
+        setSelected(null)
+        router.push(`/messages?open=${convId}`)
+      }
+    } finally {
+      setMessaging(false)
+    }
+  }
+
+  async function deleteProfile(member: Member) {
+    setDeleting(true)
+    try {
+      await fetch("/api/admin/delete-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: member.id }),
+      })
+      setAllMembers((prev) => prev.filter((m) => m.id !== member.id))
+      setSelected(null)
+      setConfirmDelete(false)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const showStationFilter = true
@@ -156,24 +202,72 @@ export function DirectoryClient({
         )}
       </div>
 
-      <Modal open={!!selected} onClose={() => { setSelected(null); setAssignOpen(false) }} title={t("nav.directory")}>
+      <Modal open={!!selected} onClose={() => { setSelected(null); setAssignOpen(false); setConfirmDelete(false) }} title={t("nav.directory")}>
         {selected && (
           <>
             <MemberDetail member={selected} />
-            {currentUser.isIntl && (
-              <div className="mt-4 border-t border-border pt-4">
-                {!assignOpen ? (
-                  <button
-                    onClick={() => setAssignOpen(true)}
-                    className="w-full rounded-xl bg-primary/10 py-2.5 text-sm font-semibold text-primary transition-colors active:bg-primary/20"
-                  >
-                    Görev ver / değiştir
-                  </button>
-                ) : (
-                  <RoleAssignPanel member={selected} onAssign={(role) => assignRole(selected, role)} onCancel={() => setAssignOpen(false)} />
-                )}
-              </div>
-            )}
+            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
+              {selected.id !== initialCurrentUserId && (
+                <button
+                  onClick={() => startMessage(selected)}
+                  disabled={messaging}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors active:bg-primary/90 disabled:opacity-60"
+                >
+                  {messaging ? <Loader2 className="size-4 animate-spin" /> : <MessageCircle className="size-4" />}
+                  Mesaj gönder
+                </button>
+              )}
+
+              {currentUser.isIntl && (
+                <div>
+                  {!assignOpen ? (
+                    <button
+                      onClick={() => setAssignOpen(true)}
+                      className="w-full rounded-xl bg-primary/10 py-2.5 text-sm font-semibold text-primary transition-colors active:bg-primary/20"
+                    >
+                      Görev ver / değiştir
+                    </button>
+                  ) : (
+                    <RoleAssignPanel member={selected} onAssign={(role) => assignRole(selected, role)} onCancel={() => setAssignOpen(false)} />
+                  )}
+                </div>
+              )}
+
+              {isAdmin && selected.id !== initialCurrentUserId && !isAdminEmail(selected.email) && (
+                <div>
+                  {!confirmDelete ? (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 py-2.5 text-sm font-semibold text-destructive transition-colors active:bg-destructive/10"
+                    >
+                      <Trash2 className="size-4" />
+                      Profili sil
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+                      <p className="text-center text-sm text-destructive">
+                        <strong>{selected.name}</strong> uygulamaya erişemeyecek. Emin misiniz?
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setConfirmDelete(false)}
+                          className="flex-1 rounded-xl border border-border py-2 text-sm font-medium text-muted-foreground"
+                        >
+                          İptal
+                        </button>
+                        <button
+                          onClick={() => deleteProfile(selected)}
+                          disabled={deleting}
+                          className="flex-1 rounded-xl bg-destructive py-2 text-sm font-bold text-white disabled:opacity-60"
+                        >
+                          {deleting ? "Siliniyor…" : "Sil"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </>
         )}
       </Modal>

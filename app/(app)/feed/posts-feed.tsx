@@ -938,10 +938,11 @@ export function PostsFeed({
     | { kind: "igem"; data: typeof igemRequests[number]; date: string }
 
   const visiblePosts = posts.filter(p => new Date(p.createdAt).getTime() > cutoff)
+  const visibleIgem = igemRequests.filter(r => new Date(r.date).getTime() > cutoff)
 
   const allItems: FeedItem[] = [
     ...visiblePosts.map(p => ({ kind: "post" as const, data: p, date: p.createdAt })),
-    ...igemRequests.map((r) => ({ kind: "igem" as const, data: r, date: r.date })),
+    ...visibleIgem.map((r) => ({ kind: "igem" as const, data: r, date: r.date })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   async function deleteIgem(id: string) {
