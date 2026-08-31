@@ -56,11 +56,20 @@ export function GifPicker({ open, onClose, onSelect }: {
 
   if (!open) return null
 
+  function pick(url: string) {
+    if (!url) return
+    onSelect(url)
+    onClose()
+  }
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50"
+      onPointerDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
       <div
         className="flex max-h-[70dvh] w-full max-w-md flex-col rounded-t-3xl border border-border bg-card"
-        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="font-semibold text-foreground">GIF</h3>
@@ -100,11 +109,17 @@ export function GifPicker({ open, onClose, onSelect }: {
                 <button
                   key={g.id}
                   type="button"
-                  onClick={() => { onSelect(g.url); onClose() }}
-                  className="overflow-hidden rounded-xl active:opacity-80"
+                  onClick={() => pick(g.url)}
+                  className="overflow-hidden rounded-xl active:scale-[0.98] active:opacity-80"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={g.preview || g.url} alt="" className="aspect-square w-full object-cover" loading="lazy" />
+                  <img
+                    src={g.preview || g.url}
+                    alt=""
+                    className="pointer-events-none aspect-square w-full object-cover"
+                    loading="lazy"
+                    draggable={false}
+                  />
                 </button>
               ))}
             </div>

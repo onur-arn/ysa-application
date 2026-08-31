@@ -1655,28 +1655,58 @@ function ChatView({
     })
   }
 
-  async function sendGif(url: string) {
-    if (!conversationId) return
+  async function sendGif(rawUrl: string) {
+    if (!conversationId || !rawUrl) return
+    const url = rawUrl.startsWith("//") ? `https:${rawUrl}` : rawUrl
+    setShowGifPicker(false)
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
     const tempId = `temp-gif-${Date.now()}`
     setMessages((prev) => [...prev, {
-      id: tempId, author: senderName, initials: senderInitials, text: "", time, self: true, gif: url, messageType: "gif" as const,
+      id: tempId,
+      author: senderName,
+      initials: senderInitials,
+      text: "",
+      time,
+      self: true,
+      gif: url,
+      messageType: "gif" as const,
     }])
 
     const supabase = createClient()
-    const { data: inserted, error } = await supabase.from("chat_messages").insert({
+    const base = {
       conversation_id: conversationId,
       sender_name: senderName,
       sender_initials: senderInitials,
+      text: "GIF",
+    }
+
+    // Prefer gif_url; fall back to image_url if column missing in DB
+    let inserted: { id: string } | null = null
+    const primary = await supabase.from("chat_messages").insert({
+      ...base,
       gif_url: url,
       message_type: "gif",
-    }).select().single()
+    }).select("id").single()
 
-    if (error || !inserted) {
-      setMessages((prev) => prev.filter((m) => m.id !== tempId))
-      return
+    if (!primary.error && primary.data) {
+      inserted = primary.data
+    } else {
+      console.warn("[chat] gif_url insert failed, falling back:", primary.error?.message)
+      const fallback = await supabase.from("chat_messages").insert({
+        ...base,
+        image_url: url,
+        message_type: "gif",
+      }).select("id").single()
+      if (!fallback.error && fallback.data) {
+        inserted = fallback.data
+      } else {
+        console.error("[chat] gif send failed:", fallback.error?.message ?? primary.error?.message)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        return
+      }
     }
-    setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, id: inserted.id } : m))
+
+    setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, id: inserted!.id } : m)))
   }
 
   async function sendAudio(blob: Blob) {
