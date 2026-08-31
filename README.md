@@ -96,6 +96,25 @@ Ouvrir [http://localhost:3000](http://localhost:3000)
 | `NEXT_PUBLIC_SUPABASE_URL` | URL du projet Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clé publique Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Clé service Supabase (serveur uniquement) |
+| `TURN_URLS` | URLs TURN séparées par des virgules (ex. `turn:host:443,turns:host:443`) |
+| `TURN_USERNAME` | Identifiant TURN (fourni par ton hébergeur TURN) |
+| `TURN_CREDENTIAL` | Mot de passe / credential TURN |
+
+### Appels audio/vidéo (WebRTC)
+
+1. Tables `call_sessions` + `call_signals` dans Supabase (voir `supabase/schema.sql`)
+2. Realtime activé sur ces deux tables
+3. Variables `TURN_*` sur Vercel — sans TURN, les appels ne passent souvent que sur le même réseau Wi‑Fi
+
+**Exemple gratuit (test)** — [Metered Open Relay](https://www.metered.ca/tools/openrelay/) :
+
+```
+TURN_URLS=turn:openrelay.metered.ca:80,turn:openrelay.metered.ca:443,turns:openrelay.metered.ca:443
+TURN_USERNAME=openrelayproject
+TURN_CREDENTIAL=openrelayproject
+```
+
+Pour la production, crée un compte Metered/Twilio et utilise tes propres credentials.
 
 ---
 

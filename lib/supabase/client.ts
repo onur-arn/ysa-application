@@ -2,7 +2,13 @@ import { createBrowserClient } from "@supabase/ssr"
 
 declare global {
   interface Window {
-    __YS_CONFIG__: { supabaseUrl: string; supabaseAnonKey: string }
+    __YS_CONFIG__: {
+      supabaseUrl: string
+      supabaseAnonKey: string
+      turnUrls?: string
+      turnUsername?: string
+      turnCredential?: string
+    }
   }
 }
 

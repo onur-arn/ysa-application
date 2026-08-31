@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 import { CallOverlay } from "@/components/messaging/call-overlay"
 
+import { getIceServers } from "@/lib/call/ice-servers"
+
 export type CallType = "audio" | "video"
 
 type CallSession = {
@@ -38,11 +40,6 @@ export function useCall() {
   if (!ctx) throw new Error("useCall must be used within CallProvider")
   return ctx
 }
-
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-]
 
 export function CallProvider({ userName, children }: { userName: string; children: ReactNode }) {
   const [incoming, setIncoming] = useState<CallSession | null>(null)
@@ -95,7 +92,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
   async function ensurePc(sessionId: string, withVideo: boolean) {
     if (pcRef.current) return pcRef.current
 
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() })
     pc.ontrack = (e) => {
       setRemoteStream(e.streams[0] ?? null)
     }

@@ -48,6 +48,9 @@ export default function RootLayout({
   const configScript = `window.__YS_CONFIG__=${JSON.stringify({
     supabaseUrl: process.env.SUPABASE_URL ?? "",
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? "",
+    turnUrls: process.env.TURN_URLS ?? "",
+    turnUsername: process.env.TURN_USERNAME ?? "",
+    turnCredential: process.env.TURN_CREDENTIAL ?? "",
   })};`
 
   return (
