@@ -41,6 +41,11 @@ export function isTurnConfigured(): boolean {
   return iceFromStaticConfig() !== null || cached !== null
 }
 
+/** Prefetch TURN credentials in the background (e.g. on app load). */
+export function prefetchIceServers() {
+  void loadIceServers()
+}
+
 /** Load ICE servers before starting a call (Metered API or static TURN env). */
 export async function loadIceServers(): Promise<RTCIceServer[]> {
   const staticIce = iceFromStaticConfig()

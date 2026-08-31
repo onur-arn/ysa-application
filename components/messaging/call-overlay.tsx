@@ -20,18 +20,22 @@ export function CallOverlay({
   active,
   localStream,
   remoteStream,
+  error,
   onAnswer,
   onDecline,
   onEnd,
+  onDismissError,
 }: {
   userName: string
   incoming: Session | null
   active: Session | null
   localStream: MediaStream | null
   remoteStream: MediaStream | null
+  error?: string | null
   onAnswer: () => void
   onDecline: () => void
   onEnd: () => void
+  onDismissError?: () => void
 }) {
   const session = incoming ?? active
   const [elapsed, setElapsed] = useState(0)
@@ -49,15 +53,32 @@ export function CallOverlay({
     return () => clearInterval(t)
   }, [isConnected, session?.id])
 
+  if (error && !session) {
+    return (
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-zinc-900 px-6 text-white">
+        <p className="text-center text-sm text-white/80">{error}</p>
+        <button
+          type="button"
+          onClick={onDismissError}
+          className="rounded-full bg-white/15 px-6 py-3 text-sm font-semibold"
+        >
+          Kapat
+        </button>
+      </div>
+    )
+  }
+
   if (!session) return null
 
   const peerName = session.callerName === userName ? session.calleeName : session.callerName
   const isVideo = session.callType === "video"
-  const statusText = isIncoming
-    ? "Gelen arama…"
-    : isConnected
-      ? formatCallDuration(elapsed)
-      : "Çalıyor…"
+  const statusText = error
+    ? error
+    : isIncoming
+      ? "Gelen arama…"
+      : isConnected
+        ? formatCallDuration(elapsed)
+        : "Çalıyor…"
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-white">
@@ -84,7 +105,7 @@ export function CallOverlay({
           {peerName.slice(0, 2).toUpperCase()}
         </div>
         <h2 className="text-xl font-bold">{peerName}</h2>
-        <p className="text-sm text-white/70">{statusText}</p>
+        <p className={`text-sm ${error ? "text-red-300" : "text-white/70"}`}>{statusText}</p>
       </div>
 
       <div className="relative z-20 flex items-center justify-center gap-8 pb-12 pt-6">

@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { createClient } from "@/lib/supabase/client"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 import { CallOverlay } from "@/components/messaging/call-overlay"
-import { loadIceServers } from "@/lib/call/ice-servers"
+import { loadIceServers, prefetchIceServers } from "@/lib/call/ice-servers"
 import { encodeCallEvent, type CallOutcome } from "@/lib/call/call-event"
 
 export type CallType = "audio" | "video"
@@ -24,6 +24,7 @@ type CallContextValue = {
   active: CallSession | null
   localStream: MediaStream | null
   remoteStream: MediaStream | null
+  callError: string | null
   answerCall: () => Promise<void>
   declineCall: () => Promise<void>
   endCall: () => Promise<void>
@@ -42,11 +43,24 @@ export function useCall() {
   return ctx
 }
 
+async function acquireMedia(withVideo: boolean): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo })
+  } catch (err) {
+    if (withVideo) {
+      // Fallback: video unavailable → audio only
+      return await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    }
+    throw err
+  }
+}
+
 export function CallProvider({ userName, children }: { userName: string; children: ReactNode }) {
   const [incoming, setIncoming] = useState<CallSession | null>(null)
   const [active, setActive] = useState<CallSession | null>(null)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [callError, setCallError] = useState<string | null>(null)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const sessionRef = useRef<CallSession | null>(null)
@@ -63,6 +77,11 @@ export function CallProvider({ userName, children }: { userName: string; childre
   useEffect(() => { activeRef.current = active }, [active])
   useEffect(() => { incomingRef.current = incoming }, [incoming])
 
+  // Prefetch TURN so getUserMedia can stay in the user-gesture chain
+  useEffect(() => {
+    if (userName) void prefetchIceServers()
+  }, [userName])
+
   const clearRingTimer = useCallback(() => {
     if (ringTimerRef.current) clearTimeout(ringTimerRef.current)
     ringTimerRef.current = null
@@ -71,6 +90,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
   const flushIce = useCallback((sessionId: string) => {
     const batch = iceBatchRef.current.splice(0)
     if (batch.length === 0) return
+    if (!userName) return
     const supabase = createClient()
     void supabase.from("call_signals").insert(
       batch.map((payload) => ({
@@ -99,6 +119,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     postedEventRef.current = false
     setActive(null)
     setIncoming(null)
+    setCallError(null)
   }, [clearRingTimer])
 
   const postCallEvent = useCallback(async (
@@ -106,7 +127,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     outcome: CallOutcome,
     durationSec?: number,
   ) => {
-    if (postedEventRef.current || !session.conversationId) return
+    if (postedEventRef.current || !session.conversationId || !userName) return
     postedEventRef.current = true
     const supabase = createClient()
     await supabase.from("chat_messages").insert({
@@ -119,7 +140,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     })
   }, [userName])
 
-  async function ensurePc(sessionId: string, withVideo: boolean) {
+  async function buildPc(sessionId: string, stream: MediaStream) {
     if (pcRef.current) return pcRef.current
 
     const iceServers = await loadIceServers()
@@ -141,7 +162,6 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo })
     stream.getTracks().forEach((t) => pc.addTrack(t, stream))
     localStreamRef.current = stream
     setLocalStream(stream)
@@ -150,34 +170,67 @@ export function CallProvider({ userName, children }: { userName: string; childre
   }
 
   async function startCall({ conversationId, peerName, callType }: { conversationId: string; peerName: string; callType: CallType }) {
-    if (!userName) return
-    const supabase = createClient()
+    if (!userName) {
+      setCallError("Profil yükleniyor, tekrar deneyin.")
+      return
+    }
+    if (activeRef.current || incomingRef.current) return
 
-    const { data: session } = await supabase.from("call_sessions").insert({
-      conversation_id: conversationId,
-      caller_name: userName,
-      callee_name: peerName,
-      call_type: callType,
-      status: "ringing",
-    }).select().single()
-    if (!session) return
+    setCallError(null)
 
-    const s: CallSession = {
-      id: session.id,
+    // 1) Media FIRST — must stay close to the click (Safari / iOS)
+    let stream: MediaStream
+    try {
+      stream = await acquireMedia(callType === "video")
+    } catch {
+      setCallError("Mikrofon / kamera izni gerekli. Tarayıcı ayarlarından izin verin.")
+      return
+    }
+
+    // 2) Show overlay immediately
+    const placeholder: CallSession = {
+      id: `pending-${Date.now()}`,
       conversationId,
       callerName: userName,
       calleeName: peerName,
       callType,
       status: "ringing",
     }
-    sessionRef.current = s
+    sessionRef.current = placeholder
     isCallerRef.current = true
     postedEventRef.current = false
     connectedAtRef.current = null
-    setActive(s)
+    localStreamRef.current = stream
+    setLocalStream(stream)
+    setActive(placeholder)
+
+    const supabase = createClient()
 
     try {
-      const pc = await ensurePc(session.id, callType === "video")
+      const { data: session, error } = await supabase.from("call_sessions").insert({
+        conversation_id: conversationId,
+        caller_name: userName,
+        callee_name: peerName,
+        call_type: callType,
+        status: "ringing",
+      }).select().single()
+
+      if (error || !session) {
+        throw new Error(error?.message ?? "Oturum oluşturulamadı")
+      }
+
+      const s: CallSession = {
+        id: session.id,
+        conversationId,
+        callerName: userName,
+        calleeName: peerName,
+        callType,
+        status: "ringing",
+      }
+      sessionRef.current = s
+      setActive(s)
+
+      const pc = await buildPc(session.id, stream)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       await supabase.from("call_signals").insert({
@@ -186,33 +239,48 @@ export function CallProvider({ userName, children }: { userName: string; childre
         signal_type: "offer",
         payload: offer,
       })
-    } catch {
-      await supabase.from("call_sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", session.id)
-      cleanup()
-      return
-    }
 
-    ringTimerRef.current = setTimeout(() => {
-      void (async () => {
-        const current = sessionRef.current
-        if (!current || current.id !== s.id || connectedAtRef.current) return
-        const sb = createClient()
-        await sb.from("call_sessions").update({ status: "missed", ended_at: new Date().toISOString() }).eq("id", s.id)
-        await sb.from("call_signals").insert({
-          session_id: s.id,
-          sender_name: userName,
-          signal_type: "hangup",
-          payload: {},
-        })
-        await postCallEvent(current, "missed")
-        cleanup()
-      })()
-    }, RING_TIMEOUT_MS)
+      ringTimerRef.current = setTimeout(() => {
+        void (async () => {
+          const current = sessionRef.current
+          if (!current || current.id !== s.id || connectedAtRef.current) return
+          const sb = createClient()
+          await sb.from("call_sessions").update({ status: "missed", ended_at: new Date().toISOString() }).eq("id", s.id)
+          await sb.from("call_signals").insert({
+            session_id: s.id,
+            sender_name: userName,
+            signal_type: "hangup",
+            payload: {},
+          })
+          await postCallEvent(current, "missed")
+          cleanup()
+        })()
+      }, RING_TIMEOUT_MS)
+    } catch (err) {
+      console.error("[call] start failed:", err)
+      setCallError(err instanceof Error ? err.message : "Arama başlatılamadı")
+      stream.getTracks().forEach((t) => t.stop())
+      localStreamRef.current = null
+      setLocalStream(null)
+      sessionRef.current = null
+      setActive(null)
+    }
   }
 
   async function answerCall() {
     const session = incomingRef.current
     if (!session || !userName) return
+
+    setCallError(null)
+
+    let stream: MediaStream
+    try {
+      stream = await acquireMedia(session.callType === "video")
+    } catch {
+      setCallError("Mikrofon / kamera izni gerekli.")
+      return
+    }
+
     const supabase = createClient()
     await supabase.from("call_sessions").update({ status: "active" }).eq("id", session.id)
     const live = { ...session, status: "active" }
@@ -224,27 +292,33 @@ export function CallProvider({ userName, children }: { userName: string; childre
     setIncoming(null)
     clearRingTimer()
 
-    const pc = await ensurePc(session.id, session.callType === "video")
+    try {
+      const pc = await buildPc(session.id, stream)
 
-    const { data: offerSig } = await supabase
-      .from("call_signals")
-      .select("payload")
-      .eq("session_id", session.id)
-      .eq("signal_type", "offer")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle()
+      const { data: offerSig } = await supabase
+        .from("call_signals")
+        .select("payload")
+        .eq("session_id", session.id)
+        .eq("signal_type", "offer")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle()
 
-    if (offerSig?.payload) {
-      await pc.setRemoteDescription(offerSig.payload as RTCSessionDescriptionInit)
-      const answer = await pc.createAnswer()
-      await pc.setLocalDescription(answer)
-      await supabase.from("call_signals").insert({
-        session_id: session.id,
-        sender_name: userName,
-        signal_type: "answer",
-        payload: answer,
-      })
+      if (offerSig?.payload) {
+        await pc.setRemoteDescription(offerSig.payload as RTCSessionDescriptionInit)
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        await supabase.from("call_signals").insert({
+          session_id: session.id,
+          sender_name: userName,
+          signal_type: "answer",
+          payload: answer,
+        })
+      }
+    } catch (err) {
+      console.error("[call] answer failed:", err)
+      setCallError("Bağlantı kurulamadı")
+      stream.getTracks().forEach((t) => t.stop())
     }
   }
 
@@ -266,6 +340,13 @@ export function CallProvider({ userName, children }: { userName: string; childre
   async function endCall() {
     const session = sessionRef.current ?? activeRef.current ?? incomingRef.current
     if (!session) { cleanup(); return }
+
+    // Pending placeholder (DB insert not done yet)
+    if (session.id.startsWith("pending-")) {
+      cleanup()
+      return
+    }
+
     const supabase = createClient()
     const connected = connectedAtRef.current != null || session.status === "active"
     const outcome: CallOutcome = connected ? "ended" : "missed"
@@ -309,8 +390,9 @@ export function CallProvider({ userName, children }: { userName: string; childre
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "call_sessions" }, (payload) => {
         const row = payload.new as { id: string; status: string }
         const incoming = incomingRef.current
+        // Only clear incoming ring UI — never tear down an active caller session on status updates
         if (incoming?.id === row.id && row.status !== "ringing") {
-          cleanup()
+          setIncoming(null)
         }
       })
 
@@ -322,7 +404,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
 
         const incoming = incomingRef.current
         if (incoming && incoming.id === sig.session_id && (sig.signal_type === "hangup" || sig.signal_type === "decline")) {
-          cleanup()
+          setIncoming(null)
           return
         }
 
@@ -336,7 +418,11 @@ export function CallProvider({ userName, children }: { userName: string; childre
           const live = { ...session, status: "active" }
           sessionRef.current = live
           setActive(live)
-          if (pc) await pc.setRemoteDescription(sig.payload as RTCSessionDescriptionInit)
+          try {
+            if (pc) await pc.setRemoteDescription(sig.payload as RTCSessionDescriptionInit)
+          } catch (err) {
+            console.error("[call] setRemoteDescription failed:", err)
+          }
         } else if (sig.signal_type === "ice") {
           try {
             if (pc) await pc.addIceCandidate(sig.payload as RTCIceCandidateInit)
@@ -356,7 +442,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
   }, [userName, cleanup, clearRingTimer])
 
   return (
-    <CallContext.Provider value={{ startCall, incoming, active, localStream, remoteStream, answerCall, declineCall, endCall }}>
+    <CallContext.Provider value={{ startCall, incoming, active, localStream, remoteStream, callError, answerCall, declineCall, endCall }}>
       {children}
       <CallOverlay
         userName={userName}
@@ -364,9 +450,11 @@ export function CallProvider({ userName, children }: { userName: string; childre
         active={active}
         localStream={localStream}
         remoteStream={remoteStream}
+        error={callError}
         onAnswer={answerCall}
         onDecline={declineCall}
         onEnd={endCall}
+        onDismissError={() => { setCallError(null); cleanup() }}
       />
     </CallContext.Provider>
   )
