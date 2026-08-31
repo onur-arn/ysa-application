@@ -238,7 +238,7 @@ export function VoiceRecorderBar({ recording, seconds, onStop, onCancel }: {
 }) {
   if (!recording) return null
   return (
-    <div className="mb-2 flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5">
+    <div className="mb-2 flex items-center gap-3 rounded-full bg-secondary px-3 py-2.5 shadow-sm">
       <span className="relative flex size-3">
         <span className="absolute inset-0 animate-ping rounded-full bg-rose-500/60" />
         <span className="relative size-3 rounded-full bg-rose-500" />

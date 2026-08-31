@@ -1987,8 +1987,8 @@ function ChatView({
     currentUserName: string
     isAdmin: boolean
     avatarUrl?: string
-    onAddMembers: (newNames: string[]) => void
-    onRemoveMember: (name: string) => void
+    onAddMembers: (newNames: string[]) => void | Promise<void>
+    onRemoveMember: (name: string) => void | Promise<void>
     onLeave: () => void
     onDeleteGroup: () => void
     onRename: (newName: string) => void
@@ -2331,64 +2331,13 @@ function ChatView({
   }
 
   return (
-    <div className="fixed inset-0 z-50 mx-auto flex max-w-md flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top)]">
-      {/* Header — BeReal-like: tap name/avatar → profile; calls on the right */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/95 px-2 py-2 backdrop-blur">
-        <button type="button" onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
-          <ArrowLeft className="size-5" />
-        </button>
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left active:opacity-70"
-          onClick={() => {
-            if (onOpenProfile) onOpenProfile()
-            else if (groupSettings) setShowSettings(true)
-          }}
-          disabled={!onOpenProfile && !groupSettings}
-        >
-          <div className="relative shrink-0">
-            {headerPhotoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={headerPhotoUrl} alt={initials} className="size-9 rounded-full object-cover" />
-            ) : (
-              <span
-                className="flex size-9 items-center justify-center rounded-full text-xs font-bold text-white"
-                style={{ backgroundColor: `hsl(${color})` }}
-              >
-                {groupSettings ? <Users className="size-4" /> : initials}
-              </span>
-            )}
-            {online && (
-              <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1">
-              <span className="truncate font-semibold text-foreground">{title}</span>
-              {groupSettings && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-            </div>
-            <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
-          </div>
-        </button>
-        {conversationId && peerName && call && (isPrivate || !!groupSettings) && (
-          <button
-            type="button"
-            onClick={() => call.startCall({
-              conversationId,
-              peerName,
-              callType: "audio",
-              isGroup: !!groupSettings && !isPrivate,
-            })}
-            className="flex size-9 shrink-0 items-center justify-center rounded-full text-foreground active:bg-secondary"
-            aria-label="Sesli arama"
-          >
-            <Phone className="size-5" />
-          </button>
-        )}
-      </div>
+    <div className="fixed inset-0 z-50 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
+      {/* Messages — full-bleed single background */}
+      <div
+        ref={scrollRef}
+        className="absolute inset-0 space-y-2 overflow-y-auto overscroll-contain px-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-[calc(4.5rem+env(safe-area-inset-top))]"
+      >
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto overscroll-contain bg-background px-3 py-4">
         {chatQuery.isLoading && messages.length === 0 && (
           <div className="flex justify-center py-8">
             <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -2487,7 +2436,7 @@ function ChatView({
                     className={`rounded-2xl px-3.5 py-2 ${
                       m.self
                         ? "rounded-br-[5px] bg-primary text-primary-foreground"
-                        : "rounded-bl-[5px] bg-card text-foreground shadow-sm"
+                        : "rounded-bl-[5px] bg-secondary text-foreground"
                     }`}
                   >
                     {m.image && (
@@ -2513,8 +2462,72 @@ function ChatView({
         })}
       </div>
 
-      {/* Composer */}
-      <div className="shrink-0 border-t border-border bg-card px-3 pt-2 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
+      {/* Floating header bubbles */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="pointer-events-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Geri"
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground shadow-sm active:scale-95"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-full bg-secondary py-1.5 pl-1.5 pr-3 text-left shadow-sm active:opacity-80 disabled:opacity-100"
+            onClick={() => {
+              if (onOpenProfile) onOpenProfile()
+              else if (groupSettings) setShowSettings(true)
+            }}
+            disabled={!onOpenProfile && !groupSettings}
+          >
+            <div className="relative shrink-0">
+              {headerPhotoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={headerPhotoUrl} alt={initials} className="size-8 rounded-full object-cover" />
+              ) : (
+                <span
+                  className="flex size-8 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                  style={{ backgroundColor: `hsl(${color})` }}
+                >
+                  {groupSettings ? <Users className="size-3.5" /> : initials}
+                </span>
+              )}
+              {online && (
+                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-secondary bg-emerald-500" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                <span className="truncate text-sm font-semibold text-foreground">{title}</span>
+                {groupSettings && <ChevronRight className="size-3 shrink-0 text-muted-foreground" />}
+              </div>
+              <span className="block truncate text-[10px] text-muted-foreground">{subtitle}</span>
+            </div>
+          </button>
+
+          {conversationId && peerName && call && (isPrivate || !!groupSettings) && (
+            <button
+              type="button"
+              onClick={() => call.startCall({
+                conversationId,
+                peerName,
+                callType: "audio",
+                isGroup: !!groupSettings && !isPrivate,
+              })}
+              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground shadow-sm active:scale-95"
+              aria-label="Sesli arama"
+            >
+              <Phone className="size-5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Floating composer bubble */}
+      <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
         <VoiceRecorderBar
           recording={voice.recording}
           seconds={voice.seconds}
@@ -2522,7 +2535,7 @@ function ChatView({
           onCancel={voice.cancel}
         />
         {(attached || uploading) && !voice.recording && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-xs text-secondary-foreground">
+          <div className="mb-2 flex items-center gap-2 rounded-full bg-secondary px-3 py-2 text-xs text-secondary-foreground shadow-sm">
             {uploading
               ? <><Loader2 className="size-3.5 animate-spin text-primary" /> Yükleniyor…</>
               : <><Check className="size-3.5 text-primary" /> {t("messages.imageAttached")}</>
@@ -2534,7 +2547,7 @@ function ChatView({
             )}
           </div>
         )}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-full bg-secondary p-1.5 shadow-sm">
           <input
             ref={fileInputRef}
             type="file"
@@ -2564,7 +2577,7 @@ function ChatView({
             <button
               type="button"
               onClick={() => setShowAttachMenu((v) => !v)}
-              className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-secondary"
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-background/50"
               aria-label="Ekle"
             >
               <Plus className="size-5" />
@@ -2582,13 +2595,13 @@ function ChatView({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }}
             placeholder={t("messages.typeMessage")}
-            className="h-11 flex-1 rounded-full border border-input bg-background px-4 text-base outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            className="h-10 min-w-0 flex-1 bg-transparent px-2 text-base text-foreground outline-none placeholder:text-muted-foreground"
           />
           {draft.trim() || attached ? (
             <button
               onClick={send}
               disabled={(!draft.trim() && !attached) || uploading || voice.recording}
-              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
+              className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
             >
               {uploading ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
             </button>
@@ -2597,7 +2610,7 @@ function ChatView({
               type="button"
               onClick={() => { if (!voice.recording) voice.start() }}
               disabled={!conversationId || uploading}
-              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
+              className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
               aria-label="Sesli mesaj"
             >
               <Mic className="size-5" />

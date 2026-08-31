@@ -11,7 +11,7 @@ export function AttachMenu({ open, onClose, onImage, onGif, onPoll }: {
 }) {
   if (!open) return null
   return (
-    <div className="absolute bottom-full left-0 z-10 mb-2 w-48 rounded-2xl border border-border bg-card p-1 shadow-lg">
+    <div className="absolute bottom-full left-0 z-10 mb-2 w-48 rounded-2xl bg-secondary p-1 shadow-md">
       <button type="button" onClick={() => { onImage(); onClose() }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm active:bg-secondary">
         <ImageIcon className="size-5 text-primary" /> Fotoğraf
       </button>
