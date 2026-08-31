@@ -14,16 +14,32 @@ export function GifPicker({ open, onClose, onSelect }: {
   const [searchQuery, setSearchQuery] = useState("")
   const [gifs, setGifs] = useState<GifItem[]>([])
   const [loading, setLoading] = useState(false)
+  const [hint, setHint] = useState<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!open) return
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
-    fetch(`/api/gifs/search?q=${encodeURIComponent(searchQuery)}`)
+    setHint(null)
+
+    fetch(`/api/gifs/search?q=${encodeURIComponent(searchQuery)}`, { signal: controller.signal })
       .then((r) => r.json())
-      .then((d) => setGifs(d.gifs ?? []))
-      .catch(() => setGifs([]))
+      .then((d) => {
+        setGifs(d.gifs ?? [])
+        if (d.hint) setHint(d.hint)
+        else if (d.fallback) setHint("GIF limités — ajoutez TENOR_API_KEY pour plus de choix")
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") setGifs([])
+      })
       .finally(() => setLoading(false))
+
+    return () => controller.abort()
   }, [open, searchQuery])
 
   useEffect(() => {
@@ -31,6 +47,7 @@ export function GifPicker({ open, onClose, onSelect }: {
       setInputValue("")
       setSearchQuery("")
       setGifs([])
+      setHint(null)
     }
   }, [open])
 
@@ -56,12 +73,15 @@ export function GifPicker({ open, onClose, onSelect }: {
               const v = e.target.value
               setInputValue(v)
               if (debounce.current) clearTimeout(debounce.current)
-              debounce.current = setTimeout(() => setSearchQuery(v), 300)
+              debounce.current = setTimeout(() => setSearchQuery(v), 200)
             }}
             placeholder="GIF ara…"
             className="h-10 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring"
           />
         </div>
+        {hint && (
+          <p className="px-3 py-1.5 text-center text-[11px] text-muted-foreground">{hint}</p>
+        )}
         <div className="flex-1 overflow-y-auto p-2">
           {loading ? (
             <div className="flex justify-center py-12">
@@ -69,7 +89,7 @@ export function GifPicker({ open, onClose, onSelect }: {
             </div>
           ) : gifs.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">
-              {searchQuery ? "Sonuç yok" : "GIF bulunamadı (Tenor API anahtarı gerekli)"}
+              {searchQuery ? "Sonuç yok" : "GIF yüklenemedi"}
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -81,7 +101,7 @@ export function GifPicker({ open, onClose, onSelect }: {
                   className="overflow-hidden rounded-xl active:opacity-80"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={g.preview || g.url} alt="" className="aspect-square w-full object-cover" />
+                  <img src={g.preview || g.url} alt="" className="aspect-square w-full object-cover" loading="lazy" />
                 </button>
               ))}
             </div>

@@ -9,7 +9,7 @@ import { useMidnightLogout } from "@/lib/use-midnight-logout"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
 import { PresenceProvider } from "@/lib/presence"
 import { CallProvider } from "@/lib/call/call-context"
-import { registerSW } from "@/lib/push"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 
 const PAGE_TITLES: { path: string; label: string }[] = [
   { path: "/feed",      label: "Ana Sayfa" },
@@ -88,35 +88,33 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Listen for new messages from others → red dot + push notification
+  // Unread badge — skip when already on messages (conversations-meta handles it there)
   useEffect(() => {
-    if (!userName) return
+    if (!userName || pathname.startsWith("/messages")) return
     const supabase = createClient()
     const channel = supabase
       .channel("shell-unread")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
         const msg = payload.new as { sender_name?: string; text?: string }
         if (msg.sender_name === userName) return
-        if (!window.location.pathname.startsWith("/messages")) {
-          setHasUnread(true)
-          try {
-            const prefs = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
-            if (prefs.messages !== false && document.visibilityState === "hidden") {
-              navigator.serviceWorker?.ready.then((reg) => {
-                reg.showNotification("Yeni Mesaj", {
-                  body: msg.text ? `${msg.sender_name}: ${msg.text}` : `${msg.sender_name} bir mesaj gönderdi`,
-                  icon: "/icon.png",
-                  badge: "/icon.png",
-                  data: { url: "/messages" },
-                })
+        setHasUnread(true)
+        try {
+          const prefs = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
+          if (prefs.messages !== false && document.visibilityState === "hidden") {
+            navigator.serviceWorker?.ready.then((reg) => {
+              reg.showNotification("Yeni Mesaj", {
+                body: msg.text ? `${msg.sender_name}: ${msg.text}` : `${msg.sender_name} bir mesaj gönderdi`,
+                icon: "/icon.png",
+                badge: "/icon.png",
+                data: { url: "/messages" },
               })
-            }
-          } catch {}
-        }
+            })
+          }
+        } catch {}
       })
-      .subscribe()
+    void subscribeChannel(supabase, channel)
     return () => { supabase.removeChannel(channel) }
-  }, [userName])
+  }, [userName, pathname])
 
   // Clear dot when user navigates to messages
   useEffect(() => {

@@ -357,6 +357,7 @@ drop policy if exists "Authenticated can read chat messages"   on chat_messages;
 drop policy if exists "Authenticated can insert chat messages" on chat_messages;
 create policy "Authenticated can read chat messages"   on chat_messages for select to authenticated using (true);
 create policy "Authenticated can insert chat messages" on chat_messages for insert to authenticated with check (true);
+create index if not exists chat_messages_conv_created_idx on chat_messages (conversation_id, created_at desc);
 
 -- Posts — created_by pour identifier l'auteur par UUID (fix bug noms dupliqués)
 alter table posts add column if not exists created_by uuid references auth.users(id) on delete set null;

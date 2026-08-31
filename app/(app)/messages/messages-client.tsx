@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption, messagePreview } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 import { useNavVisibility } from "@/lib/nav-visibility"
 import { Modal } from "@/components/ui/modal"
 import { usePresence } from "@/lib/presence"
@@ -460,11 +461,13 @@ export function MessagesClient({
   useEffect(() => { openIdRef.current = openId }, [openId])
   useEffect(() => { currentNameRef.current = currentUser.name }, [currentUser.name])
 
-  // Open a conversation and reset its unread counter
-  async function openConversation(id: string) {
-    const ok = await ensureConversationInState(id)
-    if (!ok) return
-    setOpenId(id)
+  // Open a conversation instantly; fetch metadata in background if needed
+  function openConversation(id: string) {
+    if (convIdsRef.current.has(id) || customGroups.some((g) => g.id === id) || customDMs.some((d) => d.id === id)) {
+      setOpenId(id)
+    } else {
+      void ensureConversationInState(id).then((ok) => { if (ok) setOpenId(id) })
+    }
     router.replace(`${pathname}?open=${id}`, { scroll: false })
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
     setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: 0 } : d))
@@ -475,30 +478,62 @@ export function MessagesClient({
     } catch {}
   }
 
-  // Global subscription: move-to-top + unread for all conversations
+  async function hideConversation(id: string) {
+    setCustomDMs((prev) => prev.filter((d) => d.id !== id))
+    setCustomGroups((prev) => prev.filter((g) => g.id !== id))
+    if (openId === id) closeConversation()
+    try {
+      await fetch("/api/dm/hide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: id }),
+      })
+    } catch { /* rollback optional */ }
+  }
+
+  // Filtered subscription: only our conversations (avoids TIMED_OUT from global fan-out)
+  const knownConvIds = useMemo(
+    () => [...customGroups.map((g) => g.id), ...customDMs.map((d) => d.id)],
+    [customGroups, customDMs],
+  )
+
   useEffect(() => {
+    if (knownConvIds.length === 0) return
     const supabase = createClient()
+    const filter = `conversation_id=in.(${knownConvIds.join(",")})`
+
     const channel = supabase
-      .channel("conversations-meta")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
-        const m = payload.new as { id: string; conversation_id: string; sender_name: string; text: string | null; created_at: string; is_system?: boolean }
+      .channel(`conversations-meta-${knownConvIds.length}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "chat_messages",
+        filter,
+      }, (payload) => {
+        const m = payload.new as { id: string; conversation_id: string; sender_name: string; text: string | null; created_at: string; is_system?: boolean; message_type?: string; gif_url?: string; audio_url?: string; image_url?: string }
         if (m.is_system) return
         const isOwn  = m.sender_name === currentNameRef.current
         const isOpen = m.conversation_id === openIdRef.current
         const time   = new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
-        const text   = m.text ?? ""
+        const preview = messagePreview({
+          text: m.text ?? "",
+          messageType: m.message_type as ChatMessage["messageType"],
+          image: m.image_url ?? undefined,
+          gif: m.gif_url ?? undefined,
+          audio: m.audio_url ?? undefined,
+        })
 
         setCustomGroups((prev) => {
           const idx = prev.findIndex((g) => g.id === m.conversation_id)
           if (idx < 0) return prev
-          const updated = { ...prev[idx], lastMessage: text || prev[idx].lastMessage, lastTime: time,
+          const updated = { ...prev[idx], lastMessage: preview || prev[idx].lastMessage, lastTime: time,
             unread: (!isOpen && !isOwn) ? prev[idx].unread + 1 : prev[idx].unread }
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
         setCustomDMs((prev) => {
           const idx = prev.findIndex((d) => d.id === m.conversation_id)
           if (idx < 0) return prev
-          const updated = { ...prev[idx], lastMessage: text || prev[idx].lastMessage, lastTime: time,
+          const updated = { ...prev[idx], lastMessage: preview || prev[idx].lastMessage, lastTime: time,
             unread: (!isOpen && !isOwn) ? prev[idx].unread + 1 : prev[idx].unread }
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
@@ -512,12 +547,10 @@ export function MessagesClient({
           return next
         })
       })
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR") console.error("[conversations-meta] channel error:", err)
-        if (status === "TIMED_OUT") console.warn("[conversations-meta] timed out")
-      })
+
+    void subscribeChannel(supabase, channel)
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [knownConvIds.join(",")])
 
   const senderInitials = currentUser.name.trim().split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
 
@@ -598,6 +631,7 @@ export function MessagesClient({
         conversationId={activeCustomDM.id}
         photoMap={photoMap}
         peerName={activeCustomDM.name}
+        onHide={() => hideConversation(activeCustomDM.id)}
       />
     )
   }
@@ -693,7 +727,7 @@ export function MessagesClient({
             {filteredCustomGroups.map((g) => (
               <ConversationRow
                 key={g.id}
-                onClick={() => void openConversation(g.id)}
+                onClick={() => openConversation(g.id)}
                 initials={g.initials}
                 color={CUSTOM_COLOR}
                 title={g.name}
@@ -706,7 +740,7 @@ export function MessagesClient({
             {filteredStationGroups.map((g) => (
               <ConversationRow
                 key={g.id}
-                onClick={() => void openConversation(g.id)}
+                onClick={() => openConversation(g.id)}
                 initials={getStation(g.id).short}
                 color={getStation(g.id).color}
                 title={g.title}
@@ -721,7 +755,12 @@ export function MessagesClient({
             {customDMs.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
               <ConversationRow
                 key={d.id}
-                onClick={() => void openConversation(d.id)}
+                onClick={() => openConversation(d.id)}
+                onDelete={() => {
+                  if (window.confirm("Bu sohbeti listenizden silmek istiyor musunuz? (Karşı taraf için kalır)")) {
+                    hideConversation(d.id)
+                  }
+                }}
                 initials={d.initials}
                 color={d.color}
                 title={d.name}
@@ -737,7 +776,7 @@ export function MessagesClient({
             {DM_CHATS.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
               <ConversationRow
                 key={d.id}
-                onClick={() => void openConversation(d.id)}
+                onClick={() => openConversation(d.id)}
                 initials={d.initials}
                 color={d.color}
                 title={d.name}
@@ -1422,7 +1461,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl, peerName,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl, peerName, onHide,
 }: {
   onBack: () => void
   title: string
@@ -1439,6 +1478,7 @@ function ChatView({
   photoMap?: Map<string, string>
   headerPhotoUrl?: string
   peerName?: string
+  onHide?: () => void
   groupSettings?: {
     memberNames: string[]
     adminNames: string[]
@@ -1536,10 +1576,12 @@ function ChatView({
         .from("chat_messages")
         .select("id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))")
         .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
+        .limit(80)
 
       if (data) {
-        setMessages(data.map((m) => rowToMessage(
+        const ordered = [...data].reverse()
+        setMessages(ordered.map((m) => rowToMessage(
           m as RawMsg,
           parsePoll((m as Record<string, unknown>).message_polls as RawPoll),
         )))
@@ -1550,18 +1592,22 @@ function ChatView({
     const channel = supabase
       .channel(`chat-${conversationId}`)
       .on("postgres_changes", {
-        event: "INSERT", schema: "public", table: "chat_messages",
+        event: "INSERT",
+        schema: "public",
+        table: "chat_messages",
+        filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         const m = payload.new as RawMsg & { conversation_id: string }
-        if (m.conversation_id !== conversationId) return
         setMessages((prev) => {
           if (prev.some((x) => x.id === m.id)) return prev
-          return [...prev, rowToMessage(m)]
+          // Replace optimistic temp message from same sender
+          const withoutTemp = prev.filter((x) => !(x.id.startsWith("temp-") && x.self && m.sender_name === senderName))
+          return [...withoutTemp, rowToMessage(m)]
         })
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_polls" }, (payload) => {
         const poll = payload.new as { id: string; message_id: string; question: string }
-        setTimeout(async () => {
+        void (async () => {
           const { data } = await supabase
             .from("message_polls")
             .select("id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name))")
@@ -1578,7 +1624,7 @@ function ChatView({
           setMessages((prev) => prev.map((msg) =>
             msg.id === poll.message_id ? { ...msg, poll: chatPoll } : msg
           ))
-        }, 600)
+        })()
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_poll_votes" }, (payload) => {
         const v = payload.new as { option_id: string; voter_name: string }
@@ -1616,10 +1662,7 @@ function ChatView({
           }
         }))
       })
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR") console.error("[chat-realtime] channel error:", err)
-        if (status === "TIMED_OUT") console.warn("[chat-realtime] timed out")
-      })
+    void subscribeChannel(supabase, channel)
 
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1629,72 +1672,80 @@ function ChatView({
     if (!draft.trim() && !attached) return
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
     const messageType = attached ? "image" : "text"
+    const text = draft.trim()
+    const image = attached ?? undefined
+    const tempId = `temp-${Date.now()}`
 
-    if (conversationId) {
-      const supabase = createClient()
-      const { data: inserted } = await supabase.from("chat_messages").insert({
-        conversation_id: conversationId,
-        sender_name: senderName,
-        sender_initials: senderInitials,
-        text: draft.trim() || null,
-        image_url: attached ?? null,
-        message_type: messageType,
-      }).select().single()
-
-      if (inserted) {
-        const newMsg: ChatMessage = {
-          id: inserted.id,
-          author: senderName,
-          initials: senderInitials,
-          text: draft.trim(),
-          time,
-          self: true,
-          image: attached ?? undefined,
-          messageType,
-        }
-        setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
-        onMessagesChange?.([...messages, newMsg])
-      }
-    } else {
-      const newMsg: ChatMessage = {
-        id: String(Date.now()),
-        author: senderName, initials: senderInitials,
-        text: draft.trim(), time, self: true,
-        image: attached ?? undefined,
-        messageType,
-      }
-      const newMessages = [...messages, newMsg]
-      setMessages(newMessages)
-      onMessagesChange?.(newMessages)
+    const optimistic: ChatMessage = {
+      id: tempId,
+      author: senderName,
+      initials: senderInitials,
+      text,
+      time,
+      self: true,
+      image,
+      messageType,
     }
+    setMessages((prev) => [...prev, optimistic])
     setDraft("")
     setAttached(null)
+
+    if (!conversationId) return
+
+    const supabase = createClient()
+    const { data: inserted, error } = await supabase.from("chat_messages").insert({
+      conversation_id: conversationId,
+      sender_name: senderName,
+      sender_initials: senderInitials,
+      text: text || null,
+      image_url: image ?? null,
+      message_type: messageType,
+    }).select().single()
+
+    if (error || !inserted) {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      return
+    }
+
+    const newMsg: ChatMessage = {
+      id: inserted.id,
+      author: senderName,
+      initials: senderInitials,
+      text,
+      time,
+      self: true,
+      image,
+      messageType,
+    }
+    setMessages((prev) => {
+      const updated = prev.map((m) => m.id === tempId ? newMsg : m)
+      onMessagesChange?.(updated)
+      return updated
+    })
   }
 
   async function sendGif(url: string) {
     if (!conversationId) return
-    const supabase = createClient()
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
-    const { data: inserted } = await supabase.from("chat_messages").insert({
+    const tempId = `temp-gif-${Date.now()}`
+    setMessages((prev) => [...prev, {
+      id: tempId, author: senderName, initials: senderInitials, text: "", time, self: true, gif: url, messageType: "gif" as const,
+    }])
+
+    const supabase = createClient()
+    const { data: inserted, error } = await supabase.from("chat_messages").insert({
       conversation_id: conversationId,
       sender_name: senderName,
       sender_initials: senderInitials,
       gif_url: url,
       message_type: "gif",
     }).select().single()
-    if (inserted) {
-      const newMsg: ChatMessage = {
-        id: inserted.id,
-        author: senderName,
-        initials: senderInitials,
-        text: "",
-        time,
-        self: true,
-        gif: url,
-        messageType: "gif",
-      }
-      setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
+
+    if (error || !inserted) {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      return
     }
+    setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, id: inserted.id } : m))
   }
 
   async function sendAudio(blob: Blob) {
@@ -1836,24 +1887,38 @@ function ChatView({
           </div>
           <span className="block text-xs text-muted-foreground">{subtitle}</span>
         </button>
-        {isPrivate && conversationId && peerName && call && (
+        {isPrivate && conversationId && (
           <div className="flex shrink-0 gap-1">
-            <button
-              type="button"
-              onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
-              className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
-              aria-label="Sesli arama"
-            >
-              <Phone className="size-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => call.startCall({ conversationId, peerName, callType: "video" })}
-              className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
-              aria-label="Görüntülü arama"
-            >
-              <Video className="size-5" />
-            </button>
+            {peerName && call && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
+                  className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
+                  aria-label="Sesli arama"
+                >
+                  <Phone className="size-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => call.startCall({ conversationId, peerName, callType: "video" })}
+                  className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
+                  aria-label="Görüntülü arama"
+                >
+                  <Video className="size-5" />
+                </button>
+              </>
+            )}
+            {onHide && (
+              <button
+                type="button"
+                onClick={onHide}
+                className="flex size-9 items-center justify-center rounded-full text-muted-foreground active:bg-destructive/10 active:text-destructive"
+                aria-label="Sohbeti sil"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
