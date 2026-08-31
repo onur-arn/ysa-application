@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/client"
 import type { StationId } from "@/lib/data/stations"
+import { insertConversationMembers } from "@/lib/queries/conversations"
 
 export type DmParticipant = {
   id: string
@@ -35,11 +36,13 @@ async function findExistingSharedDmId(
   const dmIds = dmConvs.map((c) => c.id as string)
 
   const [{ data: byId }, { data: byName }] = await Promise.all([
-    supabase
-      .from("conversation_members")
-      .select("conversation_id")
-      .in("conversation_id", dmIds)
-      .eq("user_id", targetId),
+    targetId
+      ? supabase
+          .from("conversation_members")
+          .select("conversation_id")
+          .in("conversation_id", dmIds)
+          .eq("user_id", targetId)
+      : Promise.resolve({ data: null as { conversation_id: string }[] | null }),
     supabase
       .from("conversation_members")
       .select("conversation_id")
@@ -52,11 +55,29 @@ async function findExistingSharedDmId(
     ...(byName ?? []).map((r) => r.conversation_id as string),
   ])
 
-  // Prefer oldest shared DM (stable) if duplicates already exist
   for (const c of dmConvs) {
     if (shared.has(c.id as string)) return c.id as string
   }
   return null
+}
+
+async function membershipConvIds(
+  supabase: SupabaseClient,
+  userId: string,
+  userName: string,
+): Promise<string[]> {
+  const [{ data: byUserId }, { data: byName }] = await Promise.all([
+    userId
+      ? supabase.from("conversation_members").select("conversation_id").eq("user_id", userId)
+      : Promise.resolve({ data: null as { conversation_id: string }[] | null }),
+    userName
+      ? supabase.from("conversation_members").select("conversation_id").eq("member_name", userName)
+      : Promise.resolve({ data: [] as { conversation_id: string }[] }),
+  ])
+  return [...new Set([
+    ...(byUserId ?? []).map((m) => m.conversation_id as string),
+    ...(byName ?? []).map((m) => m.conversation_id as string),
+  ])]
 }
 
 /** Find an existing DM with `target`, or create one. Returns conversation id. */
@@ -70,15 +91,7 @@ export async function findOrCreateDM(
   if (!current.id || !target.id || current.id === target.id) return null
   if (!meName || !themName) return null
 
-  const [{ data: byUserId, error: userIdErr }, { data: byName }] = await Promise.all([
-    supabase.from("conversation_members").select("conversation_id").eq("user_id", current.id),
-    supabase.from("conversation_members").select("conversation_id").eq("member_name", meName),
-  ])
-
-  const myConvIds = [...new Set([
-    ...(!userIdErr ? (byUserId ?? []) : []).map((m) => m.conversation_id as string),
-    ...(byName ?? []).map((m) => m.conversation_id as string),
-  ])]
+  const myConvIds = await membershipConvIds(supabase, current.id, meName)
 
   const existing = await findExistingSharedDmId(supabase, myConvIds, target.id, themName)
   if (existing) return existing
@@ -96,40 +109,21 @@ export async function findOrCreateDM(
 
   if (error || !conv) {
     console.error("[findOrCreateDM] insert:", error?.message)
-    // Race: another request may have created it — look again including fresh membership
-    const retryIds = [...myConvIds]
-    const { data: again } = await supabase
-      .from("conversation_members")
-      .select("conversation_id")
-      .eq("user_id", current.id)
-    for (const r of again ?? []) retryIds.push(r.conversation_id as string)
-    return findExistingSharedDmId(supabase, [...new Set(retryIds)], target.id, themName)
+    const retryIds = await membershipConvIds(supabase, current.id, meName)
+    return findExistingSharedDmId(supabase, retryIds, target.id, themName)
   }
 
-  const { error: membersErr } = await supabase.from("conversation_members").insert([
+  const membersOk = await insertConversationMembers(supabase, [
     { conversation_id: conv.id, member_name: meName, user_id: current.id },
     { conversation_id: conv.id, member_name: themName, user_id: target.id },
   ])
 
-  if (membersErr) {
-    const legacy = await supabase.from("conversation_members").insert([
-      { conversation_id: conv.id, member_name: meName },
-      { conversation_id: conv.id, member_name: themName },
-    ])
-    if (legacy.error) {
-      console.error("[findOrCreateDM] members:", legacy.error.message)
-      await supabase.from("conversations").delete().eq("id", conv.id)
-      // Another request won the race
-      const { data: again } = await supabase
-        .from("conversation_members")
-        .select("conversation_id")
-        .eq("user_id", current.id)
-      const ids = [...new Set((again ?? []).map((r) => r.conversation_id as string))]
-      return findExistingSharedDmId(supabase, ids, target.id, themName)
-    }
+  if (!membersOk) {
+    await supabase.from("conversations").delete().eq("id", conv.id)
+    const retryIds = await membershipConvIds(supabase, current.id, meName)
+    return findExistingSharedDmId(supabase, retryIds, target.id, themName)
   }
 
-  // Final race check: if duplicates appeared, keep oldest and drop this one — but only if empty
   const afterIds = [...new Set([...myConvIds, conv.id as string])]
   const winner = await findExistingSharedDmId(supabase, afterIds, target.id, themName)
   if (winner && winner !== conv.id) {

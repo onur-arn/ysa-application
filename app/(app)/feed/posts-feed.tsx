@@ -339,6 +339,8 @@ function ComposeModal({ open, onClose, onPost }: {
       setContent("")
       clearImage()
       onClose()
+    } catch {
+      // keep modal open on failure
     } finally {
       setPosting(false)
     }
@@ -357,6 +359,8 @@ function ComposeModal({ open, onClose, onPost }: {
       setQuestion("")
       setOptions(["", ""])
       onClose()
+    } catch {
+      // keep modal open on failure
     } finally {
       setPosting(false)
     }
@@ -893,13 +897,17 @@ export function PostsFeed({
   }
 
   async function addPost(content: string, imageFile?: File, poll?: Poll) {
+    if (!me.name?.trim()) {
+      window.alert("Profil adınız eksik. Ayarlardan adınızı kontrol edin.")
+      throw new Error("missing profile name")
+    }
     const newId = crypto.randomUUID()
     let imageUrl: string | undefined
     if (imageFile) {
       const uploaded = await uploadPostImage(imageFile)
       if (!uploaded) {
-        window.alert("Fotoğraf yüklenemedi. Lütfen tekrar deneyin.")
-        return
+        window.alert("Fotoğraf yüklenemedi. JPEG/PNG deneyin (HEIC desteklenmiyor olabilir).")
+        throw new Error("image upload failed")
       }
       imageUrl = uploaded
     }
@@ -930,17 +938,17 @@ export function PostsFeed({
       const { error } = await supabase.from("posts").insert({
         id: newId,
         author: me.name,
-        initials: me.initials,
-        station: me.station,
+        initials: me.initials || "?",
+        station: me.station || "intl",
         content,
         image_url: imageUrl ?? null,
-        created_by: userId,
+        created_by: userId || null,
       })
       if (error) {
         console.error("[addPost] insert:", error.message)
         setPosts(prev => prev.filter(p => p.id !== newId))
         window.alert("Paylaşım kaydedilemedi. Lütfen tekrar deneyin.")
-        return
+        throw error
       }
       if (pollWithIds && pollWithIds.options.length >= 2) {
         const { data: pollRow, error: pollErr } = await supabase
@@ -962,9 +970,8 @@ export function PostsFeed({
         }
       }
     } catch (e) {
-      console.error("[addPost]", e)
       setPosts(prev => prev.filter(p => p.id !== newId))
-      window.alert("Paylaşım kaydedilemedi. Lütfen tekrar deneyin.")
+      throw e
     }
   }
 

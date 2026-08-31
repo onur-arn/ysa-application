@@ -30,7 +30,7 @@ import { useCallOptional } from "@/lib/call/call-context"
 import { openDMViaApi } from "@/lib/dm"
 import { prefetchChatMessages } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
-import { fetchUserConversationRows, syncConversationMembership } from "@/lib/queries/conversations"
+import { fetchUserConversationRows, syncConversationMembership, insertConversationMembers } from "@/lib/queries/conversations"
 import { useChatMessages } from "@/lib/hooks/use-chat-messages"
 
 const CUSTOM_COLOR = "262 83% 58%"
@@ -531,14 +531,20 @@ export function MessagesClient({
     const allMembers = [...new Set([currentUser.name, ...memberNames])]
     const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", allMembers)
     const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
-    await supabase.from("conversation_members").insert(
+    const ok = await insertConversationMembers(
+      supabase,
       allMembers.map((member_name) => ({
         conversation_id: conv.id,
         member_name,
         user_id: member_name === currentUser.name ? initialUserId || idByName.get(member_name) : idByName.get(member_name),
         is_admin: member_name === currentUser.name,
-      }))
+      })),
     )
+    if (!ok) {
+      console.error("[createGroup] members insert failed")
+      await supabase.from("conversations").delete().eq("id", conv.id)
+      return
+    }
 
     const newGroup: CustomGroup = {
       id: conv.id, name, initials, adminNames: [currentUser.name], memberNames,
@@ -575,14 +581,16 @@ export function MessagesClient({
     const supabase = createClient()
     const { data: profiles } = await supabase.from("profiles").select("id,name").in("name", newNames)
     const idByName = new Map((profiles ?? []).map((p) => [p.name as string, p.id as string]))
-    await supabase.from("conversation_members").insert(
+    const ok = await insertConversationMembers(
+      supabase,
       newNames.map((member_name) => ({
         conversation_id: id,
         member_name,
         user_id: idByName.get(member_name),
         is_admin: false,
-      }))
+      })),
     )
+    if (!ok) return
     setCustomGroups((prev) =>
       prev.map((g) => g.id === id ? { ...g, memberNames: [...new Set([...g.memberNames, ...newNames])] } : g)
     )
