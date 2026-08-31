@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { sendMail, ADMIN_TO } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createHmac } from "crypto"
+import { isRoleAvailable } from "@/lib/roles"
+import { ROLES } from "@/lib/data/stations"
 
 const SUPABASE_ENABLED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 const APP_URL = process.env.APP_URL ?? "https://youthstation.vercel.app"
@@ -38,6 +40,13 @@ export async function POST(req: NextRequest) {
   const { data: existing } = await admin.from("pending_members").select("id").eq("email", email).maybeSingle()
   if (existing) {
     return NextResponse.json({ ok: false, error: "EMAIL_TAKEN" }, { status: 409 })
+  }
+
+  if (role && (ROLES as readonly string[]).includes(role)) {
+    const available = await isRoleAvailable(role)
+    if (!available) {
+      return NextResponse.json({ ok: false, error: "ROLE_TAKEN" }, { status: 409 })
+    }
   }
 
   const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""

@@ -3,6 +3,8 @@ import { sendMail } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createHmac } from "crypto"
 import { buildWelcomePost } from "@/lib/welcome-post"
+import { isRoleAvailable } from "@/lib/roles"
+import { ROLES } from "@/lib/data/stations"
 
 const SUPABASE_ENABLED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 const TOKEN_SECRET = process.env.SIGNUP_TOKEN_SECRET
@@ -46,6 +48,16 @@ export async function GET(req: NextRequest) {
       page("error", "Demande introuvable. Elle a peut-être déjà été traitée."),
       { headers: { "Content-Type": "text/html; charset=utf-8" } }
     )
+  }
+
+  if (pending.role && (ROLES as readonly string[]).includes(pending.role)) {
+    const available = await isRoleAvailable(pending.role, pendingId)
+    if (!available) {
+      return new NextResponse(
+        page("error", "Ce rôle est déjà occupé par un autre membre. Veuillez rejeter cette demande et demander à l'utilisateur de s'inscrire avec un autre rôle."),
+        { headers: { "Content-Type": "text/html; charset=utf-8" } }
+      )
+    }
   }
 
   // Create auth user

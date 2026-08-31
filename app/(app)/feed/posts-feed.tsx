@@ -2,13 +2,13 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, Archive, ChevronDown, ChevronUp, BarChart2, Check, Users, ChevronDown as CommentsToggle, Sparkles } from "lucide-react"
+import { Heart, MessageCircle, Send, X, Plus, Rocket, ImagePlus, Trash2, BarChart2, Check, Users, ChevronDown as CommentsToggle, Sparkles } from "lucide-react"
 import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/data/posts"
 import { getStation, type StationId } from "@/lib/data/stations"
+import { FEED_RETENTION_MS } from "@/lib/monthly-export"
 import { createClient } from "@/lib/supabase/client"
 import { Modal } from "@/components/ui/modal"
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 function timeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
@@ -651,8 +651,6 @@ export function PostsFeed({
         })),
     }))
   )
-  const [showArchive, setShowArchive] = useState(false)
-  const [isIntl, setIsIntl] = useState(initialMe?.station === "intl" || !initialMe)
   const [photoMap, setPhotoMap] = useState<Map<string, string>>(() => {
     const map = new Map<string, string>()
     initialPhotoMap.forEach(p => {
@@ -933,19 +931,18 @@ export function PostsFeed({
     } catch (e) { console.error("[addPost]", e) }
   }
 
-  const cutoff = Date.now() - SEVEN_DAYS_MS
+  const cutoff = Date.now() - FEED_RETENTION_MS
 
   type FeedItem =
     | { kind: "post"; data: Post; date: string }
     | { kind: "igem"; data: typeof igemRequests[number]; date: string }
 
+  const visiblePosts = posts.filter(p => new Date(p.createdAt).getTime() > cutoff)
+
   const allItems: FeedItem[] = [
-    ...posts.map(p => ({ kind: "post" as const, data: p, date: p.createdAt })),
+    ...visiblePosts.map(p => ({ kind: "post" as const, data: p, date: p.createdAt })),
     ...igemRequests.map((r) => ({ kind: "igem" as const, data: r, date: r.date })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-
-  const freshItems   = allItems.filter(item => new Date(item.date).getTime() > cutoff)
-  const archivedItems = allItems.filter(item => new Date(item.date).getTime() <= cutoff)
 
   async function deleteIgem(id: string) {
     setIgemRequests(prev => prev.filter(r => r.id !== id))
@@ -1017,38 +1014,7 @@ export function PostsFeed({
   return (
     <>
       <div className="flex flex-col gap-3">
-        {freshItems.map(renderItem)}
-
-        {/* Archives section — intl only */}
-        {isIntl && archivedItems.length > 0 && (
-          <div className="mt-2">
-            <button
-              onClick={() => setShowArchive(v => !v)}
-              className="flex w-full items-center gap-2 rounded-2xl border border-border/60 bg-muted/40 px-4 py-3 text-sm font-medium text-muted-foreground transition-colors active:bg-muted"
-            >
-              <Archive className="size-4 shrink-0" />
-              <span className="flex-1 text-left">Archives</span>
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold">{archivedItems.length}</span>
-              {showArchive ? <ChevronUp className="size-4 shrink-0" /> : <ChevronDown className="size-4 shrink-0" />}
-            </button>
-
-            <AnimatePresence>
-              {showArchive && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.22, ease: "easeInOut" }}
-                  className="overflow-hidden"
-                >
-                  <div className="flex flex-col gap-3 pt-3 opacity-70">
-                    {archivedItems.map(renderItem)}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
+        {allItems.map(renderItem)}
       </div>
 
       {/* Compose button */}

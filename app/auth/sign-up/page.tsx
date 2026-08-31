@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { getCroppedImg } from "@/lib/crop"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -127,6 +127,8 @@ export default function SignUpPage() {
         const json = await res.json().catch(() => ({}))
         if (json.error === "EMAIL_TAKEN") {
           setError("Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.")
+        } else if (json.error === "ROLE_TAKEN") {
+          setError("Seçtiğiniz görev zaten başka bir üye tarafından alınmış. Lütfen başka bir görev seçin.")
         } else {
           console.error("signup-request failed:", json)
           setError("Bir hata oluştu. Lütfen tekrar deneyin.")
@@ -497,7 +499,25 @@ function Step2({
 }) {
   const [role, setRole] = useState<Role | "">(data.role)
   const [station, setStation] = useState<StationId>(data.station)
-  const canProceed = role !== ""
+  const [occupiedRoles, setOccupiedRoles] = useState<string[]>([])
+
+  useEffect(() => {
+    fetch("/api/check-roles")
+      .then((r) => r.json())
+      .then((d) => setOccupiedRoles(d.occupied ?? []))
+      .catch(() => setOccupiedRoles([]))
+  }, [])
+
+  const canProceed = role !== "" && !occupiedRoles.includes(role)
+
+  function renderRoleOption(r: Role) {
+    const taken = occupiedRoles.includes(r)
+    return (
+      <option key={r} value={r} disabled={taken}>
+        {r}{taken ? " (dolu)" : ""}
+      </option>
+    )
+  }
 
   return (
     <div>
@@ -521,16 +541,19 @@ function Step2({
           >
             <option value="">Görevinizi seçin…</option>
             <optgroup label="Yönetim Kurulu">
-              {YONETIM_KURULU_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              {YONETIM_KURULU_ROLES.map(renderRoleOption)}
             </optgroup>
             <optgroup label="Yürütme Kurulu">
-              {YURUTME_KURULU_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              {YURUTME_KURULU_ROLES.map(renderRoleOption)}
             </optgroup>
           </select>
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         </div>
         {!canProceed && role === "" && (
           <p className="text-xs text-muted-foreground">Devam etmek için görevinizi seçmelisiniz.</p>
+        )}
+        {role !== "" && occupiedRoles.includes(role) && (
+          <p className="text-xs text-destructive">Bu görev zaten dolu. Lütfen başka bir görev seçin.</p>
         )}
       </div>
 

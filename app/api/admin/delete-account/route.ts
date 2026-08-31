@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
+import { isAdminEmail } from "@/lib/admin"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-
-const ADMIN_EMAIL = "secretaire@youthstation.org"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user || user.email !== ADMIN_EMAIL) {
+  if (!user || !isAdminEmail(user.email)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
   const { userId } = await req.json()
   if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
+  if (userId === user.id) {
+    return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 })
+  }
 
   const admin = createAdminClient()
+  const { data: target } = await admin.from("profiles").select("email").eq("id", userId).maybeSingle()
+  if (target?.email && isAdminEmail(target.email)) {
+    return NextResponse.json({ error: "Cannot delete an admin" }, { status: 403 })
+  }
 
   // Ban immediately — invalidates their JWT on Supabase auth server right now
   await admin.auth.admin.updateUserById(userId, { ban_duration: "876000h" })

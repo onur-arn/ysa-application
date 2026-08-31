@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
+import { isAdminEmail } from "@/lib/admin"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-
-const ADMIN_EMAIL = "secretaire@youthstation.org"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user || user.email !== ADMIN_EMAIL) {
+  if (!user || !isAdminEmail(user.email)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
@@ -15,7 +14,6 @@ export async function POST(req: NextRequest) {
   if (!taskId) return NextResponse.json({ error: "Missing taskId" }, { status: 400 })
 
   const admin = createAdminClient()
-  await admin.from("task_comments").delete().eq("task_id", taskId)
   const { error } = await admin.from("tasks").delete().eq("id", taskId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

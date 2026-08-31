@@ -6,7 +6,8 @@ export default async function FeedPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const postsCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const storiesCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
   const [profileRes, allProfilesRes, postsRes, igemRes, storiesRes, igemCommentsRes] = await Promise.all([
     user
@@ -16,6 +17,7 @@ export default async function FeedPage() {
     supabase
       .from("posts")
       .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at),polls(id,question,poll_options(id,text,position,poll_votes(option_id,voter_name)))")
+      .gte("created_at", postsCutoff)
       .order("created_at", { ascending: false })
       .limit(25),
     supabase
@@ -24,7 +26,7 @@ export default async function FeedPage() {
     supabase
       .from("stories")
       .select("*")
-      .gte("created_at", cutoff)
+      .gte("created_at", storiesCutoff)
       .order("created_at", { ascending: true }),
     supabase
       .from("igem_comments")

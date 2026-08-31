@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
+import { isAdminEmail } from "@/lib/admin"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-
-const ADMIN_EMAIL = "secretaire@youthstation.org"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user || user.email !== ADMIN_EMAIL) {
+  if (!user || !isAdminEmail(user.email)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
@@ -15,18 +14,14 @@ export async function POST(req: NextRequest) {
   if (!requestId) return NextResponse.json({ error: "Missing requestId" }, { status: 400 })
 
   const admin = createAdminClient()
+  const { data: req_ } = await admin.from("igem_requests").select("author").eq("id", requestId).single()
+  if (!req_) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  // Fetch author name from DB (not from client) then update their profile
-  const { data: igemReq } = await admin.from("igem_requests").select("author").eq("id", requestId).single()
-  if (igemReq?.author) {
-    await admin.from("profiles")
-      .update({ igem_egitimi: "evet", igem_tarihi: igemDate ?? null })
-      .eq("name", igemReq.author)
+  const { data: profile } = await admin.from("profiles").select("id").eq("name", req_.author).maybeSingle()
+  if (profile) {
+    await admin.from("profiles").update({ igem_egitimi: "evet", igem_tarihi: igemDate ?? null }).eq("id", profile.id)
   }
-
-  // Delete the request from the feed
-  const { error } = await admin.from("igem_requests").delete().eq("id", requestId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await admin.from("igem_requests").delete().eq("id", requestId)
 
   return NextResponse.json({ ok: true })
 }

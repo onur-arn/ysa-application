@@ -34,7 +34,7 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   const isAuthRoute    = pathname.startsWith("/auth")
-  const isPublicApi    = pathname.startsWith("/api/signup-") || pathname.startsWith("/api/test-email") || pathname === "/api/reset-password" || pathname === "/api/forgot-password"
+  const isPublicApi    = pathname.startsWith("/api/signup-") || pathname.startsWith("/api/test-email") || pathname === "/api/reset-password" || pathname === "/api/forgot-password" || pathname === "/api/check-email" || pathname === "/api/check-roles" || pathname.startsWith("/api/cron/")
   const isPublicRoute  = pathname === "/" || pathname === "/manifest.json" || isPublicApi
 
   if (!user && !isAuthRoute && !isPublicRoute) {

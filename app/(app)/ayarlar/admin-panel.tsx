@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getStation } from "@/lib/data/stations"
+import { isAdminEmail } from "@/lib/admin"
 
 type Member = { id: string; name: string; email: string; station: string; role: string; photo_url?: string | null }
 type Event  = { id: string; title: string; date: string; station: string; place: string }
@@ -20,7 +21,7 @@ type Conv   = {
   chat_messages: Array<{ id: string; sender_name: string; text: string | null; created_at: string; is_system: boolean }>
 }
 
-export function AdminPanel() {
+export function AdminPanel({ adminEmail }: { adminEmail: string }) {
   const [open, setOpen] = useState(false)
   const [section, setSection] = useState<"members" | "events" | "igem" | "tasks" | "convs" | "posts" | null>(null)
 
@@ -46,7 +47,7 @@ export function AdminPanel() {
       supabase.from("posts").select("id,author,content,station,created_at").order("created_at", { ascending: false }),
       supabase.from("conversations").select("id,type,name,created_at,conversation_members(member_name),chat_messages(id,sender_name,text,created_at,is_system)").order("created_at", { ascending: false }),
     ])
-    setMembers((m.data ?? []).filter(x => x.email !== "admin@youthstation.org"))
+    setMembers((m.data ?? []).filter(x => !isAdminEmail(x.email)))
     setEvents(e.data ?? [])
     setIgemReqs(ig.data ?? [])
     setTasks(t.data ?? [])
@@ -103,26 +104,10 @@ export function AdminPanel() {
 
   async function exportPdf() {
     setExporting(true)
-    const supabase = createClient()
-    const [{ data: profiles }, { data: posts }, { data: igem }] = await Promise.all([
-      supabase.from("profiles").select("*"),
-      supabase.from("posts").select("*"),
-      supabase.from("igem_requests").select("*"),
-    ])
     await fetch("/api/export-pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requestedBy: "admin@youthstation.org",
-        profiles: (profiles ?? []).map((m: Record<string, unknown>) => ({
-          name: m.name, email: m.email, station: m.station,
-          role: m.role, phone: m.phone, birthday: m.birthday,
-          memleket: m.memleket, linkedin: m.linkedin, igem_egitimi: m.igem_egitimi,
-        })),
-        posts: posts ?? [],
-        tasks: [],
-        igem: igem ?? [],
-      }),
+      body: JSON.stringify({ requestedBy: adminEmail }),
     })
     setExporting(false)
     setExportDone(true)
