@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useMemo, useEffect } from "react"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
-import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check, MessageCircle, Trash2, Loader2 } from "lucide-react"
+import { Search, Check, MessageCircle, Trash2, Loader2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { MEMBERS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
 import { Modal } from "@/components/ui/modal"
+import { MemberProfileContent } from "@/components/messaging/member-profile-sheet"
 import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
 import { isAdminEmail } from "@/lib/admin"
@@ -52,6 +53,8 @@ export function DirectoryClient({
 }: DirectoryClientProps) {
   const { t } = useI18n()
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
   const activeUsers = usePresence()
   const isAdmin = isAdminEmail(initialCurrentUserEmail)
@@ -71,8 +74,30 @@ export function DirectoryClient({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [messageError, setMessageError] = useState<string | null>(null)
 
+  // Deep-link: /annuaire?user=<id>
+  useEffect(() => {
+    const userId = searchParams.get("user")
+    if (!userId) return
+    const m = allMembers.find((x) => x.id === userId)
+    if (!m) return
+    setSelected({ ...m, online: activeUsers.has(m.name) })
+  }, [searchParams, allMembers, activeUsers])
 
-  // All stations see all members
+  function openMember(m: Member) {
+    setSelected({ ...m, online: activeUsers.has(m.name) })
+    router.replace(`${pathname}?user=${encodeURIComponent(m.id)}`, { scroll: false })
+  }
+
+  function closeMember() {
+    setSelected(null)
+    setAssignOpen(false)
+    setConfirmDelete(false)
+    setMessageError(null)
+    if (searchParams.get("user")) {
+      router.replace(pathname, { scroll: false })
+    }
+  }
+
   const visibleMembers = allMembers
 
   const filtered = useMemo(() => {
@@ -128,7 +153,7 @@ export function DirectoryClient({
         return
       }
       await prefetchChatMessages(queryClient, convId, myName)
-      setSelected(null)
+      closeMember()
       router.push(`/messages?open=${convId}`)
     } catch {
       setMessageError("Bağlantı hatası. Lütfen tekrar deneyin.")
@@ -146,8 +171,7 @@ export function DirectoryClient({
         body: JSON.stringify({ userId: member.id }),
       })
       setAllMembers((prev) => prev.filter((m) => m.id !== member.id))
-      setSelected(null)
-      setConfirmDelete(false)
+      closeMember()
     } finally {
       setDeleting(false)
     }
@@ -158,7 +182,6 @@ export function DirectoryClient({
   return (
     <div>
       <div className="px-4 pt-3">
-        {/* Search */}
         <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -169,7 +192,6 @@ export function DirectoryClient({
           />
         </div>
 
-        {/* Station filter chips — intl only */}
         {showStationFilter && (
           <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
             <StationChip active={stationFilter === "all"} onClick={() => setStationFilter("all")} label="Tümü" />
@@ -202,7 +224,7 @@ export function DirectoryClient({
                 <MemberRow
                   key={m.id}
                   member={{ ...m, online }}
-                  onClick={() => setSelected({ ...m, online })}
+                  onClick={() => openMember({ ...m, online })}
                 />
               )
             })}
@@ -213,10 +235,10 @@ export function DirectoryClient({
         )}
       </div>
 
-      <Modal open={!!selected} onClose={() => { setSelected(null); setAssignOpen(false); setConfirmDelete(false); setMessageError(null) }} title={t("nav.directory")}>
+      <Modal open={!!selected} onClose={closeMember} title={t("nav.directory")}>
         {selected && (
           <>
-            <MemberDetail member={selected} />
+            <MemberProfileContent member={selected} />
             <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
               {selected.id !== initialCurrentUserId && (
                 <>
@@ -359,6 +381,7 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
     >
       <div className="relative shrink-0">
         {member.photoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img src={member.photoUrl} alt={member.name} className="size-11 rounded-full object-cover" />
         ) : (
           <span
@@ -379,90 +402,5 @@ function MemberRow({ member, onClick }: { member: Member; onClick: () => void })
         </p>
       </div>
     </button>
-  )
-}
-
-const TR_MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
-
-function formatBirthday(dateStr?: string): string {
-  if (!dateStr) return "—"
-  const [y, m, d] = dateStr.split("-").map(Number)
-  if (!y || !m || !d) return dateStr
-  const now = new Date()
-  let age = now.getFullYear() - y
-  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--
-  return `${d} ${TR_MONTHS[m - 1]} ${y} (${age} yaşında)`
-}
-
-function MemberDetail({ member }: { member: Member }) {
-  const { t } = useI18n()
-  const station = getStation(member.station)
-
-  const rows = [
-    { icon: Phone, label: t("directory.phone"), value: member.phone, href: `tel:${member.phone}` },
-    { icon: Mail, label: t("directory.email"), value: member.email, href: `mailto:${member.email}` },
-    { icon: Cake, label: t("directory.birthday"), value: formatBirthday(member.birthday) },
-    ...(member.memleket ? [{ icon: Home, label: t("directory.memleket"), value: member.memleket }] : []),
-    ...(member.igemEgitimi
-      ? [{
-          icon: GraduationCap,
-          label: "iGEM Eğitimi",
-          value: member.igemEgitimi === "evet" ? "✅ Evet" : "❌ Hayır",
-        }]
-      : []),
-    ...(member.linkedin ? [{ icon: ExternalLink, label: "LinkedIn", value: "Profili gör", href: member.linkedin }] : []),
-  ]
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col items-center text-center">
-        <div className="relative">
-          {member.photoUrl ? (
-            <img src={member.photoUrl} alt={member.name} className="size-20 rounded-full object-cover" />
-          ) : (
-            <span
-              className="flex size-20 items-center justify-center rounded-full text-2xl font-bold text-white"
-              style={{ backgroundColor: `hsl(${station.color})` }}
-            >
-              {member.initials}
-            </span>
-          )}
-          {member.online && (
-            <span className="absolute bottom-1 right-1 size-4 rounded-full border-2 border-card bg-emerald-500" />
-          )}
-        </div>
-        <h3 className="mt-3 font-heading text-xl font-bold">{member.name}</h3>
-        <span
-          className="mt-1 rounded-full px-3 py-1 text-xs font-semibold text-white"
-          style={{ backgroundColor: `hsl(${station.color})` }}
-        >
-          {member.role}
-        </span>
-        <p className="mt-1 text-sm text-muted-foreground">{station.name}</p>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        {rows.map((r) => {
-          const content = (
-            <div className="flex items-center gap-3 rounded-xl px-2 py-3 transition-colors active:bg-secondary">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <r.icon className="size-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">{r.label}</p>
-                <p className="truncate font-medium text-foreground">{r.value}</p>
-              </div>
-            </div>
-          )
-          return r.href ? (
-            <a key={r.label} href={r.href} target={r.label === "LinkedIn" ? "_blank" : undefined} rel="noopener noreferrer">
-              {content}
-            </a>
-          ) : (
-            <div key={r.label}>{content}</div>
-          )
-        })}
-      </div>
-    </div>
   )
 }

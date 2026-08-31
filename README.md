@@ -102,6 +102,7 @@ Ouvrir [http://localhost:3000](http://localhost:3000)
 | `METERED_APP_NAME` | Sous-domaine Metered (ex. si ton domaine est `monapp.metered.live` → `monapp`) |
 | `METERED_SECRET_KEY` | Secret Key (Dashboard → **Developers** — ne jamais exposer côté client) |
 | `METERED_DOMAIN` | Optionnel : domaine complet (`monapp.metered.live`) à la place de `METERED_APP_NAME` |
+| `GIPHY_API_KEY` | Clé API Giphy pour la recherche GIF ([developers.giphy.com](https://developers.giphy.com/dashboard/)) |
 
 ### Appels audio/vidéo (WebRTC)
 

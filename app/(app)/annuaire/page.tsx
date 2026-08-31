@@ -1,4 +1,5 @@
 
+import { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { DirectoryClient } from "./directory-client"
 
@@ -14,12 +15,14 @@ export default async function AnnuairePage() {
   ])
 
   return (
-    <DirectoryClient
-      initialCurrentUserId={user?.id ?? ""}
-      initialCurrentUserName={(profileRes.data?.name as string) ?? ""}
-      initialCurrentUserEmail={user?.email ?? (profileRes.data?.email as string) ?? ""}
-      initialCurrentUserStation={(profileRes.data?.station as string) ?? "paris"}
-      initialProfiles={(allProfilesRes.data ?? []) as Record<string, unknown>[]}
-    />
+    <Suspense fallback={<div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">Yükleniyor…</div>}>
+      <DirectoryClient
+        initialCurrentUserId={user?.id ?? ""}
+        initialCurrentUserName={(profileRes.data?.name as string) ?? ""}
+        initialCurrentUserEmail={user?.email ?? (profileRes.data?.email as string) ?? ""}
+        initialCurrentUserStation={(profileRes.data?.station as string) ?? "paris"}
+        initialProfiles={(allProfilesRes.data ?? []) as Record<string, unknown>[]}
+      />
+    </Suspense>
   )
 }

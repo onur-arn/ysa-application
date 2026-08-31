@@ -5,7 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { useQueryClient, useQuery } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Search, Lock, Send, ArrowLeft, Check, Plus,
+  Search, Send, ArrowLeft, Check, Plus,
   Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
   Phone, Video, Mic,
 } from "lucide-react"
@@ -22,6 +22,8 @@ import { parseCallEvent } from "@/lib/call/call-event"
 import { GifPicker } from "@/components/messaging/gif-picker"
 import { AudioMessage, VoiceRecorderBar, useVoiceRecorder } from "@/components/messaging/audio-message"
 import { AttachMenu } from "@/components/messaging/attach-menu"
+import { ComposeScreen } from "@/components/messaging/compose-screen"
+import { MemberProfileSheet } from "@/components/messaging/member-profile-sheet"
 import { uploadChatAudio } from "@/lib/chat-media"
 import { useCallOptional } from "@/lib/call/call-context"
 import { openDMViaApi } from "@/lib/dm"
@@ -29,8 +31,6 @@ import { prefetchChatMessages } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
 import { fetchUserConversationRows, syncConversationMembership } from "@/lib/queries/conversations"
 import { useChatMessages } from "@/lib/hooks/use-chat-messages"
-
-type Tab = "groups" | "dm"
 
 const CUSTOM_COLOR = "262 83% 58%"
 
@@ -42,6 +42,7 @@ type CustomGroup = {
   memberNames: string[]
   lastMessage: string
   lastTime: string
+  lastAt: string
   unread: number
   messages: ChatMessage[]
 }
@@ -55,6 +56,7 @@ type CustomDM = {
   online: boolean
   lastMessage: string
   lastTime: string
+  lastAt: string
   unread: number
   messages: ChatMessage[]
 }
@@ -105,15 +107,16 @@ function mapConversations(
           audio: lastMsgObj.audio_url ?? undefined,
         })
       : ((c.type as string) === "group" ? "Grup oluşturuldu" : "")
+    const lastAt = lastMsgObj?.created_at ?? (c.created_at as string) ?? ""
     const lastTime = lastMsgObj?.created_at
       ? new Date(lastMsgObj.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
       : ""
 
     if ((c.type as string) === "group") {
-      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminNames: effectiveAdminNames, memberNames, lastMessage, lastTime, unread: 0, messages: [] })
+      groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminNames: effectiveAdminNames, memberNames, lastMessage, lastTime, lastAt, unread: 0, messages: [] })
     } else {
       const otherName = memberNames[0] ?? (c.name as string) ?? ""
-      dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
+      dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, lastAt, unread: 0, messages: [] })
     }
   }
 
@@ -133,15 +136,17 @@ export function MessagesClient({
   const queryClient = useQueryClient()
   const { setHideNav } = useNavVisibility()
   const activeUsers = usePresence()
-  const [tab, setTab] = useState<Tab>("groups")
   const [search, setSearch] = useState("")
   const [openId, setOpenId] = useState<string | null>(null)
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [profileMember, setProfileMember] = useState<Member | null>(null)
+  const [profileDirectory, setProfileDirectory] = useState<Member[]>([])
 
-  // Hide bottom nav when a conversation is open
+  // Hide bottom nav when a conversation / compose / profile is open
   useEffect(() => {
-    setHideNav(openId !== null)
+    setHideNav(openId !== null || composeOpen || !!profileMember)
     return () => setHideNav(false)
-  }, [openId, setHideNav])
+  }, [openId, composeOpen, profileMember, setHideNav])
 
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
@@ -185,10 +190,64 @@ export function MessagesClient({
     } catch { return initialMapped.dms }
   })
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
-  const [newDMOpen, setNewDMOpen]             = useState(false)
   const [photoMap, setPhotoMap]               = useState<Map<string, string>>(
     () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
   )
+  const profileByName = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; photo_url: string | null }>()
+    for (const p of initialProfiles) map.set(p.name, p)
+    return map
+  }, [initialProfiles])
+
+  useEffect(() => {
+    const supabase = createClient()
+    void supabase
+      .from("profiles")
+      .select("id,name,initials,station,role,phone,email,birthday,linkedin,memleket,photo_url,igem_egitimi")
+      .then(({ data }) => {
+        if (!data?.length) return
+        setProfileDirectory(data.map((p) => ({
+          id: p.id as string,
+          name: (p.name as string) ?? "",
+          initials: (p.initials as string) ?? "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          role: ((p.role as string) ?? "") as any,
+          station: ((p.station ?? "paris") as StationId),
+          city: (p.station as string) ?? "paris",
+          email: (p.email as string) ?? "",
+          phone: (p.phone as string) ?? "",
+          birthday: (p.birthday as string) ?? "",
+          linkedin: (p.linkedin as string) ?? "",
+          memleket: (p.memleket as string) ?? "",
+          igemEgitimi: (p.igem_egitimi as "evet" | "hayır") ?? undefined,
+          photoUrl: (p.photo_url as string) ?? undefined,
+          online: false,
+        })))
+      })
+  }, [])
+
+  function openMemberProfile(name: string) {
+    const fromDir = profileDirectory.find((m) => m.name === name)
+    if (fromDir) {
+      setProfileMember({ ...fromDir, online: activeUsers.has(name), photoUrl: fromDir.photoUrl ?? photoMap.get(name) })
+      return
+    }
+    const p = profileByName.get(name)
+    const station = "paris" as StationId
+    setProfileMember({
+      id: p?.id ?? name,
+      name,
+      initials: name.slice(0, 2).toUpperCase(),
+      role: "" as Member["role"],
+      station,
+      city: station,
+      email: "",
+      phone: "",
+      birthday: "",
+      photoUrl: photoMap.get(name) ?? p?.photo_url ?? undefined,
+      online: activeUsers.has(name),
+    })
+  }
 
   const userNameRef = useRef(currentUser.name || initialProfile?.name || "")
   useEffect(() => {
@@ -301,6 +360,7 @@ export function MessagesClient({
           memberNames,
           lastMessage: "",
           lastTime: "",
+          lastAt: new Date().toISOString(),
           unread: 0,
           messages: [],
         }, ...prev]
@@ -318,6 +378,7 @@ export function MessagesClient({
           online: false,
           lastMessage: "",
           lastTime: "",
+          lastAt: new Date().toISOString(),
           unread: 0,
           messages: [],
         }, ...prev]
@@ -336,7 +397,6 @@ export function MessagesClient({
     const convId = searchParams.get("open")
     if (!convId) return
 
-    setTab("dm")
     let cancelled = false
 
     ensureConversationInState(convId).then((ok) => {
@@ -380,7 +440,7 @@ export function MessagesClient({
 
     const newGroup: CustomGroup = {
       id: conv.id, name, initials, adminNames: [currentUser.name], memberNames,
-      lastMessage: "Grup oluşturuldu", lastTime: time, unread: 0, messages: [],
+      lastMessage: "Grup oluşturuldu", lastTime: time, lastAt: new Date().toISOString(), unread: 0, messages: [],
     }
     setCustomGroups((prev) => [newGroup, ...prev])
     setCreateGroupOpen(false)
@@ -471,13 +531,13 @@ export function MessagesClient({
     if (existingStatic) {
       setOpenId(existingStatic.id)
       router.replace(`${pathname}?open=${existingStatic.id}`, { scroll: false })
-      setNewDMOpen(false)
+      setComposeOpen(false)
       return
     }
     const existingCustom = customDMs.find((d) => d.name === member.name)
     if (existingCustom) {
       await openConversation(existingCustom.id)
-      setNewDMOpen(false)
+      setComposeOpen(false)
       return
     }
 
@@ -504,12 +564,13 @@ export function MessagesClient({
         online: member.online ?? false,
         lastMessage: "",
         lastTime: "",
+        lastAt: new Date().toISOString(),
         unread: 0,
         messages: [],
       }, ...prev]
     })
     await openConversation(convId)
-    setNewDMOpen(false)
+    setComposeOpen(false)
   }
 
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
@@ -627,35 +688,69 @@ export function MessagesClient({
     [queryClient, currentUser.name],
   )
 
-  // ── Filtering ─────────────────────────────────────────────────────────────
-  // Station groups: intl sees all, others only see their own station
-  const visibleStationGroups = GROUP_CHATS.filter(
-    (g) => currentUser.isIntl || g.id === currentUser.station
-  ).map((g) => ({ ...g, title: getStation(g.id).name }))
+  // ── Filtering — unified inbox (BeReal-style) ──────────────────────────────
+  const q = search.toLowerCase().trim()
+  const unifiedInbox = useMemo(() => {
+    type Row =
+      | { kind: "group"; item: CustomGroup }
+      | { kind: "dm"; item: CustomDM }
+      | { kind: "station"; item: typeof GROUP_CHATS[number] & { title: string } }
 
-  // Custom groups: intl created them (sees all), others see groups they're named in
-  const visibleCustomGroups = customGroups
+    const rows: Row[] = [
+      ...customGroups
+        .filter((g) => !q || g.name.toLowerCase().includes(q))
+        .map((item) => ({ kind: "group" as const, item })),
+      ...customDMs
+        .filter((d) => !q || d.name.toLowerCase().includes(q))
+        .map((item) => ({ kind: "dm" as const, item })),
+      ...GROUP_CHATS
+        .filter((g) => currentUser.isIntl || g.id === currentUser.station)
+        .map((g) => ({ ...g, title: getStation(g.id).name }))
+        .filter((g) => !q || g.title.toLowerCase().includes(q))
+        .map((item) => ({ kind: "station" as const, item })),
+      ...DM_CHATS
+        .filter((d) => !q || d.name.toLowerCase().includes(q))
+        .map((item) => ({ kind: "dm" as const, item: {
+          id: item.id,
+          name: item.name,
+          initials: item.initials,
+          color: item.color,
+          station: "paris",
+          online: item.online,
+          lastMessage: item.lastMessage,
+          lastTime: item.lastTime,
+          lastAt: "",
+          unread: item.unread,
+          messages: item.messages,
+        } })),
+    ]
 
-  const filteredStationGroups = visibleStationGroups.filter((g) =>
-    g.title.toLowerCase().includes(search.toLowerCase())
-  )
-  const filteredCustomGroups = visibleCustomGroups.filter((g) =>
-    g.name.toLowerCase().includes(search.toLowerCase())
-  )
-  const filteredDMs = [
-    ...customDMs.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())),
-    ...DM_CHATS.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())),
-  ]
+    return rows.sort((a, b) => {
+      const atA = a.kind === "station" ? "" : (a.item.lastAt || "")
+      const atB = b.kind === "station" ? "" : (b.item.lastAt || "")
+      if (atA || atB) return atB.localeCompare(atA)
+      return 0
+    })
+  }, [customGroups, customDMs, currentUser.isIntl, currentUser.station, q])
 
   // ── Open conversation ─────────────────────────────────────────────────────
-  const activeCustomGroup  = visibleCustomGroups.find((g) => g.id === openId)
+  const activeCustomGroup  = customGroups.find((g) => g.id === openId)
   const activeCustomDM     = !activeCustomGroup ? customDMs.find((d) => d.id === openId) : null
   const activeStationGroup = !activeCustomGroup && !activeCustomDM ? GROUP_CHATS.find((g) => g.id === openId) : null
   const activeDM           = !activeCustomGroup && !activeCustomDM && !activeStationGroup
     ? DM_CHATS.find((d) => d.id === openId) : null
 
+  const chatExtras = profileMember ? (
+    <MemberProfileSheet
+      member={profileMember}
+      onClose={() => setProfileMember(null)}
+      hideMessage
+    />
+  ) : null
+
   if (activeCustomGroup) {
     return (
+      <>
       <ChatView
         onBack={closeConversation}
         title={activeCustomGroup.name}
@@ -682,12 +777,15 @@ export function MessagesClient({
           onPromoteToAdmin: (name) => promoteToAdmin(activeCustomGroup.id, name),
         }}
       />
+      {chatExtras}
+      </>
     )
   }
 
   if (activeCustomDM) {
     const dmOnline = activeUsers.has(activeCustomDM.name)
     return (
+      <>
       <ChatView
         onBack={closeConversation}
         title={activeCustomDM.name}
@@ -704,12 +802,16 @@ export function MessagesClient({
         conversationId={activeCustomDM.id}
         photoMap={photoMap}
         peerName={activeCustomDM.name}
+        onOpenProfile={() => openMemberProfile(activeCustomDM.name)}
       />
+      {chatExtras}
+      </>
     )
   }
 
   if (activeStationGroup || activeDM) {
     return (
+      <>
       <ChatView
         onBack={closeConversation}
         title={activeStationGroup ? getStation(activeStationGroup.id).name : activeDM!.name}
@@ -727,76 +829,44 @@ export function MessagesClient({
         senderInitials={senderInitials}
         initialMessages={activeStationGroup ? activeStationGroup.messages : activeDM!.messages}
         photoMap={photoMap}
+        peerName={activeDM?.name}
+        onOpenProfile={activeDM ? () => openMemberProfile(activeDM.name) : undefined}
       />
+      {chatExtras}
+      </>
     )
   }
 
-  // ── List view ─────────────────────────────────────────────────────────────
+  // ── List view (BeReal inbox) ──────────────────────────────────────────────
   return (
-    <div>
-      <div className="px-4 pt-3">
-        {/* Search */}
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("messages.search")}
-            className="h-11 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-base outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-          />
-        </div>
-
-        {/* Tabs */}
-        <div className="mb-3 flex gap-1 rounded-xl bg-secondary p-1">
-          {(["groups", "dm"] as Tab[]).map((tb) => (
-            <button
-              key={tb}
-              onClick={() => setTab(tb)}
-              className={`relative flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${
-                tab === tb ? "text-primary-foreground" : "text-muted-foreground"
-              }`}
-            >
-              {tab === tb && (
-                <motion.span
-                  layoutId="msgtab"
-                  className="absolute inset-0 rounded-lg bg-primary"
-                  transition={{ type: "spring", stiffness: 700, damping: 28 }}
-                />
-              )}
-              <span className="relative flex items-center justify-center gap-1.5">
-                {tb === "dm" && <Lock className="size-3.5" />}
-                {tb === "groups" ? t("messages.groups") : t("messages.private")}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Action buttons */}
-        {tab === "groups" && (
+    <div className="relative min-h-full">
+      <div className="px-4 pt-2">
+        <div className="mb-3 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("messages.search")}
+              className="h-11 w-full rounded-full border-0 bg-secondary pl-9 pr-3 text-base outline-none focus:ring-2 focus:ring-ring/30"
+            />
+          </div>
           <button
-            onClick={() => { window.scrollTo({ top: 0, behavior: "smooth" }); setCreateGroupOpen(true) }}
-            className="mb-3 flex w-full items-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary transition-colors active:bg-primary/10"
+            type="button"
+            onClick={() => setComposeOpen(true)}
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm active:scale-95"
+            aria-label="Yeni"
           >
-            <Plus className="size-4" />
-            Yeni grup
+            <Plus className="size-5" />
           </button>
-        )}
-        {tab === "dm" && (
-          <button
-            onClick={() => { window.scrollTo({ top: 0, behavior: "smooth" }); setNewDMOpen(true) }}
-            className="mb-3 flex w-full items-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary transition-colors active:bg-primary/10"
-          >
-            <Plus className="size-4" />
-            Yeni sohbet
-          </button>
-        )}
+        </div>
       </div>
 
-      {/* List */}
       <div className="flex flex-col">
-        {tab === "groups" ? (
-          <>
-            {filteredCustomGroups.map((g) => (
+        {unifiedInbox.map((row) => {
+          if (row.kind === "group") {
+            const g = row.item
+            return (
               <ConversationRow
                 key={g.id}
                 onClick={() => openConversation(g.id)}
@@ -809,8 +879,11 @@ export function MessagesClient({
                 unread={g.unread}
                 isCustomGroup
               />
-            ))}
-            {filteredStationGroups.map((g) => (
+            )
+          }
+          if (row.kind === "station") {
+            const g = row.item
+            return (
               <ConversationRow
                 key={g.id}
                 onClick={() => openConversation(g.id)}
@@ -822,66 +895,71 @@ export function MessagesClient({
                 time={g.lastTime}
                 unread={g.unread}
               />
-            ))}
-          </>
-        ) : (
-          <>
-            {customDMs.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
-              <ConversationRow
-                key={d.id}
-                onClick={() => openConversation(d.id)}
-                onPrefetch={() => prefetchThread(d.id)}
-                onDelete={() => {
-                  if (window.confirm("Bu sohbeti listenizden silmek istiyor musunuz? (Karşı taraf için kalır)")) {
-                    hideConversation(d.id)
-                  }
-                }}
-                initials={d.initials}
-                color={d.color}
-                title={d.name}
-                last={d.lastMessage}
-                time={d.lastTime}
-                unread={d.unread}
-                online={activeUsers.has(d.name)}
-                isPrivate
-                photoUrl={photoMap.get(d.name)}
-                hideTime
-              />
-            ))}
-            {DM_CHATS.filter((d) => d.name.toLowerCase().includes(search.toLowerCase())).map((d) => (
-              <ConversationRow
-                key={d.id}
-                onClick={() => openConversation(d.id)}
-                initials={d.initials}
-                color={d.color}
-                title={d.name}
-                last={d.lastMessage}
-                time={d.lastTime}
-                unread={d.unread}
-                online={activeUsers.has(d.name)}
-                isPrivate
-                hideTime
-              />
-            ))}
-          </>
+            )
+          }
+          const d = row.item
+          const isPersisted = customDMs.some((x) => x.id === d.id)
+          return (
+            <ConversationRow
+              key={d.id}
+              onClick={() => openConversation(d.id)}
+              onPrefetch={() => prefetchThread(d.id)}
+              onDelete={isPersisted ? () => {
+                if (window.confirm("Bu sohbeti listenizden silmek istiyor musunuz? (Karşı taraf için kalır)")) {
+                  hideConversation(d.id)
+                }
+              } : undefined}
+              initials={d.initials}
+              color={d.color}
+              title={d.name}
+              last={d.lastMessage}
+              time={d.lastTime}
+              unread={d.unread}
+              online={activeUsers.has(d.name)}
+              isPrivate
+              photoUrl={photoMap.get(d.name)}
+            />
+          )
+        })}
+        {unifiedInbox.length === 0 && (
+          <p className="py-16 text-center text-sm text-muted-foreground">
+            Henüz sohbet yok.<br />Sağ üstten birine yazmaya başla.
+          </p>
         )}
       </div>
 
-      {/* Modals */}
-      <CreateGroupModal open={createGroupOpen} currentUserName={currentUser.name} onClose={() => setCreateGroupOpen(false)} onCreate={createGroup} />
-      <AnimatePresence>
-        {newDMOpen && (
-          <NewDMModal
-            existingNames={[
-              ...DM_CHATS.map((d) => d.name),
-              ...customDMs.map((d) => d.name),
-            ]}
-            currentUserName={currentUser.name}
-            onClose={() => setNewDMOpen(false)}
-            onSelect={openOrCreateDM}
-          />
-        )}
-      </AnimatePresence>
+      <CreateGroupModal
+        open={createGroupOpen}
+        currentUserName={currentUser.name}
+        onClose={() => setCreateGroupOpen(false)}
+        onCreate={async (name, members) => {
+          await createGroup(name, members)
+          setCreateGroupOpen(false)
+          setComposeOpen(false)
+        }}
+      />
+
+      {composeOpen && (
+        <ComposeScreen
+          currentUserName={currentUser.name}
+          currentUserId={initialUserId}
+          existingDmNames={[
+            ...DM_CHATS.map((d) => d.name),
+            ...customDMs.map((d) => d.name),
+          ]}
+          onClose={() => setComposeOpen(false)}
+          onSelectContact={(m) => void openOrCreateDM(m)}
+          onCreateGroup={() => setCreateGroupOpen(true)}
+        />
+      )}
+
+      {profileMember && (
+        <MemberProfileSheet
+          member={profileMember}
+          onClose={() => setProfileMember(null)}
+          hideMessage
+        />
+      )}
     </div>
   )
 }
@@ -896,51 +974,47 @@ function ConversationRow({
   onDelete?: () => void; hideTime?: boolean
 }) {
   return (
-    <div className="flex items-center border-b border-border/70">
+    <div className="flex items-center">
       <button
         onClick={onClick}
         onPointerDown={() => onPrefetch?.()}
         onTouchStart={() => onPrefetch?.()}
-        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors active:bg-secondary"
+        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-secondary"
       >
         <div className="relative shrink-0">
           {photoUrl && !isCustomGroup ? (
-            <img
-              src={photoUrl}
-              alt={initials}
-              className={`size-12 object-cover ${isCustomGroup ? "rounded-full" : "rounded-2xl"}`}
-            />
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoUrl} alt={initials} className="size-14 rounded-full object-cover" />
           ) : (
             <span
-              className={`flex size-12 items-center justify-center text-sm font-bold text-white ${
-                isCustomGroup ? "rounded-full" : "rounded-2xl"
-              }`}
+              className="flex size-14 items-center justify-center rounded-full text-sm font-bold text-white"
               style={{ backgroundColor: `hsl(${color})` }}
             >
-              {isCustomGroup ? <Users className="size-5" /> : initials}
+              {isCustomGroup ? <Users className="size-6" /> : initials}
             </span>
           )}
           {online && (
-            <span className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-card bg-emerald-500" />
+            <span className="absolute bottom-0 right-0 size-3.5 rounded-full border-2 border-background bg-emerald-500" />
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            {isPrivate && <Lock className="size-3 shrink-0 text-muted-foreground" />}
-            <span className={`truncate text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
+        <div className="min-w-0 flex-1 border-b border-border/50 py-2.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className={`truncate text-[15px] text-foreground ${unread > 0 ? "font-bold" : "font-semibold"}`}>{title}</span>
+            {!hideTime && time && (
+              <span className={`shrink-0 text-[11px] ${unread > 0 ? "font-semibold text-primary" : "text-muted-foreground"}`}>{time}</span>
+            )}
           </div>
-          <p className={`truncate text-sm ${unread > 0 ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{last}</p>
-        </div>
-        {(!hideTime || unread > 0) && (
-          <div className="flex shrink-0 flex-col items-end gap-1">
-            {!hideTime && time && <span className="text-xs text-muted-foreground">{time}</span>}
+          <div className="mt-0.5 flex items-center gap-2">
+            <p className={`min-w-0 flex-1 truncate text-[13px] ${unread > 0 ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+              {isCustomGroup ? `👥 ${last || "Grup"}` : last || (isPrivate ? "Yeni sohbet" : "")}
+            </p>
             {unread > 0 && (
-              <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                 {unread}
               </span>
             )}
           </div>
-        )}
+        </div>
       </button>
       {onDelete && (
         <button
@@ -981,7 +1055,8 @@ function GroupSettingsPanel({
       if (profiles && profiles.length > 0) {
         const mapped: Member[] = profiles.map((p) => ({
           id: p.id, name: p.name ?? "", initials: p.initials ?? "",
-          role: p.role ?? "", station: (p.station ?? "paris") as StationId,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          role: ((p.role as string) ?? "") as any, station: (p.station ?? "paris") as StationId,
           city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
           birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
           memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
@@ -1329,97 +1404,6 @@ function AddMembersModal({
   )
 }
 
-// ── New DM modal ──────────────────────────────────────────────────────────────
-function NewDMModal({
-  existingNames, currentUserName, onClose, onSelect,
-}: {
-  existingNames: string[]
-  currentUserName: string
-  onClose: () => void
-  onSelect: (member: Member) => void
-}) {
-  const [search, setSearch] = useState("")
-  const [allMembers, setAllMembers] = useState<Member[]>(MEMBERS)
-
-  useEffect(() => {
-    async function load() {
-      const supabase = createClient()
-      const { data: profiles } = await supabase.from("profiles").select("id,name,initials,station,role,email,phone,birthday,linkedin,memleket,photo_url,igem_egitimi")
-      if (profiles && profiles.length > 0) {
-        const mapped: Member[] = profiles.map((p) => ({
-          id: p.id, name: p.name ?? "", initials: p.initials ?? "",
-          role: p.role ?? "", station: (p.station ?? "paris") as StationId,
-          city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
-          birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
-          memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
-          photoUrl: p.photo_url ?? undefined,
-        }))
-        setAllMembers([...MEMBERS, ...mapped])
-      }
-    }
-    load()
-  }, [])
-
-  const filtered = allMembers
-    .filter((m) => m.name && m.name !== currentUserName && m.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  return (
-    <Modal open onClose={onClose} title="Yeni sohbet">
-      <div className="flex flex-col gap-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="İsim ara…"
-            className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-          />
-        </div>
-
-        <div className="overflow-hidden rounded-xl border border-border">
-          {filtered.map((m) => {
-            const s = getStation(m.station)
-            const hasExisting = existingNames.includes(m.name)
-            return (
-              <button
-                key={m.id}
-                onClick={() => onSelect(m)}
-                className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-0 transition-colors active:bg-secondary"
-              >
-                <div className="relative shrink-0">
-                  {m.photoUrl ? (
-                    <img src={m.photoUrl} alt={m.initials} className="size-10 rounded-full object-cover" />
-                  ) : (
-                    <span
-                      className="flex size-10 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: `hsl(${s.color})` }}
-                    >
-                      {m.initials}
-                    </span>
-                  )}
-                  {m.online && (
-                    <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card bg-emerald-500" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-foreground">{m.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{m.role} · {s.city}</p>
-                </div>
-                {hasExisting && (
-                  <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                    Mevcut
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
 // ── Create group modal ────────────────────────────────────────────────────────
 function CreateGroupModal({
   open, currentUserName, onClose, onCreate,
@@ -1427,7 +1411,7 @@ function CreateGroupModal({
   open: boolean
   currentUserName: string
   onClose: () => void
-  onCreate: (name: string, memberNames: string[]) => void
+  onCreate: (name: string, memberNames: string[]) => void | Promise<void>
 }) {
   const [name, setName]             = useState("")
   const [memberSearch, setMemberSearch] = useState("")
@@ -1441,7 +1425,8 @@ function CreateGroupModal({
       if (profiles && profiles.length > 0) {
         const mapped: Member[] = profiles.map((p) => ({
           id: p.id, name: p.name ?? "", initials: p.initials ?? "",
-          role: p.role ?? "", station: (p.station ?? "paris") as StationId,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          role: ((p.role as string) ?? "") as any, station: (p.station ?? "paris") as StationId,
           city: p.station ?? "paris", email: p.email ?? "", phone: p.phone ?? "",
           birthday: p.birthday ?? "", linkedin: p.linkedin ?? "",
           memleket: p.memleket ?? "", igemEgitimi: p.igem_egitimi ?? undefined, online: false,
@@ -1538,7 +1523,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl, peerName,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl, peerName, onOpenProfile,
 }: {
   onBack: () => void
   title: string
@@ -1555,6 +1540,7 @@ function ChatView({
   photoMap?: Map<string, string>
   headerPhotoUrl?: string
   peerName?: string
+  onOpenProfile?: () => void
   groupSettings?: {
     memberNames: string[]
     adminNames: string[]
@@ -1816,60 +1802,62 @@ function ChatView({
 
   return (
     <div className="fixed inset-x-0 bottom-0 top-14 z-30 mx-auto flex max-w-md flex-col overflow-hidden bg-background">
-      {/* Header */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-2.5">
-        <button onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
+      {/* Header — BeReal-like: tap name/avatar → profile; calls on the right */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/95 px-2 py-2 backdrop-blur">
+        <button type="button" onClick={onBack} className="flex size-9 items-center justify-center rounded-full active:bg-secondary">
           <ArrowLeft className="size-5" />
         </button>
-        <div className="relative">
-          {headerPhotoUrl ? (
-            <img src={headerPhotoUrl} alt={initials} className="size-10 rounded-xl object-cover" />
-          ) : (
-            <span
-              className="flex size-10 items-center justify-center rounded-xl text-xs font-bold text-white"
-              style={{ backgroundColor: `hsl(${color})` }}
-            >
-              {initials}
-            </span>
-          )}
-          {online && (
-            <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card bg-emerald-500" />
-          )}
-        </div>
         <button
-          className={`min-w-0 flex-1 text-left ${groupSettings ? "active:opacity-70" : ""}`}
-          onClick={() => groupSettings && setShowSettings(true)}
-          disabled={!groupSettings}
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left active:opacity-70"
+          onClick={() => {
+            if (onOpenProfile) onOpenProfile()
+            else if (groupSettings) setShowSettings(true)
+          }}
+          disabled={!onOpenProfile && !groupSettings}
         >
-          <div className="flex items-center gap-1">
-            {isPrivate && <Lock className="size-3 shrink-0 text-primary" />}
-            <span className="truncate font-semibold text-foreground">{title}</span>
-            {groupSettings && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-          </div>
-          <span className="block text-xs text-muted-foreground">{subtitle}</span>
-        </button>
-        {isPrivate && conversationId && (
-          <div className="flex shrink-0 gap-1">
-            {peerName && call && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
-                  className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
-                  aria-label="Sesli arama"
-                >
-                  <Phone className="size-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => call.startCall({ conversationId, peerName, callType: "video" })}
-                  className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
-                  aria-label="Görüntülü arama"
-                >
-                  <Video className="size-5" />
-                </button>
-              </>
+          <div className="relative shrink-0">
+            {headerPhotoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={headerPhotoUrl} alt={initials} className="size-9 rounded-full object-cover" />
+            ) : (
+              <span
+                className="flex size-9 items-center justify-center rounded-full text-xs font-bold text-white"
+                style={{ backgroundColor: `hsl(${color})` }}
+              >
+                {groupSettings ? <Users className="size-4" /> : initials}
+              </span>
             )}
+            {online && (
+              <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <span className="truncate font-semibold text-foreground">{title}</span>
+              {groupSettings && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+            </div>
+            <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
+          </div>
+        </button>
+        {isPrivate && conversationId && peerName && call && (
+          <div className="flex shrink-0 gap-0.5">
+            <button
+              type="button"
+              onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
+              className="flex size-9 items-center justify-center rounded-full text-foreground active:bg-secondary"
+              aria-label="Sesli arama"
+            >
+              <Phone className="size-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => call.startCall({ conversationId, peerName, callType: "video" })}
+              className="flex size-9 items-center justify-center rounded-full text-foreground active:bg-secondary"
+              aria-label="Görüntülü arama"
+            >
+              <Video className="size-5" />
+            </button>
           </div>
         )}
       </div>
