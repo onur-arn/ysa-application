@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (pending.role && (ROLES as readonly string[]).includes(pending.role)) {
-    const available = await isRoleAvailable(pending.role, pendingId)
+    const available = await isRoleAvailable(pending.role, pending.station || "paris", pendingId)
     if (!available) {
       return new NextResponse(
         page("error", "Ce rôle est déjà occupé par un autre membre. Veuillez rejeter cette demande et demander à l'utilisateur de s'inscrire avec un autre rôle."),

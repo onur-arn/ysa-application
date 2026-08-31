@@ -424,7 +424,50 @@ create policy "Authenticated can read story_reactions"   on story_reactions for 
 create policy "Authenticated can insert story_reactions" on story_reactions for insert to authenticated with check (true);
 create policy "Authenticated can delete story_reactions" on story_reactions for delete to authenticated using (true);
 
--- ── PASSWORD RESET TOKENS ─────────────────────────────────────────────────────
+-- ── CHAT MESSAGING UPGRADE (GIF, voice, calls) ───────────────────────────────
+alter table chat_messages add column if not exists audio_url text;
+alter table chat_messages add column if not exists gif_url text;
+alter table chat_messages add column if not exists message_type text default 'text';
+
+create table if not exists call_sessions (
+  id               uuid primary key default uuid_generate_v4(),
+  conversation_id  uuid references conversations(id) on delete cascade not null,
+  caller_name      text not null,
+  callee_name      text not null,
+  call_type        text not null check (call_type in ('audio', 'video')),
+  status           text not null default 'ringing' check (status in ('ringing', 'active', 'ended', 'missed', 'declined')),
+  started_at       timestamptz default now(),
+  ended_at         timestamptz
+);
+alter table call_sessions enable row level security;
+drop policy if exists "Authenticated can manage call_sessions" on call_sessions;
+create policy "Authenticated can manage call_sessions" on call_sessions for all to authenticated using (true) with check (true);
+
+create table if not exists call_signals (
+  id          uuid primary key default uuid_generate_v4(),
+  session_id  uuid references call_sessions(id) on delete cascade not null,
+  sender_name text not null,
+  signal_type text not null check (signal_type in ('offer', 'answer', 'ice', 'hangup', 'decline')),
+  payload     jsonb not null default '{}',
+  created_at  timestamptz default now()
+);
+alter table call_signals enable row level security;
+drop policy if exists "Authenticated can manage call_signals" on call_signals;
+create policy "Authenticated can manage call_signals" on call_signals for all to authenticated using (true) with check (true);
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('chat-audio', 'chat-audio', true, 10485760, '{audio/webm,audio/ogg,audio/mp4,audio/mpeg}')
+on conflict (id) do nothing;
+
+drop policy if exists "Public read chat audio" on storage.objects;
+drop policy if exists "Auth users upload chat audio" on storage.objects;
+create policy "Public read chat audio"
+  on storage.objects for select to public
+  using (bucket_id = 'chat-audio');
+create policy "Auth users upload chat audio"
+  on storage.objects for insert to authenticated
+  with check (bucket_id = 'chat-audio');
+
 create table if not exists password_reset_tokens (
   email      text primary key,
   code       text not null,

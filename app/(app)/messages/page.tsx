@@ -16,7 +16,6 @@ export default async function MessagesPage() {
 
   const userName = (profileRes.data?.name as string) ?? ""
 
-  // Get all conversations where user is member, with their messages
   let convRows: Record<string, unknown>[] = []
   if (userName) {
     const { data: memberRows } = await supabase
@@ -29,10 +28,8 @@ export default async function MessagesPage() {
     if (convIds.length > 0) {
       const { data } = await supabase
         .from("conversations")
-        .select("id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin),chat_messages(id,sender_name,sender_initials,text,image_url,is_system,created_at)")
+        .select("id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin),chat_messages(id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at)")
         .in("id", convIds)
-        .order("created_at", { ascending: false })
-        .limit(30)
       convRows = (data ?? []) as Record<string, unknown>[]
     }
   }

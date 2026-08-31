@@ -1,14 +1,16 @@
 import { ROLES } from "@/lib/data/stations"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-/** Board roles that can only be held by one person at a time */
-export async function getOccupiedRoles(): Promise<string[]> {
+/** Board roles that can only be held by one person per station */
+export async function getOccupiedRoles(station: string): Promise<string[]> {
+  if (!station) return []
+
   const admin = createAdminClient()
   const roleSet = new Set<string>(ROLES as unknown as string[])
 
   const [profilesRes, pendingRes] = await Promise.all([
-    admin.from("profiles").select("role"),
-    admin.from("pending_members").select("role"),
+    admin.from("profiles").select("role, station").eq("station", station),
+    admin.from("pending_members").select("role, station").eq("station", station),
   ])
 
   const occupied = new Set<string>()
@@ -19,14 +21,30 @@ export async function getOccupiedRoles(): Promise<string[]> {
   return [...occupied]
 }
 
-export async function isRoleAvailable(role: string, excludePendingId?: string): Promise<boolean> {
+export async function isRoleAvailable(
+  role: string,
+  station: string,
+  excludePendingId?: string,
+): Promise<boolean> {
   if (!(ROLES as readonly string[]).includes(role)) return true
+  if (!station) return false
 
   const admin = createAdminClient()
-  const { data: profile } = await admin.from("profiles").select("id").eq("role", role).maybeSingle()
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("role", role)
+    .eq("station", station)
+    .maybeSingle()
   if (profile) return false
 
-  const { data: pendingList } = await admin.from("pending_members").select("id").eq("role", role)
+  const { data: pendingList } = await admin
+    .from("pending_members")
+    .select("id")
+    .eq("role", role)
+    .eq("station", station)
+
   const conflicting = (pendingList ?? []).filter((p) => p.id !== excludePendingId)
   return conflicting.length === 0
 }

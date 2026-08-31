@@ -1,5 +1,7 @@
 import type { StationId } from "./stations"
 
+export type MessageType = "text" | "image" | "gif" | "audio" | "call"
+
 export type ChatPollOption = {
   id: string
   text: string
@@ -20,6 +22,9 @@ export type ChatMessage = {
   time: string
   self?: boolean
   image?: string
+  gif?: string
+  audio?: string
+  messageType?: MessageType
   system?: boolean
   poll?: ChatPoll
 }
@@ -49,3 +54,11 @@ export type DMConversation = {
 export const GROUP_CHATS: GroupConversation[] = []
 
 export const DM_CHATS: DMConversation[] = []
+
+export function messagePreview(msg: { text?: string; messageType?: MessageType; image?: string; gif?: string; audio?: string }): string {
+  if (msg.messageType === "audio" || msg.audio) return "🎤 Sesli mesaj"
+  if (msg.messageType === "gif" || msg.gif) return "GIF"
+  if (msg.messageType === "image" || msg.image) return "📷 Fotoğraf"
+  if (msg.messageType === "call") return msg.text || "📞 Arama"
+  return msg.text || ""
+}

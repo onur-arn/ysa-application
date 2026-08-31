@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (role && (ROLES as readonly string[]).includes(role)) {
-    const available = await isRoleAvailable(role)
+    const available = await isRoleAvailable(role, station || "paris")
     if (!available) {
       return NextResponse.json({ ok: false, error: "ROLE_TAKEN" }, { status: 409 })
     }

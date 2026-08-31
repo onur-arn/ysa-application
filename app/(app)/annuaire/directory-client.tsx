@@ -9,7 +9,6 @@ import { Modal } from "@/components/ui/modal"
 import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
 import { isAdminEmail } from "@/lib/admin"
-import { findOrCreateDM } from "@/lib/dm"
 
 type StationFilter = "all" | StationId
 
@@ -66,6 +65,7 @@ export function DirectoryClient({
   const [messaging, setMessaging] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [messageError, setMessageError] = useState<string | null>(null)
 
 
   // All stations see all members
@@ -109,18 +109,24 @@ export function DirectoryClient({
   }
 
   async function startMessage(member: Member) {
-    if (!initialCurrentUserName || member.id === initialCurrentUserId) return
+    if (member.id === initialCurrentUserId) return
     setMessaging(true)
+    setMessageError(null)
     try {
-      const convId = await findOrCreateDM(initialCurrentUserName, {
-        name: member.name,
-        initials: member.initials,
-        station: member.station,
+      const res = await fetch("/api/dm/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: member.id }),
       })
-      if (convId) {
-        setSelected(null)
-        router.push(`/messages?open=${convId}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.convId) {
+        setMessageError(data.error ?? "Mesaj açılamadı. Lütfen tekrar deneyin.")
+        return
       }
+      setSelected(null)
+      router.push(`/messages?open=${data.convId}`)
+    } catch {
+      setMessageError("Bağlantı hatası. Lütfen tekrar deneyin.")
     } finally {
       setMessaging(false)
     }
@@ -202,20 +208,26 @@ export function DirectoryClient({
         )}
       </div>
 
-      <Modal open={!!selected} onClose={() => { setSelected(null); setAssignOpen(false); setConfirmDelete(false) }} title={t("nav.directory")}>
+      <Modal open={!!selected} onClose={() => { setSelected(null); setAssignOpen(false); setConfirmDelete(false); setMessageError(null) }} title={t("nav.directory")}>
         {selected && (
           <>
             <MemberDetail member={selected} />
             <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
               {selected.id !== initialCurrentUserId && (
-                <button
-                  onClick={() => startMessage(selected)}
-                  disabled={messaging}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors active:bg-primary/90 disabled:opacity-60"
-                >
-                  {messaging ? <Loader2 className="size-4 animate-spin" /> : <MessageCircle className="size-4" />}
-                  Mesaj gönder
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => startMessage(selected)}
+                    disabled={messaging}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors active:bg-primary/90 disabled:opacity-60"
+                  >
+                    {messaging ? <Loader2 className="size-4 animate-spin" /> : <MessageCircle className="size-4" />}
+                    Mesaj gönder
+                  </button>
+                  {messageError && (
+                    <p className="text-center text-xs text-destructive">{messageError}</p>
+                  )}
+                </>
               )}
 
               {currentUser.isIntl && (

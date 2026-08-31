@@ -4,16 +4,22 @@ import { useState, useRef, useEffect, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Search, Lock, Send, ImageIcon, ArrowLeft, Check, Plus,
+  Search, Lock, Send, ArrowLeft, Check, Plus,
   Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
+  Phone, Video, Mic,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
-import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption } from "@/lib/data/messages"
+import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption, messagePreview } from "@/lib/data/messages"
 import { MEMBERS, getStation, type Member, type StationId } from "@/lib/data/stations"
 import { createClient } from "@/lib/supabase/client"
 import { useNavVisibility } from "@/lib/nav-visibility"
 import { Modal } from "@/components/ui/modal"
 import { usePresence } from "@/lib/presence"
+import { GifPicker } from "@/components/messaging/gif-picker"
+import { AudioMessage, VoiceRecorderBar, useVoiceRecorder } from "@/components/messaging/audio-message"
+import { AttachMenu } from "@/components/messaging/attach-menu"
+import { uploadChatAudio } from "@/lib/chat-media"
+import { useCallOptional } from "@/lib/call/call-context"
 
 type Tab = "groups" | "dm"
 
@@ -79,9 +85,17 @@ function mapConversations(
     const memberNames = memberRows.map((m) => m.member_name).filter((n) => n !== userName)
 
     // Derive last message from embedded chat_messages (sorted asc, last is the latest)
-    const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; is_system: boolean; created_at: string }[]) ?? []
+    const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; gif_url?: string | null; audio_url?: string | null; message_type?: string | null; is_system: boolean; created_at: string }[]) ?? []
     const lastMsgObj = msgs.length > 0 ? msgs[msgs.length - 1] : null
-    const lastMessage = lastMsgObj?.text ?? ((c.type as string) === "group" ? "Grup oluşturuldu" : "")
+    const lastMessage = lastMsgObj
+      ? messagePreview({
+          text: lastMsgObj.text ?? "",
+          messageType: (lastMsgObj.message_type as ChatMessage["messageType"]) ?? undefined,
+          image: lastMsgObj.image_url ?? undefined,
+          gif: lastMsgObj.gif_url ?? undefined,
+          audio: lastMsgObj.audio_url ?? undefined,
+        })
+      : ((c.type as string) === "group" ? "Grup oluşturuldu" : "")
     const lastTime = lastMsgObj?.created_at
       ? new Date(lastMsgObj.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
       : ""
@@ -89,7 +103,7 @@ function mapConversations(
     if ((c.type as string) === "group") {
       groups.push({ id: c.id as string, name: (c.name as string) ?? "", initials: (c.initials as string) ?? "", adminNames: effectiveAdminNames, memberNames, lastMessage, lastTime, unread: 0, messages: [] })
     } else {
-      const otherName = memberNames[0] ?? ""
+      const otherName = memberNames[0] ?? (c.name as string) ?? ""
       dms.push({ id: c.id as string, name: otherName, initials: otherName.slice(0, 2).toUpperCase(), color: CUSTOM_COLOR, station: "paris", online: false, lastMessage, lastTime, unread: 0, messages: [] })
     }
   }
@@ -117,69 +131,6 @@ export function MessagesClient({
     return () => setHideNav(false)
   }, [openId, setHideNav])
 
-  // Open conversation from URL (?open=convId) — e.g. from Rehber
-  useEffect(() => {
-    const convId = searchParams.get("open")
-    if (!convId) return
-
-    setTab("dm")
-    setOpenId(convId)
-
-    const inGroups = customGroups.some((g) => g.id === convId)
-    const inDms = customDMs.some((d) => d.id === convId)
-    if (inGroups || inDms) return
-
-    async function loadConv() {
-      const supabase = createClient()
-      const { data: conv } = await supabase
-        .from("conversations")
-        .select("id,type,name,initials,conversation_members(member_name)")
-        .eq("id", convId)
-        .maybeSingle()
-      if (!conv) return
-
-      const memberNames = ((conv.conversation_members as { member_name: string }[]) ?? [])
-        .map((m) => m.member_name)
-        .filter((n) => n !== currentUser.name)
-
-      if (conv.type === "group") {
-        setCustomGroups((prev) => {
-          if (prev.some((g) => g.id === convId)) return prev
-          return [{
-            id: conv.id as string,
-            name: (conv.name as string) ?? "",
-            initials: (conv.initials as string) ?? "",
-            adminNames: [],
-            memberNames,
-            lastMessage: "",
-            lastTime: "",
-            unread: 0,
-            messages: [],
-          }, ...prev]
-        })
-      } else {
-        const otherName = memberNames[0] ?? (conv.name as string) ?? ""
-        setCustomDMs((prev) => {
-          if (prev.some((d) => d.id === convId)) return prev
-          return [{
-            id: conv.id as string,
-            name: otherName,
-            initials: otherName.slice(0, 2).toUpperCase(),
-            color: CUSTOM_COLOR,
-            station: "paris",
-            online: false,
-            lastMessage: "",
-            lastTime: "",
-            unread: 0,
-            messages: [],
-          }, ...prev]
-        })
-      }
-    }
-
-    loadConv()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
     name: initialProfile?.name ?? "",
@@ -226,6 +177,81 @@ export function MessagesClient({
   const [photoMap, setPhotoMap]               = useState<Map<string, string>>(
     () => new Map(initialProfiles.filter(p => p.photo_url).map(p => [p.name, p.photo_url as string]))
   )
+
+  // Open conversation from URL (?open=convId) — e.g. from Rehber
+  useEffect(() => {
+    const convId = searchParams.get("open")
+    if (!convId) return
+
+    setTab("dm")
+
+    const userName = currentUser.name || initialProfile?.name || ""
+
+    function openKnown() {
+      setOpenId(convId)
+    }
+
+    if (customGroups.some((g) => g.id === convId) || customDMs.some((d) => d.id === convId)) {
+      openKnown()
+      return
+    }
+
+    let cancelled = false
+
+    async function loadAndOpen() {
+      const supabase = createClient()
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("id,type,name,initials,conversation_members(member_name)")
+        .eq("id", convId)
+        .maybeSingle()
+
+      if (cancelled || !conv) return
+
+      const memberNames = ((conv.conversation_members as { member_name: string }[]) ?? [])
+        .map((m) => m.member_name)
+        .filter((n) => n !== userName)
+
+      if (conv.type === "group") {
+        setCustomGroups((prev) => {
+          if (prev.some((g) => g.id === convId)) return prev
+          return [{
+            id: conv.id as string,
+            name: (conv.name as string) ?? "",
+            initials: (conv.initials as string) ?? "",
+            adminNames: [],
+            memberNames,
+            lastMessage: "",
+            lastTime: "",
+            unread: 0,
+            messages: [],
+          }, ...prev]
+        })
+      } else {
+        const otherName = memberNames[0] ?? (conv.name as string) ?? ""
+        setCustomDMs((prev) => {
+          if (prev.some((d) => d.id === convId)) return prev
+          return [{
+            id: conv.id as string,
+            name: otherName,
+            initials: otherName.slice(0, 2).toUpperCase(),
+            color: CUSTOM_COLOR,
+            station: "paris",
+            online: false,
+            lastMessage: "",
+            lastTime: "",
+            unread: 0,
+            messages: [],
+          }, ...prev]
+        })
+      }
+
+      setOpenId(convId)
+    }
+
+    loadAndOpen()
+    return () => { cancelled = true }
+  }, [searchParams, customGroups, customDMs, currentUser.name, initialProfile?.name])
 
 
   // ── Group actions ─────────────────────────────────────────────────────────
@@ -368,13 +394,6 @@ export function MessagesClient({
     setCustomDMs((prev) => [newDM, ...prev])
     setOpenId(conv.id)
     setNewDMOpen(false)
-  }
-
-  async function deleteDM(id: string) {
-    const supabase = createClient()
-    await supabase.from("conversation_members").delete()
-      .eq("conversation_id", id).eq("member_name", currentUser.name)
-    setCustomDMs((prev) => prev.filter((d) => d.id !== id))
   }
 
   function updateCustomDMMessages(id: string, messages: ChatMessage[]) {
@@ -527,6 +546,7 @@ export function MessagesClient({
         onMessagesChange={(msgs) => updateCustomDMMessages(activeCustomDM.id, msgs)}
         conversationId={activeCustomDM.id}
         photoMap={photoMap}
+        peerName={activeCustomDM.name}
       />
     )
   }
@@ -660,7 +680,6 @@ export function MessagesClient({
                 online={activeUsers.has(d.name)}
                 isPrivate
                 photoUrl={photoMap.get(d.name)}
-                onDelete={() => deleteDM(d.id)}
                 hideTime
               />
             ))}
@@ -1352,7 +1371,7 @@ function CreateGroupModal({
 // ── Chat view ─────────────────────────────────────────────────────────────────
 function ChatView({
   onBack, title, subtitle, color, initials, isPrivate, online,
-  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl,
+  initialMessages, onMessagesChange, groupSettings, senderName, senderInitials, conversationId, photoMap, headerPhotoUrl, peerName,
 }: {
   onBack: () => void
   title: string
@@ -1368,6 +1387,7 @@ function ChatView({
   conversationId?: string
   photoMap?: Map<string, string>
   headerPhotoUrl?: string
+  peerName?: string
   groupSettings?: {
     memberNames: string[]
     adminNames: string[]
@@ -1382,14 +1402,19 @@ function ChatView({
   }
 }) {
   const { t } = useI18n()
+  const call = useCallOptional()
+  const voice = useVoiceRecorder()
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [draft, setDraft]       = useState("")
   const [attached, setAttached] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showPollCompose, setShowPollCompose] = useState(false)
+  const [showGifPicker, setShowGifPicker] = useState(false)
+  const [showAttachMenu, setShowAttachMenu] = useState(false)
   const scrollRef   = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachRef = useRef<HTMLDivElement>(null)
 
   const isFirstScroll = useRef(true)
   useEffect(() => {
@@ -1410,6 +1435,35 @@ function ChatView({
 
     type RawPollOption = { id: string; text: string; position: number; message_poll_votes: { option_id: string; voter_name: string }[] }
     type RawPoll = { id: string; question: string; message_poll_options: RawPollOption[] } | null
+    type RawMsg = {
+      id: string
+      sender_name: string
+      sender_initials: string
+      text: string | null
+      image_url: string | null
+      gif_url?: string | null
+      audio_url?: string | null
+      message_type?: string | null
+      is_system: boolean
+      created_at: string
+    }
+
+    function rowToMessage(m: RawMsg, poll?: ChatPoll): ChatMessage {
+      return {
+        id: m.id,
+        author: m.sender_name,
+        initials: m.sender_initials,
+        text: m.text ?? "",
+        time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
+        self: m.sender_name === senderName,
+        image: m.image_url ?? undefined,
+        gif: m.gif_url ?? undefined,
+        audio: m.audio_url ?? undefined,
+        messageType: (m.message_type as ChatMessage["messageType"]) ?? undefined,
+        system: m.is_system,
+        poll,
+      }
+    }
 
     function parsePoll(rawPoll: RawPoll): ChatPoll | undefined {
       if (!rawPoll) return undefined
@@ -1429,22 +1483,15 @@ function ChatView({
     async function loadMessages() {
       const { data } = await supabase
         .from("chat_messages")
-        .select("id,sender_name,sender_initials,text,image_url,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))")
+        .select("id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true })
 
       if (data) {
-        setMessages(data.map((m) => ({
-          id: m.id,
-          author: m.sender_name,
-          initials: m.sender_initials,
-          text: m.text ?? "",
-          time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
-          self: m.sender_name === senderName,
-          image: m.image_url ?? undefined,
-          system: m.is_system,
-          poll: parsePoll((m as Record<string, unknown>).message_polls as RawPoll),
-        })))
+        setMessages(data.map((m) => rowToMessage(
+          m as RawMsg,
+          parsePoll((m as Record<string, unknown>).message_polls as RawPoll),
+        )))
       }
     }
     loadMessages()
@@ -1454,21 +1501,11 @@ function ChatView({
       .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "chat_messages",
       }, (payload) => {
-        const m = payload.new as { id: string; conversation_id: string; sender_name: string; sender_initials: string; text: string; image_url: string | null; is_system: boolean; created_at: string }
-        // Filter client-side — avoids server-side filter instability
+        const m = payload.new as RawMsg & { conversation_id: string }
         if (m.conversation_id !== conversationId) return
         setMessages((prev) => {
           if (prev.some((x) => x.id === m.id)) return prev
-          return [...prev, {
-            id: m.id,
-            author: m.sender_name,
-            initials: m.sender_initials,
-            text: m.text ?? "",
-            time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
-            self: m.sender_name === senderName,
-            image: m.image_url ?? undefined,
-            system: m.is_system,
-          }]
+          return [...prev, rowToMessage(m)]
         })
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_polls" }, (payload) => {
@@ -1540,6 +1577,7 @@ function ChatView({
   async function send() {
     if (!draft.trim() && !attached) return
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    const messageType = attached ? "image" : "text"
 
     if (conversationId) {
       const supabase = createClient()
@@ -1549,9 +1587,9 @@ function ChatView({
         sender_initials: senderInitials,
         text: draft.trim() || null,
         image_url: attached ?? null,
+        message_type: messageType,
       }).select().single()
 
-      // Realtime will add it, but we also add optimistically for instant feedback
       if (inserted) {
         const newMsg: ChatMessage = {
           id: inserted.id,
@@ -1561,17 +1599,18 @@ function ChatView({
           time,
           self: true,
           image: attached ?? undefined,
+          messageType,
         }
         setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
         onMessagesChange?.([...messages, newMsg])
       }
     } else {
-      // Static/mock conversation — local only
-      const newMsg: ChatMessage & { image?: string } = {
+      const newMsg: ChatMessage = {
         id: String(Date.now()),
         author: senderName, initials: senderInitials,
         text: draft.trim(), time, self: true,
         image: attached ?? undefined,
+        messageType,
       }
       const newMessages = [...messages, newMsg]
       setMessages(newMessages)
@@ -1579,6 +1618,70 @@ function ChatView({
     }
     setDraft("")
     setAttached(null)
+  }
+
+  async function sendGif(url: string) {
+    if (!conversationId) return
+    const supabase = createClient()
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    const { data: inserted } = await supabase.from("chat_messages").insert({
+      conversation_id: conversationId,
+      sender_name: senderName,
+      sender_initials: senderInitials,
+      gif_url: url,
+      message_type: "gif",
+    }).select().single()
+    if (inserted) {
+      const newMsg: ChatMessage = {
+        id: inserted.id,
+        author: senderName,
+        initials: senderInitials,
+        text: "",
+        time,
+        self: true,
+        gif: url,
+        messageType: "gif",
+      }
+      setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
+    }
+  }
+
+  async function sendAudio(blob: Blob) {
+    if (!conversationId) return
+    setUploading(true)
+    try {
+      const url = await uploadChatAudio(conversationId, blob)
+      if (!url) return
+      const supabase = createClient()
+      const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+      const { data: inserted } = await supabase.from("chat_messages").insert({
+        conversation_id: conversationId,
+        sender_name: senderName,
+        sender_initials: senderInitials,
+        audio_url: url,
+        message_type: "audio",
+      }).select().single()
+      if (inserted) {
+        const newMsg: ChatMessage = {
+          id: inserted.id,
+          author: senderName,
+          initials: senderInitials,
+          text: "",
+          time,
+          self: true,
+          audio: url,
+          messageType: "audio",
+        }
+        setMessages((prev) => prev.some((m) => m.id === inserted.id) ? prev : [...prev, newMsg])
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleVoiceStop() {
+    const blob = await voice.stop()
+    if (blob) await sendAudio(blob)
   }
 
   async function sendPoll(question: string, optionTexts: string[]) {
@@ -1682,13 +1785,31 @@ function ChatView({
           </div>
           <span className="block text-xs text-muted-foreground">{subtitle}</span>
         </button>
+        {isPrivate && conversationId && peerName && call && (
+          <div className="flex shrink-0 gap-1">
+            <button
+              type="button"
+              onClick={() => call.startCall({ conversationId, peerName, callType: "audio" })}
+              className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
+              aria-label="Sesli arama"
+            >
+              <Phone className="size-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => call.startCall({ conversationId, peerName, callType: "video" })}
+              className="flex size-9 items-center justify-center rounded-full text-primary active:bg-secondary"
+              aria-label="Görüntülü arama"
+            >
+              <Video className="size-5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-background px-3 py-4">
         {messages.map((m) => {
-          const msg = m as ChatMessage & { image?: string }
-
           if (m.system) {
             return (
               <div key={m.id} className="flex justify-center py-1">
@@ -1739,10 +1860,15 @@ function ChatView({
                       : "rounded-bl-[5px] bg-card text-foreground shadow-sm"
                   }`}
                 >
-                  {msg.image && (
+                  {m.image && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={msg.image} alt="" className="mb-1 max-h-48 rounded-lg" />
+                    <img src={m.image} alt="" className="mb-1 max-h-48 rounded-lg" />
                   )}
+                  {m.gif && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={m.gif} alt="" className="mb-1 max-h-48 rounded-lg" />
+                  )}
+                  {m.audio && <AudioMessage src={m.audio} self={m.self} />}
                   {m.text && <p className="text-[15px] leading-relaxed">{m.text}</p>}
                   <span
                     className={`mt-0.5 block text-right text-[10px] ${m.self ? "text-primary-foreground/70" : "text-muted-foreground"}`}
@@ -1758,10 +1884,16 @@ function ChatView({
 
       {/* Composer */}
       <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
-        {(attached || uploading) && (
+        <VoiceRecorderBar
+          recording={voice.recording}
+          seconds={voice.seconds}
+          onStop={handleVoiceStop}
+          onCancel={voice.cancel}
+        />
+        {(attached || uploading) && !voice.recording && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-xs text-secondary-foreground">
             {uploading
-              ? <><Loader2 className="size-3.5 animate-spin text-primary" /> Fotoğraf yükleniyor…</>
+              ? <><Loader2 className="size-3.5 animate-spin text-primary" /> Yükleniyor…</>
               : <><Check className="size-3.5 text-primary" /> {t("messages.imageAttached")}</>
             }
             {!uploading && (
@@ -1797,21 +1929,23 @@ function ChatView({
               }
             }}
           />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-secondary"
-          >
-            <ImageIcon className="size-5" />
-          </button>
-          {conversationId && (
+          <div ref={attachRef} className="relative">
             <button
-              onClick={() => setShowPollCompose(true)}
+              type="button"
+              onClick={() => setShowAttachMenu((v) => !v)}
               className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-secondary"
-              aria-label="Anket oluştur"
+              aria-label="Ekle"
             >
-              <BarChart2 className="size-5" />
+              <Plus className="size-5" />
             </button>
-          )}
+            <AttachMenu
+              open={showAttachMenu}
+              onClose={() => setShowAttachMenu(false)}
+              onImage={() => fileInputRef.current?.click()}
+              onGif={() => setShowGifPicker(true)}
+              onPoll={() => setShowPollCompose(true)}
+            />
+          </div>
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -1819,15 +1953,33 @@ function ChatView({
             placeholder={t("messages.typeMessage")}
             className="h-11 flex-1 rounded-full border border-input bg-background px-4 text-base outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
-          <button
-            onClick={send}
-            disabled={(!draft.trim() && !attached) || uploading}
-            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
-          >
-            {uploading ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
-          </button>
+          {draft.trim() || attached ? (
+            <button
+              onClick={send}
+              disabled={(!draft.trim() && !attached) || uploading || voice.recording}
+              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
+            >
+              {uploading ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { if (!voice.recording) voice.start() }}
+              disabled={!conversationId || uploading}
+              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
+              aria-label="Sesli mesaj"
+            >
+              <Mic className="size-5" />
+            </button>
+          )}
         </div>
       </div>
+
+      <GifPicker
+        open={showGifPicker}
+        onClose={() => setShowGifPicker(false)}
+        onSelect={sendGif}
+      />
 
       {/* Group settings overlay */}
       <AnimatePresence>

@@ -502,11 +502,17 @@ function Step2({
   const [occupiedRoles, setOccupiedRoles] = useState<string[]>([])
 
   useEffect(() => {
-    fetch("/api/check-roles")
+    fetch(`/api/check-roles?station=${encodeURIComponent(station)}`)
       .then((r) => r.json())
       .then((d) => setOccupiedRoles(d.occupied ?? []))
       .catch(() => setOccupiedRoles([]))
-  }, [])
+  }, [station])
+
+  useEffect(() => {
+    if (role && occupiedRoles.includes(role)) {
+      setRole("")
+    }
+  }, [occupiedRoles, role])
 
   const canProceed = role !== "" && !occupiedRoles.includes(role)
 
@@ -553,7 +559,7 @@ function Step2({
           <p className="text-xs text-muted-foreground">Devam etmek için görevinizi seçmelisiniz.</p>
         )}
         {role !== "" && occupiedRoles.includes(role) && (
-          <p className="text-xs text-destructive">Bu görev zaten dolu. Lütfen başka bir görev seçin.</p>
+          <p className="text-xs text-destructive">Bu görev bu istasyonda zaten dolu. Lütfen başka bir görev seçin.</p>
         )}
       </div>
 
