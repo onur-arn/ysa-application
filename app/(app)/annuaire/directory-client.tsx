@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 import { Search, Phone, Mail, Cake, ExternalLink, Home, GraduationCap, ChevronDown, Check, MessageCircle, Trash2, Loader2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { MEMBERS, STATIONS_SORTED, getStation, YONETIM_KURULU_ROLES, YURUTME_KURULU_ROLES, type Member, type StationId, type Role } from "@/lib/data/stations"
@@ -10,6 +11,7 @@ import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
 import { isAdminEmail } from "@/lib/admin"
 import { openDMViaApi } from "@/lib/dm"
+import { prefetchChatMessages } from "@/lib/queries/messages"
 
 type StationFilter = "all" | StationId
 
@@ -50,6 +52,7 @@ export function DirectoryClient({
 }: DirectoryClientProps) {
   const { t } = useI18n()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const activeUsers = usePresence()
   const isAdmin = isAdminEmail(initialCurrentUserEmail)
   const [search, setSearch] = useState("")
@@ -124,6 +127,7 @@ export function DirectoryClient({
         setMessageError("Sohbet açılamadı. Lütfen tekrar deneyin.")
         return
       }
+      await prefetchChatMessages(queryClient, convId, myName)
       setSelected(null)
       router.push(`/messages?open=${convId}`)
     } catch {

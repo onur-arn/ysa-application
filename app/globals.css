@@ -182,3 +182,21 @@ input[type="date"] {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+@keyframes story-progress {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.story-progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  background: white;
+  animation: story-progress 8s linear forwards;
+}
+
+.story-progress-bar.paused {
+  animation-play-state: paused;
+}
+

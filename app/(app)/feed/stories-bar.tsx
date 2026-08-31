@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import type { RealtimeChannel } from "@supabase/supabase-js"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AnimatePresence, motion } from "framer-motion"
 import { Plus, X, ChevronLeft, ChevronRight, Music, Heart, Volume2, VolumeX } from "lucide-react"
 import { STATIONS_SORTED } from "@/lib/data/stations"
@@ -9,6 +10,9 @@ import { STORY_BG } from "@/lib/data/feed"
 import { useI18n } from "@/lib/i18n/context"
 import { StoryEditor } from "./story-editor"
 import { createClient } from "@/lib/supabase/client"
+import { fetchStories, mapStoryRow, type StoryRow } from "@/lib/queries/stories"
+import { storyKeys } from "@/lib/queries/keys"
+import { preloadImages } from "@/lib/utils/preload-images"
 
 const SEEN_KEY = "ys-seen-story-ids"
 
@@ -20,17 +24,7 @@ function storyTimeAgo(iso: string) {
   return `${Math.floor(diff / 86400)}g önce`
 }
 
-type Story = {
-  id: string
-  station: string
-  authorName: string
-  initials: string
-  imageUrl: string
-  createdAt: string
-  fitMode?: "cover" | "contain"
-  musicPreviewUrl?: string
-  musicLabel?: string
-}
+type Story = StoryRow
 
 interface StoriesBarProps {
   initialUser?: { name: string; station: string; initials: string; photoUrl?: string }
@@ -39,17 +33,7 @@ interface StoriesBarProps {
 }
 
 function mapStoriesFromRaw(raw: Record<string, unknown>[]): Story[] {
-  return raw.map((s) => ({
-    id: s.id as string,
-    station: s.station as string,
-    authorName: s.author_name as string,
-    initials: s.initials as string,
-    imageUrl: s.image_url as string,
-    createdAt: s.created_at as string,
-    fitMode: ((s.fit_mode as "cover" | "contain") ?? "cover"),
-    musicPreviewUrl: (s.music_preview_url as string) ?? undefined,
-    musicLabel: (s.music_label as string) ?? undefined,
-  }))
+  return raw.map((s) => mapStoryRow(s))
 }
 
 export function StoriesBar({
@@ -58,9 +42,34 @@ export function StoriesBar({
   initialPhotoMap = [],
 }: StoriesBarProps) {
   const { t } = useI18n()
-  const [stories, setStories]         = useState<Story[]>(() => mapStoriesFromRaw(initialStories))
+  const queryClient = useQueryClient()
+  const initialMapped = useMemo(() => mapStoriesFromRaw(initialStories), [initialStories])
+  const { data: stories = initialMapped } = useQuery({
+    queryKey: storyKeys.list(),
+    queryFn: fetchStories,
+    initialData: initialMapped,
+    staleTime: 60_000,
+  })
+
+  const setStories = useCallback((updater: Story[] | ((prev: Story[]) => Story[])) => {
+    queryClient.setQueryData<Story[]>(storyKeys.list(), (prev = []) =>
+      typeof updater === "function" ? updater(prev) : updater,
+    )
+  }, [queryClient])
+
   const [active, setActive]           = useState<string | null>(null)
   const [storyIdx, setStoryIdx]       = useState(0)
+  const [paused, setPaused]           = useState(false)
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleViewerPointerDown() {
+    holdTimerRef.current = setTimeout(() => setPaused(true), 180)
+  }
+
+  function handleViewerPointerUp() {
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
+    setPaused(false)
+  }
   const [fromMyButton, setFromMyButton] = useState(false)
   const [editingImage, setEditingImage] = useState<string | null>(null)
   const [user, setUser] = useState<{ name: string; station: string; initials: string; photoUrl?: string }>(
@@ -99,11 +108,22 @@ export function StoriesBar({
   const myStories = stories.filter((s) => s.authorName === user.name)
 
   function openStation(stationId: string, startIdx = 0, myBtn = false) {
+    const stationStories = stories.filter((s) => s.station === stationId)
+    preloadImages(stationStories.map((s) => s.imageUrl))
     setActive(stationId)
     setStoryIdx(startIdx)
     setFromMyButton(myBtn)
+    setPaused(false)
     markStationSeen(stationId, stories)
   }
+
+  function prefetchStation(stationId: string) {
+    preloadImages(stories.filter((s) => s.station === stationId).map((s) => s.imageUrl))
+  }
+
+  useEffect(() => {
+    preloadImages(stories.map((s) => s.imageUrl))
+  }, [stories])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -275,6 +295,16 @@ export function StoriesBar({
   const currentStory  = activeStories[storyIdx] ?? null
   const activeStation = STATIONS_SORTED.find((s) => s.id === active)
 
+  // Preload adjacent story when index changes
+  useEffect(() => {
+    if (!active) return
+    const list = fromMyButton && active === user.station
+      ? stories.filter((s) => s.station === active && s.authorName === user.name)
+      : stories.filter((s) => s.station === active)
+    const urls = [list[storyIdx + 1], list[storyIdx + 2]].filter(Boolean).map((s) => s!.imageUrl)
+    preloadImages(urls)
+  }, [active, storyIdx, stories, fromMyButton, user.station, user.name])
+
   // Play/stop music when the viewed story changes
   useEffect(() => {
     storyAudioRef.current?.pause()
@@ -387,17 +417,26 @@ export function StoriesBar({
           return (
             <button
               key={s.id}
+              onPointerDown={() => hasStory && prefetchStation(s.id)}
               onClick={() => hasStory && openStation(s.id, 0)}
               disabled={!hasStory}
               className={`flex shrink-0 flex-col items-center gap-1.5 ${!hasStory ? "opacity-40 cursor-default" : ""}`}
             >
               <span className={`relative rounded-full p-[2.5px] ${ringStyle}`}>
+                {hasStory ? (
+                  <img
+                    src={stories.filter((x) => x.station === s.id).at(-1)?.imageUrl}
+                    alt={s.city}
+                    className="h-16 w-16 rounded-full border-2 border-card object-cover"
+                  />
+                ) : (
                 <span
                   className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-card font-heading text-[11px] font-bold tracking-wide text-white"
                   style={{ backgroundColor: `hsl(${STORY_BG[s.id]})` }}
                 >
                   {s.short}
                 </span>
+                )}
                 {count > 1 && (
                   <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white shadow">
                     {count}
@@ -420,19 +459,20 @@ export function StoriesBar({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 mx-auto flex w-full max-w-md flex-col bg-black"
+            onPointerDown={handleViewerPointerDown}
+            onPointerUp={handleViewerPointerUp}
+            onPointerCancel={handleViewerPointerUp}
+            onPointerLeave={handleViewerPointerUp}
           >
             {/* Progress bars */}
-            <div className="absolute inset-x-4 top-4 z-10 flex gap-1">
+            <div className="absolute inset-x-4 top-4 z-10 flex gap-1 pt-[env(safe-area-inset-top)]">
               {activeStories.map((_, i) => (
-                <span key={i} className="h-1 flex-1 rounded-full bg-white/30">
+                <span key={i} className="h-1 flex-1 overflow-hidden rounded-full bg-white/30">
                   {i === storyIdx && (
-                    <motion.span
-                      key={`${active}-${storyIdx}`}
-                      initial={{ width: "0%" }}
-                      animate={{ width: "100%" }}
-                      transition={{ duration: 10, ease: "linear" }}
-                      onAnimationComplete={goNext}
-                      className="block h-full rounded-full bg-white"
+                    <span
+                      key={`${active}-${storyIdx}-${paused}`}
+                      className={`story-progress-bar ${paused ? "paused" : ""}`}
+                      onAnimationEnd={goNext}
                     />
                   )}
                   {i < storyIdx && <span className="block h-full w-full rounded-full bg-white" />}
@@ -460,8 +500,9 @@ export function StoriesBar({
                 <img
                   src={currentStory.imageUrl}
                   alt=""
-                  className="h-full w-full"
+                  className="h-full w-full object-center"
                   style={{ objectFit: currentStory.fitMode ?? "cover", backgroundColor: "#000" }}
+                  decoding="async"
                 />
 
                 {/* Prev / Next tap zones */}

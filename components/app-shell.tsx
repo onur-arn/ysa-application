@@ -9,6 +9,7 @@ import { useMidnightLogout } from "@/lib/use-midnight-logout"
 import { NavVisibilityProvider, useNavVisibility } from "@/lib/nav-visibility"
 import { PresenceProvider } from "@/lib/presence"
 import { CallProvider } from "@/lib/call/call-context"
+import { QueryProvider } from "@/components/providers/query-provider"
 import { registerSW } from "@/lib/push"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 
@@ -30,7 +31,7 @@ function BottomNavWrapper({ hasUnread }: { hasUnread: boolean }) {
 function MainWrapper({ children }: { children: ReactNode }) {
   const { hideNav } = useNavVisibility()
   return (
-    <main className={`relative flex-1 ${hideNav ? "" : "pb-28"}`}>
+    <main className={`relative flex min-h-0 flex-1 flex-col ${hideNav ? "" : "pb-28"}`}>
       {children}
     </main>
   )
@@ -123,6 +124,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [pathname])
 
   return (
+    <QueryProvider>
     <NavVisibilityProvider>
     <PresenceProvider userName={userName}>
     <CallProvider userName={userName}>
@@ -159,6 +161,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     </CallProvider>
     </PresenceProvider>
     </NavVisibilityProvider>
+    </QueryProvider>
   )
 }
 

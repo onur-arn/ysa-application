@@ -6,6 +6,8 @@ import { motion } from "framer-motion"
 import { CalendarDays, Home, ListChecks, MessageCircle, Users } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
+import { prefetchStories } from "@/lib/queries/stories"
 
 const items = [
   { href: "/annuaire",  icon: Users,        key: "nav.directory" },
@@ -18,6 +20,7 @@ const items = [
 export function BottomNav({ hasUnread = false }: { hasUnread?: boolean }) {
   const pathname = usePathname()
   const router   = useRouter()
+  const queryClient = useQueryClient()
   const { t }    = useI18n()
   const navRef   = useRef<HTMLElement>(null)
   const [dragHover, setDragHover] = useState<string | null>(null)
@@ -44,6 +47,7 @@ export function BottomNav({ hasUnread = false }: { hasUnread?: boolean }) {
   function navigateTo(href: string) {
     if (href === lastNavigated.current) return
     lastNavigated.current = href
+    if (href === "/feed") void prefetchStories(queryClient)
     router.replace(href)
   }
 
