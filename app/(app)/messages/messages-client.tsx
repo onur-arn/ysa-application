@@ -1541,7 +1541,7 @@ function GroupSettingsPanel({
       animate={{ x: 0 }}
       exit={{ x: "100%" }}
       transition={{ type: "spring", stiffness: 400, damping: 36 }}
-      className="absolute inset-0 z-10 flex flex-col bg-background"
+      className="absolute inset-0 z-30 flex flex-col bg-background"
     >
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-2.5">
@@ -2016,6 +2016,10 @@ function ChatView({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachRef = useRef<HTMLDivElement>(null)
 
+  const chromeBubble =
+    "bg-background/90 shadow-[0_2px_14px_rgba(0,0,0,0.07)] ring-1 ring-border/50 backdrop-blur-xl"
+  const hideChatChrome = showSettings
+
   useEffect(() => {
     if (conversationId && messages.length > 0) onMessagesChange?.(messages)
   }, [conversationId, messages, onMessagesChange])
@@ -2462,21 +2466,22 @@ function ChatView({
         })}
       </div>
 
-      {/* Floating header bubbles */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+      {/* Floating header bubbles — hidden on group settings */}
+      {!hideChatChrome && (
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <div className="pointer-events-auto flex items-center gap-2">
           <button
             type="button"
             onClick={onBack}
             aria-label="Geri"
-            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground shadow-sm active:scale-95"
+            className={`flex size-10 shrink-0 items-center justify-center rounded-full ${chromeBubble} text-foreground active:scale-95`}
           >
-            <ArrowLeft className="size-5" />
+            <ArrowLeft className="size-[18px]" />
           </button>
 
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-full bg-secondary py-1.5 pl-1.5 pr-3 text-left shadow-sm active:opacity-80 disabled:opacity-100"
+            className={`flex min-w-0 flex-1 items-center gap-2 rounded-[20px] py-1 pl-1 pr-3 text-left ${chromeBubble} active:opacity-90 disabled:opacity-100`}
             onClick={() => {
               if (onOpenProfile) onOpenProfile()
               else if (groupSettings) setShowSettings(true)
@@ -2496,15 +2501,15 @@ function ChatView({
                 </span>
               )}
               {online && (
-                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-secondary bg-emerald-500" />
+                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-background bg-emerald-500" />
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1">
-                <span className="truncate text-sm font-semibold text-foreground">{title}</span>
-                {groupSettings && <ChevronRight className="size-3 shrink-0 text-muted-foreground" />}
+              <div className="flex items-center gap-0.5">
+                <span className="truncate text-[15px] font-semibold leading-tight text-foreground">{title}</span>
+                {groupSettings && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/80" />}
               </div>
-              <span className="block truncate text-[10px] text-muted-foreground">{subtitle}</span>
+              <span className="block truncate text-[11px] leading-tight text-muted-foreground">{subtitle}</span>
             </div>
           </button>
 
@@ -2517,17 +2522,19 @@ function ChatView({
                 callType: "audio",
                 isGroup: !!groupSettings && !isPrivate,
               })}
-              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground shadow-sm active:scale-95"
+              className={`flex size-10 shrink-0 items-center justify-center rounded-full ${chromeBubble} text-foreground active:scale-95`}
               aria-label="Sesli arama"
             >
-              <Phone className="size-5" />
+              <Phone className="size-[18px]" />
             </button>
           )}
         </div>
       </div>
+      )}
 
-      {/* Floating composer bubble */}
-      <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+      {/* Floating composer bubble — hidden on group settings */}
+      {!hideChatChrome && (
+      <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
         <VoiceRecorderBar
           recording={voice.recording}
           seconds={voice.seconds}
@@ -2535,7 +2542,7 @@ function ChatView({
           onCancel={voice.cancel}
         />
         {(attached || uploading) && !voice.recording && (
-          <div className="mb-2 flex items-center gap-2 rounded-full bg-secondary px-3 py-2 text-xs text-secondary-foreground shadow-sm">
+          <div className={`mb-2 flex items-center gap-2 rounded-[18px] px-3 py-2 text-xs text-secondary-foreground ${chromeBubble}`}>
             {uploading
               ? <><Loader2 className="size-3.5 animate-spin text-primary" /> Yükleniyor…</>
               : <><Check className="size-3.5 text-primary" /> {t("messages.imageAttached")}</>
@@ -2547,7 +2554,7 @@ function ChatView({
             )}
           </div>
         )}
-        <div className="flex items-center gap-1.5 rounded-full bg-secondary p-1.5 shadow-sm">
+        <div className={`flex items-center gap-1 rounded-[22px] p-1 pl-1.5 pr-1 ${chromeBubble}`}>
           <input
             ref={fileInputRef}
             type="file"
@@ -2577,7 +2584,7 @@ function ChatView({
             <button
               type="button"
               onClick={() => setShowAttachMenu((v) => !v)}
-              className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-background/50"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-foreground/5"
               aria-label="Ekle"
             >
               <Plus className="size-5" />
@@ -2595,29 +2602,30 @@ function ChatView({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }}
             placeholder={t("messages.typeMessage")}
-            className="h-10 min-w-0 flex-1 bg-transparent px-2 text-base text-foreground outline-none placeholder:text-muted-foreground"
+            className="h-9 min-w-0 flex-1 bg-transparent px-1.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground"
           />
           {draft.trim() || attached ? (
             <button
               onClick={send}
               disabled={(!draft.trim() && !attached) || uploading || voice.recording}
-              className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
             >
-              {uploading ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
+              {uploading ? <Loader2 className="size-[18px] animate-spin" /> : <Send className="size-[18px]" />}
             </button>
           ) : (
             <button
               type="button"
               onClick={() => { if (!voice.recording) voice.start() }}
               disabled={!conversationId || uploading}
-              className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95 disabled:opacity-40"
               aria-label="Sesli mesaj"
             >
-              <Mic className="size-5" />
+              <Mic className="size-[18px]" />
             </button>
           )}
         </div>
       </div>
+      )}
 
       <GifPicker
         open={showGifPicker}
