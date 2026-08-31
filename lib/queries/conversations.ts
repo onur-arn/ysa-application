@@ -7,11 +7,12 @@ const CHAT_MSG_NO_AUDIO =
 const CHAT_MSG_MIN = "id,sender_name,sender_initials,text,image_url,is_system,created_at"
 
 const CONV_SELECTS = [
-  "id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin,user_id)",
+  // Prefer without user_id — column often missing in production
   "id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin)",
+  "id,type,name,initials,admin_name,created_at,conversation_members(member_name,is_admin,user_id)",
 ] as const
 
-const MSG_SELECTS = [CHAT_MSG_FULL, CHAT_MSG_NO_AUDIO, CHAT_MSG_MIN] as const
+const MSG_SELECTS = [CHAT_MSG_NO_AUDIO, CHAT_MSG_MIN, CHAT_MSG_FULL] as const
 
 function isSchemaError(message?: string) {
   return !!message && /user_id|audio_url|gif_url|message_type|schema cache|42703|PGRST/i.test(message)
@@ -92,37 +93,33 @@ export async function syncConversationMembership(
   }
 }
 
-/** Insert members — tries with user_id, falls back if the column is absent. */
+/** Insert members — prefer schema without user_id (prod may not have the column yet). */
 export async function insertConversationMembers(
   supabase: SupabaseClient,
   rows: { conversation_id: string; member_name: string; user_id?: string | null; is_admin?: boolean }[],
 ): Promise<boolean> {
   if (rows.length === 0) return true
 
-  const withUid = rows.map((r) => ({
-    conversation_id: r.conversation_id,
-    member_name: r.member_name,
-    is_admin: r.is_admin ?? false,
-    ...(r.user_id ? { user_id: r.user_id } : {}),
-  }))
-
-  const primary = await supabase.from("conversation_members").insert(withUid)
-  if (!primary.error) return true
-
-  if (!isSchemaError(primary.error.message) && !/user_id/i.test(primary.error.message)) {
-    console.error("[insertConversationMembers]", primary.error.message)
-    return false
-  }
-
+  // Always use identical keys across rows (PostgREST PGRST102 otherwise)
   const legacy = rows.map((r) => ({
     conversation_id: r.conversation_id,
     member_name: r.member_name,
     is_admin: r.is_admin ?? false,
   }))
-  const fallback = await supabase.from("conversation_members").insert(legacy)
-  if (fallback.error) {
-    console.error("[insertConversationMembers] legacy:", fallback.error.message)
-    return false
-  }
-  return true
+
+  const legacyRes = await supabase.from("conversation_members").insert(legacy)
+  if (!legacyRes.error) return true
+
+  // Newer schema with user_id — only if every row has the same shape
+  const withUid = rows.map((r) => ({
+    conversation_id: r.conversation_id,
+    member_name: r.member_name,
+    is_admin: r.is_admin ?? false,
+    user_id: r.user_id ?? null,
+  }))
+  const uidRes = await supabase.from("conversation_members").insert(withUid)
+  if (!uidRes.error) return true
+
+  console.error("[insertConversationMembers]", legacyRes.error.message, uidRes.error?.message)
+  return false
 }

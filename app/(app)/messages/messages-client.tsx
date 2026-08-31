@@ -687,47 +687,18 @@ export function MessagesClient({
         return
       }
 
-      // Show a temporary row while API runs so the list doesn't feel empty
+      // Wait for a real conversation id before opening the chat (pending-* blocks sends)
       const s = getStation(member.station)
-      const tempId = `pending-dm-${member.id}`
-      setCustomDMs((prev) => {
-        if (prev.some(matchDm)) return prev
-        return [{
-          id: tempId,
-          name: member.name,
-          initials: member.initials,
-          color: s.color,
-          station: member.station,
-          online: member.online ?? false,
-          lastMessage: "",
-          lastTime: "",
-          lastAt: new Date().toISOString(),
-          unread: 0,
-          messages: [],
-          peerUserId: member.id,
-        }, ...prev]
-      })
-      setOpenId(tempId)
-
       const convId = await openDMViaApi(member.id)
       if (!convId) {
         console.error("[openOrCreateDM] API failed")
-        setCustomDMs((prev) => prev.filter((d) => d.id !== tempId))
-        if (openIdRef.current === tempId) setOpenId(null)
+        window.alert("Sohbet açılamadı. Lütfen tekrar deneyin.")
         return
       }
 
       softUnhideConv(convId)
       setCustomDMs((prev) => {
-        const withoutTemp = prev.filter((d) => d.id !== tempId)
-        const replaced = withoutTemp.map((d) =>
-          d.id === convId || matchDm(d)
-            ? { ...d, id: convId, peerUserId: member.id, name: member.name }
-            : d,
-        )
-        if (replaced.some((d) => d.id === convId || matchDm(d))) {
-          return dedupeDmsByPeer(replaced)
-        }
+        const withoutPeer = prev.filter((d) => !matchDm(d) && d.id !== convId)
         return dedupeDmsByPeer([{
           id: convId,
           name: member.name,
@@ -741,7 +712,7 @@ export function MessagesClient({
           unread: 0,
           messages: [],
           peerUserId: member.id,
-        }, ...replaced])
+        }, ...withoutPeer])
       })
       openConversation(convId)
       void queryClient.invalidateQueries({ queryKey: messageKeys.conversations(initialUserId) })
@@ -1717,7 +1688,14 @@ function ChatView({
 
   async function send() {
     if (!draft.trim() && !attached) return
-    if (conversationId?.startsWith("pending-")) return
+    if (!conversationId || conversationId.startsWith("pending-")) {
+      window.alert("Sohbet henüz hazır değil. Bir saniye bekleyip tekrar deneyin.")
+      return
+    }
+    if (!senderName.trim()) {
+      window.alert("Profil adınız eksik. Ayarlardan kontrol edin.")
+      return
+    }
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
     const messageType = attached ? "image" : "text"
     const text = draft.trim()
@@ -1738,43 +1716,49 @@ function ChatView({
     setDraft("")
     setAttached(null)
 
-    if (!conversationId) return
+    try {
+      const res = await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          text,
+          imageUrl: image ?? null,
+          messageType,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.id) {
+        console.error("[chat] send failed:", data.error ?? res.status)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert("Mesaj gönderilemedi. Lütfen tekrar deneyin.")
+        return
+      }
 
-    const supabase = createClient()
-    const { data: inserted, error } = await supabase.from("chat_messages").insert({
-      conversation_id: conversationId,
-      sender_name: senderName,
-      sender_initials: senderInitials,
-      text: text || null,
-      image_url: image ?? null,
-      message_type: messageType,
-    }).select("id").single()
-
-    if (error || !inserted) {
-      console.error("[chat] send failed:", error?.message)
+      const newMsg: ChatMessage = {
+        id: data.id as string,
+        author: senderName,
+        initials: senderInitials,
+        text,
+        time,
+        self: true,
+        image,
+        messageType,
+      }
+      setMessages((prev) => {
+        const updated = prev.some((m) => m.id === tempId)
+          ? prev.map((m) => (m.id === tempId ? newMsg : m))
+          : prev.some((m) => m.id === newMsg.id)
+            ? prev
+            : [...prev, newMsg]
+        onMessagesChange?.(updated)
+        return updated
+      })
+    } catch (e) {
+      console.error("[chat] send failed:", e)
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
-      return
+      window.alert("Mesaj gönderilemedi. Lütfen tekrar deneyin.")
     }
-
-    const newMsg: ChatMessage = {
-      id: inserted.id,
-      author: senderName,
-      initials: senderInitials,
-      text,
-      time,
-      self: true,
-      image,
-      messageType,
-    }
-    setMessages((prev) => {
-      const updated = prev.some((m) => m.id === tempId)
-        ? prev.map((m) => (m.id === tempId ? newMsg : m))
-        : prev.some((m) => m.id === newMsg.id)
-          ? prev
-          : [...prev, newMsg]
-      onMessagesChange?.(updated)
-      return updated
-    })
   }
 
   async function sendGif(rawUrl: string) {
