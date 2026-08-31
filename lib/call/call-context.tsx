@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { createClient } from "@/lib/supabase/client"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 import { CallOverlay } from "@/components/messaging/call-overlay"
-import { loadIceServers, prefetchIceServers } from "@/lib/call/ice-servers"
+import { loadIceServers, prefetchIceServers, getTurnLoadError, isTurnConfigured } from "@/lib/call/ice-servers"
 import { encodeCallEvent, type CallOutcome } from "@/lib/call/call-event"
 
 export type CallType = "audio" | "video"
@@ -178,7 +178,19 @@ export function CallProvider({ userName, children }: { userName: string; childre
 
     setCallError(null)
 
-    // 1) Media FIRST — must stay close to the click (Safari / iOS)
+    // TURN/Metered check (usually already prefetched — avoid long await before getUserMedia)
+    if (!isTurnConfigured()) {
+      await loadIceServers()
+      if (!isTurnConfigured()) {
+        setCallError(
+          getTurnLoadError() ??
+            "TURN yapılandırılmamış. Metered için Vercel'de METERED_APP_NAME + METERED_SECRET_KEY yeterlidir (değerler boş olmamalı).",
+        )
+        return
+      }
+    }
+
+    // Media FIRST — must stay close to the click (Safari / iOS)
     let stream: MediaStream
     try {
       stream = await acquireMedia(callType === "video")
@@ -187,7 +199,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
       return
     }
 
-    // 2) Show overlay immediately
+    // Show overlay immediately
     const placeholder: CallSession = {
       id: `pending-${Date.now()}`,
       conversationId,

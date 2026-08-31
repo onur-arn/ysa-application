@@ -12,20 +12,29 @@ function iceFromEnv(): RTCIceServer[] | null {
   const turn: RTCIceServer = { urls: urls.length === 1 ? urls[0] : urls }
   const username = process.env.TURN_USERNAME?.trim()
   const credential = process.env.TURN_CREDENTIAL?.trim()
-  if (username) turn.username = username
-  if (credential) turn.credential = credential
+  // Incomplete static TURN (URLs without auth) → ignore, fall through to Metered
+  if (!username || !credential) return null
+  turn.username = username
+  turn.credential = credential
   return [...DEFAULT_STUN, turn]
 }
 
+/** Accepts `myapp`, `myapp.metered.live`, or full URL. */
 function meteredBaseUrl(): string | null {
   const domain = process.env.METERED_DOMAIN?.trim()
-  if (domain) {
-    const host = domain.replace(/^https?:\/\//, "").replace(/\/$/, "")
-    return `https://${host}`
-  }
   const app = process.env.METERED_APP_NAME?.trim()
-  if (app) return `https://${app}.metered.live`
-  return null
+  const raw = domain || app
+  if (!raw) return null
+
+  let host = raw.replace(/^https?:\/\//i, "").replace(/\/$/, "")
+  if (!host.includes(".")) {
+    host = `${host}.metered.live`
+  }
+  return `https://${host}`
+}
+
+function hasMeteredConfig(): boolean {
+  return !!(meteredBaseUrl() && process.env.METERED_SECRET_KEY?.trim())
 }
 
 /** Create a short-lived TURN credential via Metered REST API (server-side only). */
@@ -33,16 +42,28 @@ export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json({ error: "Unauthorized", iceServers: null, source: "none" }, { status: 401 })
   }
 
   const fromEnv = iceFromEnv()
-  if (fromEnv) return NextResponse.json(fromEnv)
+  if (fromEnv) {
+    return NextResponse.json({ iceServers: fromEnv, source: "static" })
+  }
 
   const base = meteredBaseUrl()
   const secretKey = process.env.METERED_SECRET_KEY?.trim()
   if (!base || !secretKey) {
-    return NextResponse.json(DEFAULT_STUN)
+    return NextResponse.json({
+      error: "TURN yapılandırılmamış. Vercel'de METERED_APP_NAME + METERED_SECRET_KEY değerlerini doldurun (boş olmamalı) ve yeniden deploy edin.",
+      iceServers: DEFAULT_STUN,
+      source: "stun-only",
+      configured: false,
+      hint: {
+        hasAppName: !!(process.env.METERED_APP_NAME?.trim() || process.env.METERED_DOMAIN?.trim()),
+        hasSecret: !!process.env.METERED_SECRET_KEY?.trim(),
+        hasStaticTurn: !!(process.env.TURN_URLS?.trim()),
+      },
+    })
   }
 
   try {
@@ -62,12 +83,21 @@ export async function GET() {
     if (!createRes.ok) {
       const detail = await createRes.text()
       console.error("[turn] Metered create credential:", createRes.status, detail)
-      return NextResponse.json({ error: "Metered credential creation failed" }, { status: 502 })
+      return NextResponse.json({
+        error: `Metered credential hatası (${createRes.status}). METERED_APP_NAME / METERED_SECRET_KEY değerlerini kontrol edin.`,
+        iceServers: DEFAULT_STUN,
+        source: "stun-only",
+        configured: hasMeteredConfig(),
+      }, { status: 502 })
     }
 
     const created = (await createRes.json()) as { apiKey?: string }
     if (!created.apiKey) {
-      return NextResponse.json({ error: "Metered response missing apiKey" }, { status: 502 })
+      return NextResponse.json({
+        error: "Metered yanıtında apiKey yok",
+        iceServers: DEFAULT_STUN,
+        source: "stun-only",
+      }, { status: 502 })
     }
 
     const iceRes = await fetch(
@@ -78,13 +108,29 @@ export async function GET() {
     if (!iceRes.ok) {
       const detail = await iceRes.text()
       console.error("[turn] Metered get credentials:", iceRes.status, detail)
-      return NextResponse.json({ error: "Metered ICE fetch failed" }, { status: 502 })
+      return NextResponse.json({
+        error: "Metered ICE sunucuları alınamadı",
+        iceServers: DEFAULT_STUN,
+        source: "stun-only",
+      }, { status: 502 })
     }
 
     const iceServers = (await iceRes.json()) as RTCIceServer[]
-    return NextResponse.json(iceServers)
+    if (!Array.isArray(iceServers) || iceServers.length === 0) {
+      return NextResponse.json({
+        error: "Metered boş ICE listesi döndü",
+        iceServers: DEFAULT_STUN,
+        source: "stun-only",
+      }, { status: 502 })
+    }
+
+    return NextResponse.json({ iceServers, source: "metered", configured: true })
   } catch (err) {
     console.error("[turn] Metered error:", err)
-    return NextResponse.json({ error: "TURN service unavailable" }, { status: 502 })
+    return NextResponse.json({
+      error: "TURN servisine ulaşılamadı",
+      iceServers: DEFAULT_STUN,
+      source: "stun-only",
+    }, { status: 502 })
   }
 }
