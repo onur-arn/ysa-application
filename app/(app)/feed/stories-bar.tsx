@@ -10,7 +10,7 @@ import { STORY_BG } from "@/lib/data/feed"
 import { useI18n } from "@/lib/i18n/context"
 import { StoryEditor } from "./story-editor"
 import { createClient } from "@/lib/supabase/client"
-import { fetchStories, mapStoryRow, type StoryRow } from "@/lib/queries/stories"
+import { fetchStories, mapStoryRow, STORY_RETENTION_MS, type StoryRow } from "@/lib/queries/stories"
 import { storyKeys } from "@/lib/queries/keys"
 import { preloadImages } from "@/lib/utils/preload-images"
 
@@ -43,13 +43,20 @@ export function StoriesBar({
 }: StoriesBarProps) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
-  const initialMapped = useMemo(() => mapStoriesFromRaw(initialStories), [initialStories])
-  const { data: stories = initialMapped } = useQuery({
+  const initialMapped = useMemo(
+    () => mapStoriesFromRaw(initialStories).filter((s) => Date.now() - new Date(s.createdAt).getTime() < STORY_RETENTION_MS),
+    [initialStories],
+  )
+  const { data: fetchedStories = initialMapped } = useQuery({
     queryKey: storyKeys.list(),
     queryFn: fetchStories,
     initialData: initialMapped,
     staleTime: 60_000,
   })
+  const stories = useMemo(
+    () => fetchedStories.filter((s) => Date.now() - new Date(s.createdAt).getTime() < STORY_RETENTION_MS),
+    [fetchedStories],
+  )
 
   const setStories = useCallback((updater: Story[] | ((prev: Story[]) => Story[])) => {
     queryClient.setQueryData<Story[]>(storyKeys.list(), (prev = []) =>

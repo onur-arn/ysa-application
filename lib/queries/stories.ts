@@ -2,6 +2,12 @@ import type { QueryClient } from "@tanstack/react-query"
 import { createClient } from "@/lib/supabase/client"
 import { storyKeys } from "./keys"
 
+export const STORY_RETENTION_MS = 24 * 60 * 60 * 1000
+
+export function storyCutoffIso() {
+  return new Date(Date.now() - STORY_RETENTION_MS).toISOString()
+}
+
 export type StoryRow = {
   id: string
   station: string
@@ -33,6 +39,7 @@ export async function fetchStories(): Promise<StoryRow[]> {
   const { data } = await supabase
     .from("stories")
     .select("id,station,author_name,initials,image_url,created_at,fit_mode,music_preview_url,music_label")
+    .gte("created_at", storyCutoffIso())
     .order("created_at", { ascending: true })
   return (data ?? []).map((s) => mapStoryRow(s as Record<string, unknown>))
 }

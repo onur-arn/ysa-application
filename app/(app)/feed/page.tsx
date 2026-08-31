@@ -2,6 +2,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { FEED_RETENTION_MS } from "@/lib/monthly-export"
+import { storyCutoffIso } from "@/lib/queries/stories"
 import { FeedClient } from "./feed-client"
 
 export default async function FeedPage() {
@@ -9,14 +10,17 @@ export default async function FeedPage() {
   const { data: { user } } = await supabase.auth.getUser()
 
   const postsCutoff = new Date(Date.now() - FEED_RETENTION_MS).toISOString()
-  const storiesCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const storiesCutoff = storyCutoffIso()
 
-  // Remove iGEM requests older than 30 days (comments cascade)
+  // Remove expired feed content
   try {
     const admin = createAdminClient()
-    await admin.from("igem_requests").delete().lt("created_at", postsCutoff)
+    await Promise.all([
+      admin.from("igem_requests").delete().lt("created_at", postsCutoff),
+      admin.from("stories").delete().lt("created_at", storiesCutoff),
+    ])
   } catch (err) {
-    console.error("[feed] igem cleanup:", err)
+    console.error("[feed] cleanup:", err)
   }
 
   const [profileRes, allProfilesRes, postsRes, igemRes, storiesRes, igemCommentsRes] = await Promise.all([

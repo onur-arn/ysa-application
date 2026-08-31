@@ -1,6 +1,7 @@
 "use client"
 
 import { createClient } from "./client"
+import { storyCutoffIso } from "@/lib/queries/stories"
 
 export const supabaseEnabled = true
 
@@ -83,11 +84,10 @@ export async function toggleVote(optionId: string, voterName: string, hasVoted: 
 // ── Stories ───────────────────────────────────────────────────────────────────
 export async function fetchStories() {
   const sb = createClient()
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { data } = await sb
     .from("stories")
     .select("*")
-    .gt("created_at", cutoff)
+    .gte("created_at", storyCutoffIso())
     .order("created_at", { ascending: true })
   return data ?? []
 }
