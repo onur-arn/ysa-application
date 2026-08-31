@@ -189,7 +189,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
       if (!isTurnConfigured()) {
         setCallError(
           getTurnLoadError() ??
-            "TURN yapılandırılmamış. Metered için Vercel'de METERED_APP_NAME + METERED_SECRET_KEY yeterlidir (değerler boş olmamalı).",
+            "TURN sunucusu hazır değil. Sayfayı yenileyip tekrar deneyin.",
         )
         return
       }

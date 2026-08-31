@@ -109,7 +109,11 @@ export function GifPicker({ open, onClose, onSelect }: {
                 <button
                   key={g.id}
                   type="button"
-                  onClick={() => pick(g.url)}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    pick(g.url || g.preview)
+                  }}
                   className="overflow-hidden rounded-xl active:scale-[0.98] active:opacity-80"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}

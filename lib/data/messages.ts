@@ -27,6 +27,8 @@ export type ChatMessage = {
   image?: string
   gif?: string
   audio?: string
+  /** Voice note length in seconds (hint for UI before metadata loads) */
+  audioDuration?: number
   messageType?: MessageType
   system?: boolean
   poll?: ChatPoll

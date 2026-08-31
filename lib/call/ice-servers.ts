@@ -5,7 +5,7 @@ const DEFAULT_STUN: RTCIceServer[] = [
 
 let cached: RTCIceServer[] | null = null
 let cacheUntil = 0
-let lastSource: "static" | "metered" | "stun-only" | "none" = "none"
+let lastSource: "static" | "metered" | "openrelay" | "stun-only" | "none" = "none"
 let lastError: string | null = null
 
 function readTurnConfig() {
@@ -65,7 +65,7 @@ export function prefetchIceServers() {
 
 type IceApiResponse = {
   iceServers?: RTCIceServer[]
-  source?: "static" | "metered" | "stun-only" | "none"
+  source?: "static" | "metered" | "openrelay" | "stun-only" | "none"
   error?: string
   configured?: boolean
 }
@@ -94,7 +94,9 @@ export async function loadIceServers(): Promise<RTCIceServer[]> {
         ? data.iceServers
         : DEFAULT_STUN
 
-    lastSource = Array.isArray(data) ? (hasTurnRelay(servers) ? "metered" : "stun-only") : (data.source ?? "stun-only")
+    lastSource = Array.isArray(data)
+      ? (hasTurnRelay(servers) ? "metered" : "stun-only")
+      : (data.source ?? "stun-only")
     lastError = Array.isArray(data) ? null : (data.error ?? null)
 
     if (hasTurnRelay(servers)) {
@@ -108,8 +110,7 @@ export async function loadIceServers(): Promise<RTCIceServer[]> {
     cached = null
     cacheUntil = 0
     if (!lastError) {
-      lastError =
-        "TURN yapılandırılmamış. Vercel'de METERED_APP_NAME + METERED_SECRET_KEY değerlerini doldurun (isim yetmez, değer boş olmamalı) ve redeploy edin."
+      lastError = "TURN sunucusu bulunamadı. Sayfayı yenileyip tekrar deneyin."
     }
     return DEFAULT_STUN
   } catch {

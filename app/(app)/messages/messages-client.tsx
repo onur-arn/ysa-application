@@ -1867,6 +1867,7 @@ function ChatView({
     const url = rawUrl.startsWith("//") ? `https:${rawUrl}` : rawUrl
     setShowGifPicker(false)
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    const createdAt = new Date().toISOString()
     const tempId = `temp-gif-${Date.now()}`
     setMessages((prev) => [...prev, {
       id: tempId,
@@ -1874,75 +1875,56 @@ function ChatView({
       initials: senderInitials,
       text: "",
       time,
+      createdAt,
       self: true,
       gif: url,
       messageType: "gif" as const,
     }])
 
-    const supabase = createClient()
-    const base = {
-      conversation_id: conversationId,
-      sender_name: senderName,
-      sender_initials: senderInitials,
-      text: "GIF",
-    }
-
-    // Prefer gif_url; fall back to image_url if column missing in DB
-    let inserted: { id: string } | null = null
-    const primary = await supabase.from("chat_messages").insert({
-      ...base,
-      gif_url: url,
-      message_type: "gif",
-    }).select("id").single()
-
-    if (!primary.error && primary.data) {
-      inserted = primary.data
-    } else {
-      console.warn("[chat] gif_url insert failed, falling back:", primary.error?.message)
-      const fallback = await supabase.from("chat_messages").insert({
-        ...base,
-        image_url: url,
-        message_type: "gif",
-      }).select("id").single()
-      if (!fallback.error && fallback.data) {
-        inserted = fallback.data
-      } else {
-        console.error("[chat] gif send failed:", fallback.error?.message ?? primary.error?.message)
+    try {
+      const res = await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          gifUrl: url,
+          messageType: "gif",
+          text: "GIF",
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.id) {
+        console.error("[chat] gif send failed:", data.error)
         setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert("GIF gönderilemedi. Lütfen tekrar deneyin.")
         return
       }
-    }
 
-    setMessages((prev) => {
-      const updated = prev.some((m) => m.id === tempId)
-        ? prev.map((m) => (m.id === tempId ? { ...m, id: inserted!.id } : m))
-        : prev.some((m) => m.id === inserted!.id)
-          ? prev
-          : [...prev, {
-              id: inserted!.id,
-              author: senderName,
-              initials: senderInitials,
-              text: "",
-              time,
-              self: true,
-              gif: url,
-              messageType: "gif" as const,
-            }]
-      return updated
-    })
-    void broadcastChatMessage(conversationId, {
-      id: inserted.id,
-      author: senderName,
-      initials: senderInitials,
-      text: "",
-      time,
-      self: true,
-      gif: url,
-      messageType: "gif",
-    })
+      const newMsg: ChatMessage = {
+        id: data.id as string,
+        author: senderName,
+        initials: senderInitials,
+        text: "",
+        time,
+        createdAt: (data.createdAt as string) || createdAt,
+        self: true,
+        gif: url,
+        messageType: "gif",
+      }
+      setMessages((prev) => {
+        const updated = prev.map((m) => (m.id === tempId ? newMsg : m))
+        onMessagesChange?.(updated)
+        return updated
+      })
+      void broadcastChatMessage(conversationId, newMsg)
+    } catch (e) {
+      console.error("[chat] gif:", e)
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      window.alert("GIF gönderilemedi. Lütfen tekrar deneyin.")
+    }
   }
 
-  async function sendAudio(blob: Blob) {
+  async function sendAudio(blob: Blob, durationSec?: number) {
     if (!conversationId || conversationId.startsWith("pending-")) return
     if (!senderName.trim()) {
       window.alert("Profil adınız eksik.")
@@ -1952,6 +1934,7 @@ function ChatView({
     const createdAt = new Date().toISOString()
     const tempId = `temp-audio-${Date.now()}`
     const localUrl = URL.createObjectURL(blob)
+    const audioDuration = durationSec && durationSec > 0 ? durationSec : undefined
 
     const optimistic: ChatMessage = {
       id: tempId,
@@ -1962,6 +1945,7 @@ function ChatView({
       createdAt,
       self: true,
       audio: localUrl,
+      audioDuration,
       messageType: "audio",
     }
     setMessages((prev) => [...prev, optimistic])
@@ -2011,6 +1995,7 @@ function ChatView({
         createdAt: (data.createdAt as string) || createdAt,
         self: true,
         audio: url,
+        audioDuration,
         messageType: "audio",
       }
       setMessages((prev) => {
@@ -2030,8 +2015,8 @@ function ChatView({
   }
 
   async function handleVoiceStop() {
-    const blob = await voice.stop()
-    if (blob) await sendAudio(blob)
+    const result = await voice.stop()
+    if (result) await sendAudio(result.blob, result.durationSec)
   }
 
   async function sendPoll(question: string, optionTexts: string[]) {
@@ -2259,7 +2244,7 @@ function ChatView({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={m.gif} alt="" className="mb-1 max-h-48 rounded-lg" />
                     )}
-                    {m.audio && <AudioMessage src={m.audio} self={m.self} />}
+                    {m.audio && <AudioMessage src={m.audio} self={m.self} durationHint={m.audioDuration} />}
                     {m.text && !m.audio && <p className="text-[15px] leading-relaxed">{m.text}</p>}
                     <span
                       className={`mt-0.5 block text-right text-[10px] ${m.self ? "text-primary-foreground/70" : "text-muted-foreground"}`}
