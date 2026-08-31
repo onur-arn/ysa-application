@@ -554,39 +554,47 @@ export function MessagesClient({
 
   // ── Group actions ─────────────────────────────────────────────────────────
   async function insertSystemChat(conversationId: string, text: string) {
-    const supabase = createClient()
-    const { data } = await supabase.from("chat_messages").insert({
-      conversation_id: conversationId,
-      sender_name: "",
-      sender_initials: "",
-      text,
-      is_system: true,
-    }).select("id,created_at").single()
-    if (!data) return
-    const msg: ChatMessage = {
-      id: data.id as string,
-      author: "",
-      initials: "",
-      text,
-      time: new Date(data.created_at as string).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
-      createdAt: data.created_at as string,
-      system: true,
-    }
-    queryClient.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) => {
-      if (prev.some((m) => m.id === msg.id)) return prev
-      return [...prev, msg]
-    })
-    void broadcastChatMessage(conversationId, msg)
-    setCustomGroups((prev) => prev.map((g) => {
-      if (g.id !== conversationId) return g
-      return {
-        ...g,
-        messages: g.messages.some((m) => m.id === msg.id) ? g.messages : [...g.messages, msg],
-        lastMessage: text,
-        lastTime: msg.time,
-        lastAt: msg.createdAt || g.lastAt,
+    try {
+      const res = await fetch("/api/chat/system", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.id) {
+        console.error("[system-chat]", data.error)
+        return
       }
-    }))
+      const msg: ChatMessage = {
+        id: data.id as string,
+        author: "",
+        initials: "",
+        text,
+        time: new Date((data.createdAt as string) || Date.now()).toLocaleTimeString("tr-TR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        createdAt: (data.createdAt as string) || new Date().toISOString(),
+        system: true,
+      }
+      queryClient.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) => {
+        if (prev.some((m) => m.id === msg.id)) return prev
+        return [...prev, msg]
+      })
+      void broadcastChatMessage(conversationId, msg)
+      setCustomGroups((prev) => prev.map((g) => {
+        if (g.id !== conversationId) return g
+        return {
+          ...g,
+          messages: g.messages.some((m) => m.id === msg.id) ? g.messages : [...g.messages, msg],
+          lastMessage: text,
+          lastTime: msg.time,
+          lastAt: msg.createdAt || g.lastAt,
+        }
+      }))
+    } catch (e) {
+      console.error("[system-chat]", e)
+    }
   }
 
   async function uploadGroupAvatar(conversationId: string, photo: { base64: string; ext: string }) {
@@ -1480,7 +1488,7 @@ function GroupSettingsPanel({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editingName, setEditingName]     = useState(false)
   const [newName, setNewName]             = useState(title)
-  const [removeStep, setRemoveStep]       = useState<{ name: string; step: 1 | 2 } | null>(null)
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null)
   const [avatarBusy, setAvatarBusy]       = useState(false)
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
@@ -1530,7 +1538,7 @@ function GroupSettingsPanel({
 
       <div className="flex-1 overflow-y-auto">
         {/* Group identity */}
-        <div className="flex flex-col items-center gap-2 py-8">
+        <div className="flex flex-col items-center gap-3 py-8">
           <input
             ref={avatarInputRef}
             type="file"
@@ -1552,32 +1560,44 @@ function GroupSettingsPanel({
               reader.readAsDataURL(file)
             }}
           />
-          <button
-            type="button"
-            disabled={!isAdmin || avatarBusy || !onChangeAvatar}
-            onClick={() => isAdmin && avatarInputRef.current?.click()}
-            className="relative flex size-20 items-center justify-center overflow-hidden rounded-full text-2xl font-bold text-white disabled:opacity-100"
-            style={{ backgroundColor: `hsl(${CUSTOM_COLOR})` }}
-          >
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatarUrl}
-                alt=""
-                className="size-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
-              />
-            ) : (
-              initials
+          <div className="relative">
+            <div
+              className="flex size-[88px] items-center justify-center overflow-hidden rounded-full text-2xl font-bold text-white"
+              style={{ backgroundColor: `hsl(${CUSTOM_COLOR})` }}
+            >
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  className="size-full object-cover"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+                />
+              ) : (
+                initials
+              )}
+            </div>
+            {isAdmin && onChangeAvatar && (
+              <button
+                type="button"
+                disabled={avatarBusy}
+                onClick={() => avatarInputRef.current?.click()}
+                aria-label="Grup fotoğrafını değiştir"
+                className="absolute -bottom-1 -right-1 flex size-9 items-center justify-center rounded-full border-[3px] border-background bg-primary text-primary-foreground shadow-md transition-transform active:scale-95 disabled:opacity-60"
+              >
+                {avatarBusy ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" strokeWidth={2.25} />}
+              </button>
             )}
-            {isAdmin && (
-              <span className="absolute bottom-1 right-1 flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
-                {avatarBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Camera className="size-3.5" />}
-              </span>
-            )}
-          </button>
+          </div>
           {isAdmin && (
-            <p className="text-xs text-muted-foreground">Grup fotoğrafını değiştir</p>
+            <button
+              type="button"
+              disabled={avatarBusy || !onChangeAvatar}
+              onClick={() => avatarInputRef.current?.click()}
+              className="text-xs font-medium text-primary active:opacity-70"
+            >
+              Fotoğrafı değiştir
+            </button>
           )}
           {isAdmin && editingName ? (
             <div className="flex items-center gap-2 px-6 w-full">
@@ -1670,7 +1690,7 @@ function GroupSettingsPanel({
                   )}
                   {isAdmin && (
                     <button
-                      onClick={() => setRemoveStep({ name: m.name, step: 1 })}
+                      onClick={() => setRemoveTarget(m.name)}
                       className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-destructive/10 active:text-destructive"
                       aria-label={`${m.name} çıkar`}
                     >
@@ -1682,58 +1702,31 @@ function GroupSettingsPanel({
             })}
           </div>
 
-          {removeStep && (
+          {removeTarget && (
             <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-              {removeStep.step === 1 ? (
-                <>
-                  <p className="mb-3 text-sm font-medium text-destructive">
-                    {removeStep.name} kişisini gruptan çıkarmak istiyor musunuz?
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRemoveStep(null)}
-                      className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
-                    >
-                      İptal
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRemoveStep({ name: removeStep.name, step: 2 })}
-                      className="flex-1 rounded-lg bg-destructive/90 py-2 text-sm font-semibold text-white"
-                    >
-                      Devam
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="mb-1 text-sm font-semibold text-destructive">Emin misiniz?</p>
-                  <p className="mb-3 text-xs text-muted-foreground">
-                    {removeStep.name} gruptan kalıcı olarak çıkarılacak.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRemoveStep(null)}
-                      className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
-                    >
-                      İptal
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const name = removeStep.name
-                        setRemoveStep(null)
-                        onRemoveMember(name)
-                      }}
-                      className="flex-1 rounded-lg bg-destructive py-2 text-sm font-semibold text-white"
-                    >
-                      Evet, çıkar
-                    </button>
-                  </div>
-                </>
-              )}
+              <p className="mb-3 text-sm font-medium text-destructive">
+                {removeTarget} kişisini gruptan çıkarmak istediğinizden emin misiniz?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRemoveTarget(null)}
+                  className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground"
+                >
+                  İptal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const name = removeTarget
+                    setRemoveTarget(null)
+                    onRemoveMember(name)
+                  }}
+                  className="flex-1 rounded-lg bg-destructive py-2 text-sm font-semibold text-white"
+                >
+                  Çıkar
+                </button>
+              </div>
             </div>
           )}
 
@@ -2413,8 +2406,8 @@ function ChatView({
             return (
               <div key={m.id}>
                 {daySep}
-                <div className="flex justify-center py-1">
-                  <span className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                <div className="flex justify-center py-2">
+                  <span className="max-w-[90%] rounded-full bg-secondary/90 px-3.5 py-1.5 text-center text-[11px] leading-snug text-muted-foreground shadow-sm">
                     {m.text}
                   </span>
                 </div>

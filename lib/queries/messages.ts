@@ -64,7 +64,7 @@ export function rowToChatMessage(m: RawMsg, senderName: string, poll?: ChatPoll)
     gif: m.gif_url ?? undefined,
     audio: audio ?? undefined,
     messageType: isAudio ? "audio" : ((m.message_type as ChatMessage["messageType"]) ?? undefined),
-    system: m.is_system,
+    system: !!m.is_system,
     poll,
   }
 }
