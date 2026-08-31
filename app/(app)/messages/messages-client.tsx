@@ -31,7 +31,7 @@ import { openDMViaApi } from "@/lib/dm"
 import { prefetchChatMessages } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
 import { fetchUserConversationRows, syncConversationMembership, insertConversationMembers } from "@/lib/queries/conversations"
-import { useChatMessages } from "@/lib/hooks/use-chat-messages"
+import { useChatMessages, broadcastChatMessage } from "@/lib/hooks/use-chat-messages"
 
 const CUSTOM_COLOR = "262 83% 58%"
 
@@ -341,8 +341,10 @@ export function MessagesClient({
     },
     enabled: !!initialUserId,
     initialData: initialConversations,
-    staleTime: 30_000,
+    staleTime: 10_000,
     refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 8_000,
   })
 
   useEffect(() => {
@@ -373,9 +375,11 @@ export function MessagesClient({
       const livePeers = new Set(
         fromLive.map((d) => (d.peerUserId || d.name).trim().toLowerCase()).filter(Boolean),
       )
-      // Keep optimistic / just-opened DMs until they appear in the live refetch
+      // Keep local DMs not yet visible in live refetch (and never drop the open thread)
+      const openIdNow = openIdRef.current
       const pendingLocal = prev.filter((d) => {
         if (hidden.has(d.id) || liveIds.has(d.id)) return false
+        if (d.id === openIdNow) return true
         const key = (d.peerUserId || d.name).trim().toLowerCase()
         return !key || !livePeers.has(key)
       })
@@ -1754,6 +1758,7 @@ function ChatView({
         onMessagesChange?.(updated)
         return updated
       })
+      void broadcastChatMessage(conversationId, newMsg)
     } catch (e) {
       console.error("[chat] send failed:", e)
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
@@ -1828,6 +1833,16 @@ function ChatView({
               messageType: "gif" as const,
             }]
       return updated
+    })
+    void broadcastChatMessage(conversationId, {
+      id: inserted.id,
+      author: senderName,
+      initials: senderInitials,
+      text: "",
+      time,
+      self: true,
+      gif: url,
+      messageType: "gif",
     })
   }
 
