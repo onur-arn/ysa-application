@@ -25,31 +25,43 @@ export async function findOrCreateDM(
 
   if (memErr) {
     console.error("[findOrCreateDM] memberships:", memErr.message)
-    return null
   }
 
-  const convIds = (myMemberships ?? []).map((m) => m.conversation_id as string)
+  const myConvIds = (myMemberships ?? []).map((m) => m.conversation_id as string)
 
-  if (convIds.length > 0) {
-    const { data: convs, error: convErr } = await supabase
+  if (!memErr && myConvIds.length > 0) {
+    const { data: dmConvs, error: dmErr } = await supabase
       .from("conversations")
-      .select("id, type, conversation_members(member_name)")
-      .in("id", convIds)
+      .select("id")
+      .in("id", myConvIds)
       .eq("type", "dm")
 
-    if (convErr) {
-      console.error("[findOrCreateDM] convs:", convErr.message)
+    if (dmErr) {
+      console.error("[findOrCreateDM] dm convs:", dmErr.message)
     } else {
-      for (const conv of convs ?? []) {
-        const names = ((conv.conversation_members as { member_name: string }[]) ?? []).map((m) => m.member_name)
-        if (names.includes(them) && names.includes(me)) {
-          return conv.id as string
+      const dmIds = (dmConvs ?? []).map((c) => c.id as string)
+      if (dmIds.length > 0) {
+        const { data: shared, error: sharedErr } = await supabase
+          .from("conversation_members")
+          .select("conversation_id")
+          .eq("member_name", them)
+          .in("conversation_id", dmIds)
+          .limit(1)
+          .maybeSingle()
+
+        if (sharedErr) {
+          console.error("[findOrCreateDM] shared lookup:", sharedErr.message)
+        } else if (shared?.conversation_id) {
+          return shared.conversation_id as string
         }
       }
     }
   }
 
-  const initials = member.initials?.trim() || them.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?"
+  const initials =
+    member.initials?.trim() ||
+    them.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() ||
+    "?"
 
   const { data: conv, error } = await supabase
     .from("conversations")

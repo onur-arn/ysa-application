@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { isAdminEmail } from "@/lib/admin"
 
 type CurrentUser = { id: string; station: StationId; role: string; name: string; initials: string }
 
@@ -17,6 +18,7 @@ const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done"]
 
 interface TasksClientProps {
   initialUserId?: string
+  initialUserEmail?: string
   initialProfile?: { name: string; initials: string; station: string; role: string } | null
   initialProfiles?: { id: string; name: string; photo_url: string | null }[]
   initialTasks?: Record<string, unknown>[]
@@ -58,12 +60,14 @@ function mapTasksFromRaw(
 
 export function TasksClient({
   initialUserId = "",
+  initialUserEmail = "",
   initialProfile = null,
   initialProfiles = [],
   initialTasks = [],
   initialComments = [],
 }: TasksClientProps) {
   const { t } = useI18n()
+  const isAdmin = isAdminEmail(initialUserEmail)
   const [tasks, setTasks] = useState<Task[]>(() => mapTasksFromRaw(initialTasks, initialComments))
   const [filter, setFilter] = useState<TaskStatus | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -168,9 +172,20 @@ export function TasksClient({
   }
 
   async function deleteTask(id: string) {
-    setTasks((prev) => prev.filter((t) => t.id !== id))
-    const supabase = createClient()
-    await supabase.from("tasks").delete().eq("id", id)
+    const prev = tasks
+    setTasks((t) => t.filter((x) => x.id !== id))
+    try {
+      const res = await fetch("/api/tasks/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: id }),
+      })
+      if (!res.ok) {
+        setTasks(prev)
+      }
+    } catch {
+      setTasks(prev)
+    }
   }
 
   return (
@@ -207,7 +222,7 @@ export function TasksClient({
             <TaskCard
               key={task.id}
               task={task}
-              currentUserId={myId}
+              canDelete={isAdmin || (!!task.createdById && task.createdById === myId)}
               photoMap={photoMap}
               onCycle={() => cycleStatus(task.id)}
               onComment={(text) => addComment(task.id, text)}
@@ -334,14 +349,14 @@ function priorityStyle(p: TaskPriority) {
 
 function TaskCard({
   task,
-  currentUserId,
+  canDelete,
   photoMap,
   onCycle,
   onComment,
   onDelete,
 }: {
   task: Task
-  currentUserId: string
+  canDelete: boolean
   photoMap: Map<string, string>
   onCycle: () => void
   onComment: (text: string) => void
@@ -385,7 +400,7 @@ function TaskCard({
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${priorityStyle(task.priority)}`}>
                 {priorityLabel[task.priority]}
               </span>
-              {task.createdById && task.createdById === currentUserId && (
+              {canDelete && (
                 confirmDelete ? (
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <button

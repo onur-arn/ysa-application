@@ -3,22 +3,35 @@ import { createAdminClient } from "@/lib/supabase/admin"
 
 /** Board roles that can only be held by one person per station */
 export async function getOccupiedRoles(station: string): Promise<string[]> {
-  if (!station) return []
+  const all = await getOccupiedRolesByStation()
+  return all[station] ?? []
+}
 
+/** Occupied board roles grouped by station — one DB round-trip for signup UI */
+export async function getOccupiedRolesByStation(): Promise<Record<string, string[]>> {
   const admin = createAdminClient()
   const roleSet = new Set<string>(ROLES as unknown as string[])
 
   const [profilesRes, pendingRes] = await Promise.all([
-    admin.from("profiles").select("role, station").eq("station", station),
-    admin.from("pending_members").select("role, station").eq("station", station),
+    admin.from("profiles").select("role, station"),
+    admin.from("pending_members").select("role, station"),
   ])
 
-  const occupied = new Set<string>()
+  const byStation: Record<string, Set<string>> = {}
+
   for (const row of [...(profilesRes.data ?? []), ...(pendingRes.data ?? [])]) {
     const role = row.role as string | null
-    if (role && roleSet.has(role)) occupied.add(role)
+    const st = row.station as string | null
+    if (!st || !role || !roleSet.has(role)) continue
+    if (!byStation[st]) byStation[st] = new Set()
+    byStation[st].add(role)
   }
-  return [...occupied]
+
+  const result: Record<string, string[]> = {}
+  for (const [st, roles] of Object.entries(byStation)) {
+    result[st] = [...roles]
+  }
+  return result
 }
 
 export async function isRoleAvailable(

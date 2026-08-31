@@ -9,6 +9,7 @@ import { Modal } from "@/components/ui/modal"
 import { createClient } from "@/lib/supabase/client"
 import { usePresence } from "@/lib/presence"
 import { isAdminEmail } from "@/lib/admin"
+import { findOrCreateDMFromBrowser } from "@/lib/dm"
 
 type StationFilter = "all" | StationId
 
@@ -110,21 +111,25 @@ export function DirectoryClient({
 
   async function startMessage(member: Member) {
     if (member.id === initialCurrentUserId) return
+    const myName = initialCurrentUserName.trim()
+    if (!myName) {
+      setMessageError("Profilinizde isim eksik. Ayarlardan tamamlayın.")
+      return
+    }
     setMessaging(true)
     setMessageError(null)
     try {
-      const res = await fetch("/api/dm/open", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: member.id }),
+      const convId = await findOrCreateDMFromBrowser(myName, {
+        name: member.name,
+        initials: member.initials,
+        station: member.station,
       })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.convId) {
-        setMessageError(data.error ?? "Mesaj açılamadı. Lütfen tekrar deneyin.")
+      if (!convId) {
+        setMessageError("Sohbet açılamadı. Lütfen tekrar deneyin.")
         return
       }
       setSelected(null)
-      router.push(`/messages?open=${data.convId}`)
+      router.push(`/messages?open=${convId}`)
     } catch {
       setMessageError("Bağlantı hatası. Lütfen tekrar deneyin.")
     } finally {

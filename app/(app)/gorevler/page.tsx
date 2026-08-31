@@ -25,6 +25,7 @@ export default async function TasksPage() {
   return (
     <TasksClient
       initialUserId={user?.id ?? ""}
+      initialUserEmail={user?.email ?? ""}
       initialProfile={profileRes.data as { name: string; initials: string; station: string; role: string } | null}
       initialProfiles={(allProfilesRes.data ?? []) as { id: string; name: string; photo_url: string | null }[]}
       initialTasks={(tasksRes.data ?? []) as Record<string, unknown>[]}

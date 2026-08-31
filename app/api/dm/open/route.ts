@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { findOrCreateDM } from "@/lib/dm"
 
 export async function POST(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Üye bulunamadı" }, { status: 404 })
   }
 
-  const convId = await findOrCreateDM(supabase, me.name, {
+  const convId = await findOrCreateDM(createAdminClient(), me.name, {
     name: target.name,
     initials: target.initials ?? "",
     station: target.station ?? "paris",

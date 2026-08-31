@@ -92,6 +92,16 @@ export default function SignUpPage() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [occupiedByStation, setOccupiedByStation] = useState<Record<string, string[]>>({})
+  const [rolesPrefetched, setRolesPrefetched] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/check-roles?all=1")
+      .then((r) => r.json())
+      .then((d) => setOccupiedByStation(d.byStation ?? {}))
+      .catch(() => setOccupiedByStation({}))
+      .finally(() => setRolesPrefetched(true))
+  }, [])
 
   function go(delta: number, updates?: Partial<FormData>) {
     if (updates) setData(p => ({ ...p, ...updates }))
@@ -198,7 +208,15 @@ export default function SignUpPage() {
                 onLogin={() => router.push("/auth/login")}
               />
             )}
-            {step === 2 && <Step2 data={data} onNext={d => go(1, d)} onBack={() => go(-1)} />}
+            {step === 2 && (
+              <Step2
+                data={data}
+                occupiedByStation={occupiedByStation}
+                rolesLoading={!rolesPrefetched}
+                onNext={d => go(1, d)}
+                onBack={() => go(-1)}
+              />
+            )}
             {step === 3 && (
               <Step3
                 data={data}
@@ -487,37 +505,37 @@ function Step1({
   )
 }
 
-// ── Step 2 — Role + Station (Europe map) ─────────────────────────────────────
+// ── Step 2 — Station + Role ───────────────────────────────────────────────────
 function Step2({
   data,
+  occupiedByStation,
+  rolesLoading,
   onNext,
   onBack,
 }: {
   data: FormData
+  occupiedByStation: Record<string, string[]>
+  rolesLoading: boolean
   onNext: (d: Partial<FormData>) => void
   onBack: () => void
 }) {
   const [role, setRole] = useState<Role | "">(data.role)
   const [station, setStation] = useState<StationId>(data.station)
-  const [occupiedRoles, setOccupiedRoles] = useState<string[]>([])
 
-  useEffect(() => {
-    fetch(`/api/check-roles?station=${encodeURIComponent(station)}`)
-      .then((r) => r.json())
-      .then((d) => setOccupiedRoles(d.occupied ?? []))
-      .catch(() => setOccupiedRoles([]))
-  }, [station])
+  const occupiedRoles = occupiedByStation[station] ?? []
 
-  useEffect(() => {
-    if (role && occupiedRoles.includes(role)) {
+  function selectStation(id: StationId) {
+    setStation(id)
+    const occupied = occupiedByStation[id] ?? []
+    if (role && occupied.includes(role)) {
       setRole("")
     }
-  }, [occupiedRoles, role])
+  }
 
   const canProceed = role !== "" && !occupiedRoles.includes(role)
 
   function renderRoleOption(r: Role) {
-    const taken = occupiedRoles.includes(r)
+    const taken = !rolesLoading && occupiedRoles.includes(r)
     return (
       <option key={r} value={r} disabled={taken}>
         {r}{taken ? " (dolu)" : ""}
@@ -533,44 +551,14 @@ function Step2({
       <h1 className="mb-1 font-heading text-2xl font-bold text-foreground">Görev & İstasyon</h1>
       <p className="mb-5 text-sm text-muted-foreground">Adım 2 / 3</p>
 
-      {/* Role */}
-      <div className="mb-5 flex flex-col gap-1.5">
-        <label className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-          <Briefcase className="size-4 text-muted-foreground" />
-          Göreviniz <span className="text-destructive">*</span>
-        </label>
-        <div className="relative">
-          <select
-            value={role}
-            onChange={e => setRole(e.target.value as Role)}
-            className={selectClass}
-          >
-            <option value="">Görevinizi seçin…</option>
-            <optgroup label="Yönetim Kurulu">
-              {YONETIM_KURULU_ROLES.map(renderRoleOption)}
-            </optgroup>
-            <optgroup label="Yürütme Kurulu">
-              {YURUTME_KURULU_ROLES.map(renderRoleOption)}
-            </optgroup>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        </div>
-        {!canProceed && role === "" && (
-          <p className="text-xs text-muted-foreground">Devam etmek için görevinizi seçmelisiniz.</p>
-        )}
-        {role !== "" && occupiedRoles.includes(role) && (
-          <p className="text-xs text-destructive">Bu görev bu istasyonda zaten dolu. Lütfen başka bir görev seçin.</p>
-        )}
-      </div>
-
-      {/* Station — Europe map */}
+      {/* Station — Europe map (first) */}
       <div className="mb-5 flex flex-col gap-2">
         <label className="flex items-center gap-1.5 text-sm font-medium text-foreground">
           <MapPin className="size-4 text-muted-foreground" />
-          İstasyonun
+          İstasyonun <span className="text-destructive">*</span>
         </label>
         <div className="overflow-hidden rounded-2xl border border-border bg-card p-2">
-          <EuropeMap selected={station} onSelect={setStation} />
+          <EuropeMap selected={station} onSelect={selectStation} />
         </div>
         <div className="grid grid-cols-2 gap-2">
           {STATIONS_SORTED.map(s => {
@@ -579,7 +567,7 @@ function Step2({
               <button
                 key={s.id}
                 type="button"
-                onClick={() => setStation(s.id)}
+                onClick={() => selectStation(s.id)}
                 className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
                   sel ? "border-primary bg-primary/10 text-foreground" : "border-input bg-card text-muted-foreground"
                 }`}
@@ -598,10 +586,45 @@ function Step2({
         </div>
       </div>
 
+      {/* Role (depends on station) */}
+      <div className="mb-5 flex flex-col gap-1.5">
+        <label className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+          <Briefcase className="size-4 text-muted-foreground" />
+          Göreviniz <span className="text-destructive">*</span>
+        </label>
+        <div className="relative">
+          <select
+            value={role}
+            onChange={e => setRole(e.target.value as Role)}
+            disabled={rolesLoading}
+            className={`${selectClass} disabled:opacity-60`}
+          >
+            <option value="">{rolesLoading ? "Görevler yükleniyor…" : "Görevinizi seçin…"}</option>
+            {!rolesLoading && (
+              <>
+                <optgroup label="Yönetim Kurulu">
+                  {YONETIM_KURULU_ROLES.map(renderRoleOption)}
+                </optgroup>
+                <optgroup label="Yürütme Kurulu">
+                  {YURUTME_KURULU_ROLES.map(renderRoleOption)}
+                </optgroup>
+              </>
+            )}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        </div>
+        {!canProceed && role === "" && !rolesLoading && (
+          <p className="text-xs text-muted-foreground">Devam etmek için görevinizi seçmelisiniz.</p>
+        )}
+        {role !== "" && occupiedRoles.includes(role) && (
+          <p className="text-xs text-destructive">Bu görev bu istasyonda zaten dolu. Lütfen başka bir görev seçin.</p>
+        )}
+      </div>
+
       <Button
         size="lg"
         className="w-full"
-        disabled={!canProceed}
+        disabled={!canProceed || rolesLoading}
         onClick={() => canProceed && onNext({ role: role as Role, station })}
       >
         Devam et
