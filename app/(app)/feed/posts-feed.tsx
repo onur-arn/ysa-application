@@ -8,6 +8,7 @@ import { getStation, type StationId } from "@/lib/data/stations"
 import { FEED_RETENTION_MS } from "@/lib/monthly-export"
 import { createClient } from "@/lib/supabase/client"
 import { Modal } from "@/components/ui/modal"
+import { uploadPostImage } from "@/lib/chat-media"
 
 
 function timeAgo(iso: string) {
@@ -288,22 +289,33 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
 }
 
 // ── Compose modal ─────────────────────────────────────────────────────────────
-function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () => void; onPost: (content: string, imageUrl?: string, poll?: Poll) => void }) {
+function ComposeModal({ open, onClose, onPost }: {
+  open: boolean
+  onClose: () => void
+  onPost: (content: string, imageFile?: File, poll?: Poll) => void | Promise<void>
+}) {
   const [tab, setTab] = useState<"post" | "poll">("post")
-
   const [content, setContent] = useState("")
-  const [imageUrl, setImageUrl] = useState<string | undefined>()
+  const [imageFile, setImageFile] = useState<File | undefined>()
+  const [imagePreview, setImagePreview] = useState<string | undefined>()
+  const [posting, setPosting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
   const [question, setQuestion] = useState("")
   const [options, setOptions] = useState(["", ""])
+
+  function clearImage() {
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImageFile(undefined)
+    setImagePreview(undefined)
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => setImageUrl(reader.result as string)
-    reader.readAsDataURL(file)
+    clearImage()
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+    e.target.value = ""
   }
 
   function setOption(i: number, v: string) {
@@ -319,30 +331,39 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
   const canPost = content.trim()
   const canPoll = question.trim() && validOptions.length >= 2
 
-  function submitPost() {
-    if (!canPost) return
-    onPost(content.trim(), imageUrl)
-    setContent("")
-    setImageUrl(undefined)
-    onClose()
+  async function submitPost() {
+    if (!canPost || posting) return
+    setPosting(true)
+    try {
+      await onPost(content.trim(), imageFile)
+      setContent("")
+      clearImage()
+      onClose()
+    } finally {
+      setPosting(false)
+    }
   }
 
-  function submitPoll() {
-    if (!canPoll) return
+  async function submitPoll() {
+    if (!canPoll || posting) return
     const pollOptions: PollOption[] = validOptions.map((text, i) => ({
       id: `opt-${i}`,
       text: text.trim(),
       voters: [],
     }))
-    onPost(question.trim(), undefined, { question: question.trim(), options: pollOptions })
-    setQuestion("")
-    setOptions(["", ""])
-    onClose()
+    setPosting(true)
+    try {
+      await onPost(question.trim(), undefined, { question: question.trim(), options: pollOptions })
+      setQuestion("")
+      setOptions(["", ""])
+      onClose()
+    } finally {
+      setPosting(false)
+    }
   }
 
   return (
     <Modal open={open} onClose={onClose} title="Yeni paylaşım">
-      {/* Tabs */}
       <div className="-mx-5 -mt-5 mb-5 flex gap-2 border-b border-border px-5 pb-3 pt-1">
         <button
           onClick={() => setTab("post")}
@@ -371,11 +392,12 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
             rows={4}
             className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
-          {imageUrl && (
+          {imagePreview && (
             <div className="relative">
-              <img src={imageUrl} alt="" className="w-full rounded-xl object-cover" style={{ maxHeight: 220 }} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imagePreview} alt="" className="w-full rounded-xl object-cover" style={{ maxHeight: 220 }} />
               <button
-                onClick={() => setImageUrl(undefined)}
+                onClick={clearImage}
                 className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/60 text-white"
               >
                 <X className="size-4" />
@@ -391,11 +413,11 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
             </button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
             <button
-              onClick={submitPost}
-              disabled={!canPost}
+              onClick={() => void submitPost()}
+              disabled={!canPost || posting}
               className="ml-auto rounded-xl bg-primary px-6 py-2.5 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
             >
-              Paylaş
+              {posting ? "Gönderiliyor…" : "Paylaş"}
             </button>
           </div>
         </div>
@@ -410,7 +432,6 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
             />
           </div>
-
           <div className="flex flex-col gap-2">
             <label className="text-xs font-semibold text-muted-foreground">Seçenekler</label>
             {options.map((opt, i) => (
@@ -440,13 +461,12 @@ function ComposeModal({ open, onClose, onPost }: { open: boolean; onClose: () =>
               </button>
             )}
           </div>
-
           <button
-            onClick={submitPoll}
-            disabled={!canPoll}
+            onClick={() => void submitPoll()}
+            disabled={!canPoll || posting}
             className="w-full rounded-xl bg-primary py-3 font-semibold text-primary-foreground transition-colors active:bg-primary/80 disabled:opacity-40"
           >
-            Anketi paylaş
+            {posting ? "Gönderiliyor…" : "Anketi paylaş"}
           </button>
         </div>
       )}
@@ -872,11 +892,18 @@ export function PostsFeed({
     await supabase.from("posts").delete().eq("id", id)
   }
 
-  async function addPost(content: string, imageUrl?: string, poll?: Poll) {
-    const userId = me.id
-    if (!userId) return
-    // Pre-generate UUID so the realtime INSERT event matches the optimistic post
+  async function addPost(content: string, imageFile?: File, poll?: Poll) {
     const newId = crypto.randomUUID()
+    let imageUrl: string | undefined
+    if (imageFile) {
+      const uploaded = await uploadPostImage(imageFile)
+      if (!uploaded) {
+        window.alert("Fotoğraf yüklenemedi. Lütfen tekrar deneyin.")
+        return
+      }
+      imageUrl = uploaded
+    }
+
     // Générer de vrais UUIDs pour les options (utilisés à la fois en local et en BD)
     const pollWithIds: Poll | undefined = poll ? {
       ...poll,
@@ -900,7 +927,7 @@ export function PostsFeed({
     window.scrollTo({ top: 0, behavior: "smooth" })
     const supabase = createClient()
     try {
-      await supabase.from("posts").insert({
+      const { error } = await supabase.from("posts").insert({
         id: newId,
         author: me.name,
         initials: me.initials,
@@ -909,6 +936,12 @@ export function PostsFeed({
         image_url: imageUrl ?? null,
         created_by: userId,
       })
+      if (error) {
+        console.error("[addPost] insert:", error.message)
+        setPosts(prev => prev.filter(p => p.id !== newId))
+        window.alert("Paylaşım kaydedilemedi. Lütfen tekrar deneyin.")
+        return
+      }
       if (pollWithIds && pollWithIds.options.length >= 2) {
         const { data: pollRow, error: pollErr } = await supabase
           .from("polls")
@@ -928,7 +961,11 @@ export function PostsFeed({
           if (optErr) console.error("[addPost] poll_options insert:", optErr)
         }
       }
-    } catch (e) { console.error("[addPost]", e) }
+    } catch (e) {
+      console.error("[addPost]", e)
+      setPosts(prev => prev.filter(p => p.id !== newId))
+      window.alert("Paylaşım kaydedilemedi. Lütfen tekrar deneyin.")
+    }
   }
 
   const cutoff = Date.now() - FEED_RETENTION_MS

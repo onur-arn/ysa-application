@@ -370,17 +370,19 @@ export function MessagesClient({
     ])
   }, [customGroups, customDMs])
 
-  // Seed React Query cache from list previews — instant open when tapping a conversation
+  // Seed React Query only when thread cache is empty — never overwrite live messages
   useEffect(() => {
     for (const g of customGroups) {
-      if (g.messages.length > 0) {
-        queryClient.setQueryData(messageKeys.thread(g.id), g.messages, { updatedAt: Date.now() - 20_000 })
-      }
+      if (g.messages.length === 0) continue
+      const existing = queryClient.getQueryData<ChatMessage[]>(messageKeys.thread(g.id))
+      if (existing && existing.length > 0) continue
+      queryClient.setQueryData(messageKeys.thread(g.id), g.messages, { updatedAt: Date.now() - 20_000 })
     }
     for (const d of customDMs) {
-      if (d.messages.length > 0) {
-        queryClient.setQueryData(messageKeys.thread(d.id), d.messages, { updatedAt: Date.now() - 20_000 })
-      }
+      if (d.messages.length === 0) continue
+      const existing = queryClient.getQueryData<ChatMessage[]>(messageKeys.thread(d.id))
+      if (existing && existing.length > 0) continue
+      queryClient.setQueryData(messageKeys.thread(d.id), d.messages, { updatedAt: Date.now() - 20_000 })
     }
   }, [customGroups, customDMs, queryClient])
 
@@ -1594,6 +1596,7 @@ function ChatView({
     }).select().single()
 
     if (error || !inserted) {
+      console.error("[chat] send failed:", error?.message)
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
       return
     }
@@ -1609,7 +1612,11 @@ function ChatView({
       messageType,
     }
     setMessages((prev) => {
-      const updated = prev.map((m) => m.id === tempId ? newMsg : m)
+      const updated = prev.some((m) => m.id === tempId)
+        ? prev.map((m) => (m.id === tempId ? newMsg : m))
+        : prev.some((m) => m.id === newMsg.id)
+          ? prev
+          : [...prev, newMsg]
       onMessagesChange?.(updated)
       return updated
     })
@@ -1666,7 +1673,23 @@ function ChatView({
       }
     }
 
-    setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, id: inserted!.id } : m)))
+    setMessages((prev) => {
+      const updated = prev.some((m) => m.id === tempId)
+        ? prev.map((m) => (m.id === tempId ? { ...m, id: inserted!.id } : m))
+        : prev.some((m) => m.id === inserted!.id)
+          ? prev
+          : [...prev, {
+              id: inserted!.id,
+              author: senderName,
+              initials: senderInitials,
+              text: "",
+              time,
+              self: true,
+              gif: url,
+              messageType: "gif" as const,
+            }]
+      return updated
+    })
   }
 
   async function sendAudio(blob: Blob) {
