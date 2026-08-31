@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 import { CallOverlay } from "@/components/messaging/call-overlay"
 
-import { getIceServers } from "@/lib/call/ice-servers"
+import { loadIceServers } from "@/lib/call/ice-servers"
 
 export type CallType = "audio" | "video"
 
@@ -92,7 +92,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
   async function ensurePc(sessionId: string, withVideo: boolean) {
     if (pcRef.current) return pcRef.current
 
-    const pc = new RTCPeerConnection({ iceServers: getIceServers() })
+    const iceServers = await loadIceServers()
+    const pc = new RTCPeerConnection({ iceServers })
     pc.ontrack = (e) => {
       setRemoteStream(e.streams[0] ?? null)
     }

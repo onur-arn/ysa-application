@@ -99,22 +99,22 @@ Ouvrir [http://localhost:3000](http://localhost:3000)
 | `TURN_URLS` | URLs TURN séparées par des virgules (ex. `turn:host:443,turns:host:443`) |
 | `TURN_USERNAME` | Identifiant TURN (fourni par ton hébergeur TURN) |
 | `TURN_CREDENTIAL` | Mot de passe / credential TURN |
+| `METERED_APP_NAME` | Sous-domaine Metered (ex. si ton domaine est `monapp.metered.live` → `monapp`) |
+| `METERED_SECRET_KEY` | Secret Key (Dashboard → **Developers** — ne jamais exposer côté client) |
+| `METERED_DOMAIN` | Optionnel : domaine complet (`monapp.metered.live`) à la place de `METERED_APP_NAME` |
 
 ### Appels audio/vidéo (WebRTC)
 
 1. Tables `call_sessions` + `call_signals` dans Supabase (voir `supabase/schema.sql`)
 2. Realtime activé sur ces deux tables
-3. Variables `TURN_*` sur Vercel — sans TURN, les appels ne passent souvent que sur le même réseau Wi‑Fi
+3. **TURN** — une des deux options :
+   - **Option A (simple)** : `TURN_URLS` + `TURN_USERNAME` + `TURN_CREDENTIAL`
+   - **Option B (Metered, recommandé)** : `METERED_APP_NAME` + `METERED_SECRET_KEY` — l’app crée les credentials automatiquement via l’API (pas besoin du dashboard TURN)
 
-**Exemple gratuit (test)** — [Metered Open Relay](https://www.metered.ca/tools/openrelay/) :
-
-```
-TURN_URLS=turn:openrelay.metered.ca:80,turn:openrelay.metered.ca:443,turns:openrelay.metered.ca:443
-TURN_USERNAME=openrelayproject
-TURN_CREDENTIAL=openrelayproject
-```
-
-Pour la production, crée un compte Metered/Twilio et utilise tes propres credentials.
+**Metered — où trouver les clés :**
+1. [dashboard.metered.ca](https://dashboard.metered.ca) → **Developers**
+2. Copie **Metered Domain** (ex. `youthstation.metered.live`) → `METERED_APP_NAME=youthstation`
+3. Copie **Secret Key** → `METERED_SECRET_KEY=...` (sur Vercel uniquement, jamais dans le code)
 
 ---
 
