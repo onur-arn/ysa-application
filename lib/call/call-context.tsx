@@ -19,7 +19,7 @@ type CallSession = {
 }
 
 type CallContextValue = {
-  startCall: (opts: { conversationId: string; peerName: string; callType: CallType }) => Promise<void>
+  startCall: (opts: { conversationId: string; peerName: string; callType?: CallType }) => Promise<void>
   incoming: CallSession | null
   active: CallSession | null
   localStream: MediaStream | null
@@ -31,7 +31,7 @@ type CallContextValue = {
 }
 
 const CallContext = createContext<CallContextValue | null>(null)
-const RING_TIMEOUT_MS = 35_000
+const RING_TIMEOUT_MS = 10_000
 
 export function useCallOptional() {
   return useContext(CallContext)
