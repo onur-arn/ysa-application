@@ -55,25 +55,51 @@ async function latestMessageByConv(
   const map = new Map<string, Record<string, unknown>>()
   if (convIds.length === 0) return map
 
-  for (const cols of [MSG_COLS_RICH, MSG_COLS_MIN]) {
+  const colsList = [MSG_COLS_RICH, MSG_COLS_MIN]
+  let cols = colsList[0]
+
+  // One latest message per conversation (parallel) — reliable sort by recency
+  async function fetchOne(id: string, select: string) {
     const { data, error } = await supabase
       .from("chat_messages")
-      .select(cols)
-      .in("conversation_id", convIds)
+      .select(select)
+      .eq("conversation_id", id)
+      .eq("is_system", false)
       .order("created_at", { ascending: false })
-      .limit(Math.min(convIds.length * 3, 200))
-
+      .limit(1)
+      .maybeSingle()
     if (error) {
-      if (isSchemaError(error.message)) continue
+      if (isSchemaError(error.message)) return "schema" as const
       console.error("[conversations] messages:", error.message)
-      break
+      return "error" as const
     }
+    if (data) map.set(id, data as unknown as Record<string, unknown>)
+    return "ok" as const
+  }
 
-    for (const row of data ?? []) {
-      const cid = (row as { conversation_id: string }).conversation_id
-      if (!map.has(cid)) map.set(cid, row as unknown as Record<string, unknown>)
+  for (const select of colsList) {
+    cols = select
+    const results = await Promise.all(convIds.map((id) => fetchOne(id, select)))
+    if (results.some((r) => r === "schema")) {
+      map.clear()
+      continue
     }
     break
+  }
+
+  // Fallback for conversations with only system messages
+  const missing = convIds.filter((id) => !map.has(id))
+  if (missing.length > 0) {
+    await Promise.all(missing.map(async (id) => {
+      const { data } = await supabase
+        .from("chat_messages")
+        .select(cols)
+        .eq("conversation_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (data) map.set(id, data as unknown as Record<string, unknown>)
+    }))
   }
 
   return map

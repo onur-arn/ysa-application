@@ -71,6 +71,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
   const [convs, setConvs] = useState<ConvRow[]>([])
   const [msgCounts, setMsgCounts] = useState<Record<string, number>>({})
   const [lastPreviews, setLastPreviews] = useState<Record<string, string>>({})
+  const [lastAts, setLastAts] = useState<Record<string, string>>({})
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [msgsLoading, setMsgsLoading] = useState(false)
@@ -109,6 +110,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
       setConvs(convRes.conversations as ConvRow[])
       setMsgCounts((convRes.msgCounts as Record<string, number>) ?? {})
       setLastPreviews((convRes.lastPreviews as Record<string, string>) ?? {})
+      setLastAts((convRes.lastAts as Record<string, string>) ?? {})
       const conversationRows = convRes.conversations as ConvRow[]
       if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
         setSelectedConvId((prev) => prev ?? conversationRows[0]?.id ?? null)
@@ -120,6 +122,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
         .select("id,type,name,created_at,conversation_members(member_name)")
         .order("created_at", { ascending: false })
       setConvs((c ?? []) as ConvRow[])
+      setLastAts({})
     }
 
     try {
@@ -192,14 +195,18 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
 
   const filteredConvs = useMemo(() => {
     const q = convSearch.trim().toLowerCase()
-    const sorted = [...convs].sort((a, b) => (msgCounts[b.id] ?? 0) - (msgCounts[a.id] ?? 0))
+    const sorted = [...convs].sort((a, b) => {
+      const atA = lastAts[a.id] || a.created_at || ""
+      const atB = lastAts[b.id] || b.created_at || ""
+      return atB.localeCompare(atA)
+    })
     if (!q) return sorted
     return sorted.filter((conv) => {
       const members = conv.conversation_members.map((m) => m.member_name).join(" ")
       const title = convTitle(conv)
       return title.toLowerCase().includes(q) || members.toLowerCase().includes(q)
     })
-  }, [convs, convSearch, msgCounts])
+  }, [convs, convSearch, lastAts])
 
   const selectedConv = convs.find((c) => c.id === selectedConvId) ?? null
   const visibleMsgs = messages.filter((m) => !m.is_system)

@@ -132,9 +132,12 @@ function mapConversations(
     const otherMembers = memberRows.filter((m) => m.member_name !== userName)
     const memberNames = otherMembers.map((m) => m.member_name)
 
-    // Derive last message from embedded chat_messages (sorted asc, last is the latest)
+    // Derive last message from embedded chat_messages (newest by created_at)
     const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; gif_url?: string | null; audio_url?: string | null; message_type?: string | null; is_system: boolean; created_at: string }[]) ?? []
-    const lastMsgObj = msgs.length > 0 ? msgs[msgs.length - 1] : null
+    const lastMsgObj = msgs.reduce<(typeof msgs)[number] | null>((best, m) => {
+      if (!best || m.created_at > best.created_at) return m
+      return best
+    }, null)
     const lastMessage = lastMsgObj
       ? messagePreview({
           text: lastMsgObj.text ?? "",
@@ -1174,8 +1177,11 @@ export function MessagesClient({
     return rows.sort((a, b) => {
       const atA = a.kind === "station" ? "" : (a.item.lastAt || "")
       const atB = b.kind === "station" ? "" : (b.item.lastAt || "")
-      if (atA || atB) return atB.localeCompare(atA)
-      return 0
+      // Plus récent → plus ancien ; sans activité à la fin
+      if (atA !== atB) return atB.localeCompare(atA)
+      const titleA = a.kind === "group" ? a.item.name : a.kind === "dm" ? a.item.name : a.item.title
+      const titleB = b.kind === "group" ? b.item.name : b.kind === "dm" ? b.item.name : b.item.title
+      return titleA.localeCompare(titleB, "tr")
     })
   }, [customGroups, customDMs, currentUser.isIntl, currentUser.station, q])
 

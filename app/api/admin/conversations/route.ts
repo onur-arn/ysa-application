@@ -25,6 +25,7 @@ export async function GET() {
   const ids = conversationRows.map((c) => c.id as string)
   const counts: Record<string, number> = {}
   const previews: Record<string, string> = {}
+  const lastAts: Record<string, string> = {}
 
   if (ids.length > 0) {
     const { data: recent } = await admin
@@ -37,6 +38,9 @@ export async function GET() {
     for (const row of recent ?? []) {
       const cid = row.conversation_id as string
       counts[cid] = (counts[cid] ?? 0) + 1
+      if (!lastAts[cid]) {
+        lastAts[cid] = row.created_at as string
+      }
       if (!previews[cid]) {
         if (row.text) previews[cid] = row.text
         else if (row.image_url) previews[cid] = "📷 Fotoğraf"
@@ -47,10 +51,18 @@ export async function GET() {
     }
   }
 
+  // Newest activity first
+  conversationRows.sort((a, b) => {
+    const atA = lastAts[a.id as string] || (a.created_at as string) || ""
+    const atB = lastAts[b.id as string] || (b.created_at as string) || ""
+    return atB.localeCompare(atA)
+  })
+
   return NextResponse.json({
     conversations: conversationRows,
     msgCounts: counts,
     lastPreviews: previews,
+    lastAts,
   })
 }
 
