@@ -71,6 +71,13 @@ export function StoriesBar({
 
   function handleViewerPointerDown() {
     holdTimerRef.current = setTimeout(() => setPaused(true), 180)
+    // User gesture: unlock music if autoplay failed on reopen
+    const audio = storyAudioRef.current
+    if (audio && musicBlocked) {
+      audio.play()
+        .then(() => setMusicBlocked(false))
+        .catch(() => {})
+    }
   }
 
   function handleViewerPointerUp() {
@@ -93,6 +100,22 @@ export function StoriesBar({
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
   const [musicBlocked, setMusicBlocked] = useState(false)
+  // Preserve user-gesture unlock so autoplay works on reopen
+  const musicGestureRef = useRef(false)
+
+  function destroyStoryAudio() {
+    const audio = storyAudioRef.current
+    storyAudioRef.current = null
+    if (!audio) return
+    try {
+      audio.pause()
+      audio.onended = null
+      audio.onerror = null
+      audio.oncanplay = null
+      audio.removeAttribute("src")
+      audio.load()
+    } catch {}
+  }
 
   // Load seen IDs from localStorage on mount
   useEffect(() => {
@@ -117,6 +140,8 @@ export function StoriesBar({
   function openStation(stationId: string, startIdx = 0, myBtn = false) {
     const stationStories = stories.filter((s) => s.station === stationId)
     preloadImages(stationStories.map((s) => s.imageUrl))
+    musicGestureRef.current = true
+    setMusicBlocked(false)
     setActive(stationId)
     setStoryIdx(startIdx)
     setFromMyButton(myBtn)
@@ -318,25 +343,93 @@ export function StoriesBar({
 
   // Play/stop music when the viewed story changes
   useEffect(() => {
-    storyAudioRef.current?.pause()
-    storyAudioRef.current = null
+    let cancelled = false
+    let audio: HTMLAudioElement | null = null
+
+    destroyStoryAudio()
     setMusicBlocked(false)
-    if (active && currentStory?.musicPreviewUrl) {
-      const audio = new Audio(currentStory.musicPreviewUrl)
-      audio.loop = true
-      audio.volume = 0.7
-      audio.play().catch(() => setMusicBlocked(true))
-      storyAudioRef.current = audio
+
+    const previewUrl = currentStory?.musicPreviewUrl
+    if (!active || !previewUrl) {
+      return () => { cancelled = true }
     }
-    return () => { storyAudioRef.current?.pause() }
-  }, [active, currentStory?.id])
+
+    // Bust CDN/browser cache so Deezer preview reloads cleanly on reopen
+    const src = `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}_ys=${Date.now()}`
+    audio = new Audio()
+    audio.preload = "auto"
+    audio.loop = true
+    audio.volume = 0.7
+    storyAudioRef.current = audio
+
+    const tryPlay = () => {
+      if (cancelled || storyAudioRef.current !== audio) return
+      audio!.play()
+        .then(() => {
+          if (!cancelled) {
+            setMusicBlocked(false)
+            musicGestureRef.current = false
+          }
+        })
+        .catch(() => {
+          if (cancelled) return
+          setMusicBlocked(true)
+          // Retry once when the buffer is ready (helps after reopen)
+          const retry = () => {
+            if (cancelled || storyAudioRef.current !== audio) return
+            audio!.play()
+              .then(() => {
+                setMusicBlocked(false)
+                musicGestureRef.current = false
+              })
+              .catch(() => setMusicBlocked(true))
+          }
+          audio!.addEventListener("canplay", retry, { once: true })
+        })
+    }
+
+    audio.onerror = () => {
+      if (!cancelled) setMusicBlocked(true)
+    }
+    audio.src = src
+    audio.load()
+    tryPlay()
+
+    return () => {
+      cancelled = true
+      if (audio) {
+        try {
+          audio.pause()
+          audio.onerror = null
+          audio.removeAttribute("src")
+          audio.load()
+        } catch {}
+      }
+      if (storyAudioRef.current === audio) storyAudioRef.current = null
+    }
+  }, [active, currentStory?.id, currentStory?.musicPreviewUrl])
+
+  // Pause/resume music with story hold-to-pause (respect intentional mute)
+  useEffect(() => {
+    const audio = storyAudioRef.current
+    if (!audio || !audio.src) return
+    if (paused) {
+      audio.pause()
+      return
+    }
+    if (!musicBlocked) {
+      audio.play().catch(() => setMusicBlocked(true))
+    }
+  }, [paused])
 
   function toggleMusic() {
     const audio = storyAudioRef.current
     if (!audio) return
+    musicGestureRef.current = true
     if (musicBlocked || audio.paused) {
-      audio.play().catch(() => {})
-      setMusicBlocked(false)
+      audio.play()
+        .then(() => setMusicBlocked(false))
+        .catch(() => setMusicBlocked(true))
     } else {
       audio.pause()
       setMusicBlocked(true)
