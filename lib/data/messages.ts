@@ -1,7 +1,7 @@
 import type { StationId } from "./stations"
 import { parseCallEvent, callEventPreview } from "@/lib/call/call-event"
 
-export type MessageType = "text" | "image" | "gif" | "audio" | "call"
+export type MessageType = "text" | "image" | "gif" | "audio" | "call" | "poll"
 
 export type ChatPollOption = {
   id: string
