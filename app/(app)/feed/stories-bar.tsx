@@ -181,7 +181,11 @@ export function StoriesBar({
       const supabase = createClient()
       await supabase.from("stories").delete().eq("id", id)
     } catch {}
-    const remaining = updated.filter((s) => s.station === active)
+    const remaining = updated.filter((s) =>
+      fromMyButton && active === user.station
+        ? s.station === active && s.authorName === user.name
+        : s.station === active,
+    )
     if (remaining.length === 0) {
       setActive(null)
     } else {
@@ -404,7 +408,7 @@ export function StoriesBar({
             )}
           </span>
           <span className="max-w-16 truncate text-[11px] font-medium text-muted-foreground">
-            {myStories.length > 0 ? `${myStories.length} story` : t("feed.yourStory")}
+            {t("feed.yourStory")}
           </span>
         </button>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
@@ -507,8 +511,8 @@ export function StoriesBar({
                 <img
                   src={currentStory.imageUrl}
                   alt=""
-                  className="h-full w-full object-center"
-                  style={{ objectFit: currentStory.fitMode ?? "cover", backgroundColor: "#000" }}
+                  className="h-full w-full object-contain object-center"
+                  style={{ backgroundColor: "#000" }}
                   decoding="async"
                 />
 
@@ -599,7 +603,7 @@ export function StoriesBar({
                       </span>
                     </div>
                   )}
-                  {currentStory.authorName === user.name && (
+                  {fromMyButton && currentStory.authorName === user.name && (
                     <div className="pointer-events-auto mt-4 flex gap-2">
                       <button
                         onClick={() => { setActive(null); fileRef.current?.click() }}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { X, Music, Search, Play, Pause, Loader2, Expand, Minimize2 } from "lucide-react"
+import { X, Music, Search, Play, Pause, Loader2, Expand, Minimize2, Minus, Plus } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useI18n } from "@/lib/i18n/context"
 
@@ -142,26 +142,38 @@ export function StoryEditor({
   function addText() {
     if (!textInput.trim()) return
     const c = containerRef.current
+    const id = `t-${Date.now()}`
     setLayers((l) => [
       ...l,
       {
-        id: `t-${Date.now()}`,
+        id,
         text: textInput.trim(),
         color: textColor,
         fontFamily,
-        fontSize: 30,
+        fontSize: 36,
         x: (c?.clientWidth  ?? 300) / 2,
         y: (c?.clientHeight ?? 500) / 2,
       },
     ])
     setTextInput("")
-    setSelectedId(null)
+    setSelectedId(id)
     setTool(null)
   }
 
   function deleteLayer(id: string) {
     setLayers((l) => l.filter((x) => x.id !== id))
     setSelectedId(null)
+  }
+
+  function bumpTextSize(delta: number) {
+    if (!selectedId) return
+    setLayers((prev) =>
+      prev.map((l) =>
+        l.id === selectedId
+          ? { ...l, fontSize: Math.min(140, Math.max(16, l.fontSize + delta)) }
+          : l,
+      ),
+    )
   }
 
   function onPointerDown(e: React.PointerEvent, id: string) {
@@ -188,14 +200,14 @@ export function StoryEditor({
 
   async function publish() {
     setPublishing(true)
-    const c   = containerRef.current!
-    const w   = c.clientWidth
-    const h   = c.clientHeight
-    const dpr = window.devicePixelRatio || 1
-
+    const c = containerRef.current!
+    const viewW = c.clientWidth
+    const viewH = c.clientHeight
+    // Match editor aspect at high DPI so preview === published frame
+    const dpr = Math.max(2, Math.min(window.devicePixelRatio || 2, 3))
     const canvas = document.createElement("canvas")
-    canvas.width  = w * dpr
-    canvas.height = h * dpr
+    canvas.width = Math.round(viewW * dpr)
+    canvas.height = Math.round(viewH * dpr)
     const ctx = canvas.getContext("2d")!
     ctx.scale(dpr, dpr)
 
@@ -204,37 +216,40 @@ export function StoryEditor({
     img.src = imageUrl
     await new Promise((r) => { img.onload = r })
 
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = "high"
     ctx.fillStyle = "#000"
-    ctx.fillRect(0, 0, w, h)
+    ctx.fillRect(0, 0, viewW, viewH)
 
     if (filter !== "none") ctx.filter = filter
     if (fitMode === "cover") {
-      const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight)
-      const dw = img.naturalWidth  * scale
+      const scale = Math.max(viewW / img.naturalWidth, viewH / img.naturalHeight)
+      const dw = img.naturalWidth * scale
       const dh = img.naturalHeight * scale
-      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+      ctx.drawImage(img, (viewW - dw) / 2, (viewH - dh) / 2, dw, dh)
     } else {
-      const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight)
-      const dw = img.naturalWidth  * scale
+      const scale = Math.min(viewW / img.naturalWidth, viewH / img.naturalHeight)
+      const dw = img.naturalWidth * scale
       const dh = img.naturalHeight * scale
-      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+      ctx.drawImage(img, (viewW - dw) / 2, (viewH - dh) / 2, dw, dh)
     }
     ctx.filter = "none"
 
     for (const layer of layers) {
-      ctx.font         = `bold ${layer.fontSize}px ${layer.fontFamily}`
-      ctx.textAlign    = "center"
+      ctx.font = `bold ${layer.fontSize}px ${layer.fontFamily}`
+      ctx.textAlign = "center"
       ctx.textBaseline = "middle"
-      ctx.shadowColor  = "rgba(0,0,0,0.55)"
-      ctx.shadowBlur   = 8
-      ctx.fillStyle    = layer.color
+      ctx.shadowColor = "rgba(0,0,0,0.55)"
+      ctx.shadowBlur = 8
+      ctx.fillStyle = layer.color
       ctx.fillText(layer.text, layer.x, layer.y)
-      ctx.shadowBlur   = 0
+      ctx.shadowBlur = 0
     }
 
+    // Composition is baked — viewer must use contain (never re-apply cover/contain)
     onPublish(
-      canvas.toDataURL("image/jpeg", 0.88),
-      fitMode,
+      canvas.toDataURL("image/jpeg", 0.95),
+      "contain",
       music?.previewUrl,
       music ? `${music.name} — ${music.artist}` : undefined,
     )
@@ -371,9 +386,31 @@ export function StoryEditor({
         </div>
       )}
 
-      {/* Bottom: music badge + publish CTA */}
+      {/* Bottom: text size + music badge + publish CTA */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-3 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        {music && tool !== "music" && tool !== "filter" && tool !== "text" && (
+        {selectedId && tool !== "music" && tool !== "filter" && tool !== "text" && (
+          <div className="pointer-events-auto mx-auto flex items-center gap-3 rounded-full bg-black/55 px-2 py-1.5 backdrop-blur-md">
+            <button
+              onClick={() => bumpTextSize(-4)}
+              className="flex size-9 items-center justify-center rounded-full bg-white/15 text-white active:bg-white/25"
+              aria-label="Réduire le texte"
+            >
+              <Minus className="size-4" />
+            </button>
+            <span className="min-w-[3ch] text-center text-xs font-bold text-white">
+              {layers.find((l) => l.id === selectedId)?.fontSize ?? 36}
+            </span>
+            <button
+              onClick={() => bumpTextSize(4)}
+              className="flex size-9 items-center justify-center rounded-full bg-white/15 text-white active:bg-white/25"
+              aria-label="Agrandir le texte"
+            >
+              <Plus className="size-4" />
+            </button>
+          </div>
+        )}
+
+        {music && tool !== "music" && tool !== "filter" && tool !== "text" && !selectedId && (
           <div className="pointer-events-auto mx-auto flex max-w-full items-center gap-2 rounded-full bg-black/55 px-3.5 py-2 backdrop-blur-md">
             <Music className="size-3.5 shrink-0 text-white" />
             <span className="max-w-[220px] truncate text-xs font-semibold text-white">
