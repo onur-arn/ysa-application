@@ -146,6 +146,8 @@ export async function GET(req: NextRequest) {
   }
 
   // Notify the user
+  let emailOk = false
+  let emailError = ""
   try {
     await sendMail({
       to: pending.email,
@@ -168,12 +170,24 @@ export async function GET(req: NextRequest) {
         </div>
       `,
     })
+    emailOk = true
   } catch (err) {
-    console.error("[signup-approve] Welcome email failed:", err)
+    emailError = err instanceof Error ? err.message : String(err)
+    console.error("[signup-approve] Welcome email failed:", emailError)
+  }
+
+  if (emailOk) {
+    return new NextResponse(
+      page("success", `Le compte de <strong>${fullName}</strong> a été créé avec succès. Un e-mail de confirmation lui a été envoyé.`),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } }
+    )
   }
 
   return new NextResponse(
-    page("success", `Le compte de <strong>${fullName}</strong> a été créé avec succès. Un e-mail de confirmation lui a été envoyé.`),
+    page(
+      "success",
+      `Le compte de <strong>${fullName}</strong> a été créé, mais l'e-mail de confirmation n'a pas pu être envoyé.<br><small style="color:#b45309">${emailError}</small>`,
+    ),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
   )
 }
