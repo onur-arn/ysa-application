@@ -605,7 +605,7 @@ export function StoriesBar({
           const ringStyle = !hasStory
             ? "bg-muted"
             : isUnseen
-              ? "bg-[linear-gradient(135deg,#1d9bf0_0%,#0095f6_45%,#38bdf8_100%)]"
+              ? "bg-[linear-gradient(135deg,#facc15_0%,#eab308_50%,#fde047_100%)]"
               : "bg-neutral-300 dark:bg-neutral-600"
 
           return (
