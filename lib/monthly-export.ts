@@ -78,7 +78,7 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
 
   const convQuery = admin
     .from("conversations")
-    .select("id, type, name, created_at, conversation_members(member_name), chat_messages(sender_name, text, image_url, gif_url, audio_url, created_at, is_system)")
+    .select("id, type, name, created_at, conversation_members(member_name)")
     .order("created_at", { ascending: true })
 
   const [profRes, postRes, taskRes, taskComRes, igemRes, igemComRes, eventRes, storyRes, storyReactRes, pendRes, convRes, archives] =
@@ -97,22 +97,59 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
       listArchives(800),
     ])
 
-  let conversations = (convRes.data ?? []) as Record<string, unknown>[]
+  // Load ALL messages in pages (nested select truncates large threads)
+  const msgsByConv = new Map<string, Record<string, unknown>[]>()
+  const pageSize = 1000
+  let from = 0
+  for (;;) {
+    let msgQuery = admin
+      .from("chat_messages")
+      .select("conversation_id,sender_name,text,image_url,gif_url,audio_url,message_type,created_at,is_system")
+      .order("created_at", { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (start) msgQuery = msgQuery.gte("created_at", start)
+    if (end) msgQuery = msgQuery.lte("created_at", end)
+    const { data: page, error } = await msgQuery
+    if (error) {
+      console.error("[export] chat_messages:", error.message)
+      break
+    }
+    const rows = page ?? []
+    for (const m of rows) {
+      const cid = m.conversation_id as string
+      if (!cid) continue
+      const arr = msgsByConv.get(cid) ?? []
+      arr.push(m as Record<string, unknown>)
+      msgsByConv.set(cid, arr)
+    }
+    if (rows.length < pageSize) break
+    from += pageSize
+    if (from > 100_000) break // safety
+  }
+
+  let conversations = ((convRes.data ?? []) as Record<string, unknown>[]).map((conv) => ({
+    ...conv,
+    chat_messages: msgsByConv.get(conv.id as string) ?? [],
+  }))
+
   if (start || end) {
     conversations = conversations
       .map((conv) => {
         const msgs = ((conv.chat_messages as Array<{ created_at: string; is_system: boolean }>) ?? [])
           .filter((m) => !m.is_system)
-          .filter((m) => {
-            const t = new Date(m.created_at).getTime()
-            if (start && t < new Date(start).getTime()) return false
-            if (end && t > new Date(end).getTime()) return false
-            return true
-          })
         return { ...conv, chat_messages: msgs }
       })
       .filter((conv) => (conv.chat_messages as unknown[]).length > 0)
   }
+
+  // Newest activity first (like Yönetici)
+  conversations.sort((a, b) => {
+    const msgsA = (a.chat_messages as Array<{ created_at: string }>) ?? []
+    const msgsB = (b.chat_messages as Array<{ created_at: string }>) ?? []
+    const lastA = msgsA.length > 0 ? msgsA[msgsA.length - 1].created_at : (a.created_at as string) || ""
+    const lastB = msgsB.length > 0 ? msgsB[msgsB.length - 1].created_at : (b.created_at as string) || ""
+    return lastB.localeCompare(lastA)
+  })
 
   let filteredArchives = archives
   if (start || end) {
@@ -333,7 +370,7 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
       .filter((m) => !m.is_system)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
     const msgRows = msgs.map((m) => {
-      let body = m.text ? escapeHtml(String(m.text).slice(0, 500)) : ""
+      let body = m.text ? escapeHtml(String(m.text)) : ""
       if (m.image_url) body += (body ? " " : "") + "[image]"
       if (m.gif_url) body += (body ? " " : "") + "[gif]"
       if (m.audio_url) body += (body ? " " : "") + "[audio]"
@@ -374,6 +411,11 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
     ]
   })
 
+  const totalMsgCount = conversations.reduce((n, c) => {
+    const msgs = asArray((c as { chat_messages?: unknown }).chat_messages) as Array<{ is_system?: boolean }>
+    return n + msgs.filter((m) => !m.is_system).length
+  }, 0)
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><title>${escapeHtml(opts.title)}</title></head>
@@ -406,7 +448,7 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
     posts.length > 0 ? postsHtml : "<p style='color:#6b7280;font-size:13px'>Aucune publication.</p>"
   )}
 
-  ${section("📲 Stories (" + stories.length + ")", storiesHtml)}
+  ${section("📲 Hikayeler (" + stories.length + ")", storiesHtml)}
 
   ${section("✅ Tâches (" + tasks.length + ")",
     tasks.length > 0
@@ -420,9 +462,9 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
       : "<p style='color:#6b7280;font-size:13px'>Aucune demande iGEM.</p>"
   )}
 
-  ${conversations.length > 0 ? section("💬 Messages (" + conversations.length + " conversations)",
+  ${conversations.length > 0 ? section("💬 Sohbetler & messages (" + conversations.length + " conversations · " + totalMsgCount + " msgs)",
     convsHtml
-  ) : section("💬 Messages", "<p style='color:#6b7280;font-size:13px'>Aucune conversation.</p>")}
+  ) : section("💬 Sohbetler & messages", "<p style='color:#6b7280;font-size:13px'>Aucune conversation.</p>")}
 
   ${section("🗑️ Éléments supprimés — archive (" + archives.length + ")",
     archives.length > 0
@@ -457,39 +499,30 @@ export async function sendMonthlyExport(period?: ExportPeriod) {
   )
 }
 
-const MAX_EMAIL_HTML_CHARS = 900_000
-
-function trimExportForEmail(html: string): string {
-  if (html.length <= MAX_EMAIL_HTML_CHARS) return html
-  return `${html.slice(0, MAX_EMAIL_HTML_CHARS)}
-<p style="font-family:sans-serif;color:#b45309;margin-top:24px"><strong>Note :</strong> rapport tronqué pour l'email (trop volumineux). Réessayez ou utilisez le téléchargement HTML depuis le panneau admin.</p>`
-}
-
 export async function buildManualExportHtml(requestedBy: string): Promise<string> {
   const data = await fetchExportData()
-  // Cap messages per conversation to keep exports email-safe
-  const capped: ExportData = {
-    ...data,
-    conversations: data.conversations.map((conv) => {
-      const msgs = ((conv.chat_messages as unknown[]) ?? []).slice(-80)
-      return { ...conv, chat_messages: msgs }
-    }),
-  }
-  return buildExportHtml(capped, {
-    title: "Export complet — YouthStation",
-    subtitle: `Demandé par : ${requestedBy} — toutes les données actives + suppressions archivées`,
+  return buildExportHtml(data, {
+    title: "Export complet — YouthStation (Yönetici)",
+    subtitle: `Demandé par : ${requestedBy} — tous les onglets yönetici : membres, événements, posts, hikayeler, tâches, iGEM, sohbetler (tous les messages), archives`,
   })
 }
 
 export async function sendManualExport(requestedBy: string) {
   const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" })
-  const html = trimExportForEmail(await buildManualExportHtml(requestedBy))
-  const intro = `<p style="font-family:sans-serif;color:#374151">Bonjour,<br><br>Export complet de l'application YouthStation (membres, événements passés/à venir, posts, stories, tâches, iGEM, messages, et éléments supprimés archivés).<br>Vous pouvez l'imprimer en PDF depuis votre client mail (Fichier → Imprimer → Enregistrer en PDF).</p>`
+  const stamp = new Date().toISOString().slice(0, 10)
+  const html = await buildManualExportHtml(requestedBy)
+  const intro = `<p style="font-family:sans-serif;color:#374151">Bonjour,<br><br>Export <strong>complet</strong> du panneau Yönetici YouthStation (membres, événements, posts, hikayeler, tâches, iGEM, <strong>tous les messages de tous les sohbetler</strong>, archives).<br><br>Le rapport HTML complet est en pièce jointe — ouvrez-le puis <em>Fichier → Imprimer → Enregistrer en PDF</em>.</p>`
 
   const recipients = new Set<string>(ADMIN_EMAILS.map((e) => e.toLowerCase()))
   const maybeEmail = requestedBy.trim().toLowerCase()
   if (maybeEmail.includes("@") && isAdminEmail(maybeEmail)) {
     recipients.add(maybeEmail)
+  }
+
+  const attachment = {
+    filename: `youthstation-export-${stamp}.html`,
+    content: html,
+    contentType: "text/html; charset=utf-8",
   }
 
   const errors: string[] = []
@@ -498,8 +531,9 @@ export async function sendManualExport(requestedBy: string) {
     try {
       await sendMail({
         to,
-        subject: `[YouthStation] Export complet — ${now}`,
-        html: intro + html,
+        subject: `[YouthStation] Export complet Yönetici — ${now}`,
+        html: intro,
+        attachments: [attachment],
       })
       sent += 1
     } catch (err) {

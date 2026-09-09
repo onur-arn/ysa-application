@@ -5,6 +5,12 @@
 
 export const ADMIN_TO = process.env.ADMIN_EMAIL || "secretaire@youthstation.org"
 
+export type MailAttachment = {
+  filename: string
+  content: string
+  contentType?: string
+}
+
 function resolveResendApiKey(): string | null {
   const key = process.env.RESEND_API_KEY?.trim()
   if (key) return key
@@ -32,11 +38,33 @@ function resolveFromEmail(): { email: string; name: string } {
   return { email: "secretaire@youthstation.org", name: "Youth Station Derneği Uygulaması" }
 }
 
-async function sendViaBrevo(to: string, subject: string, html: string) {
+function toBase64(text: string) {
+  return Buffer.from(text, "utf8").toString("base64")
+}
+
+async function sendViaBrevo(
+  to: string,
+  subject: string,
+  html: string,
+  attachments?: MailAttachment[],
+) {
   const apiKey = process.env.BREVO_API_KEY?.trim()
   if (!apiKey) throw new Error("BREVO_API_KEY manquant")
 
   const from = resolveFromEmail()
+  const payload: Record<string, unknown> = {
+    sender: { name: from.name, email: from.email },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html,
+  }
+  if (attachments && attachments.length > 0) {
+    payload.attachment = attachments.map((a) => ({
+      name: a.filename,
+      content: toBase64(a.content),
+    }))
+  }
+
   const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
@@ -44,12 +72,7 @@ async function sendViaBrevo(to: string, subject: string, html: string) {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({
-      sender: { name: from.name, email: from.email },
-      to: [{ email: to }],
-      subject,
-      htmlContent: html,
-    }),
+    body: JSON.stringify(payload),
   })
 
   if (!res.ok) {
@@ -58,7 +81,12 @@ async function sendViaBrevo(to: string, subject: string, html: string) {
   }
 }
 
-async function sendViaResend(to: string, subject: string, html: string) {
+async function sendViaResend(
+  to: string,
+  subject: string,
+  html: string,
+  attachments?: MailAttachment[],
+) {
   const apiKey = resolveResendApiKey()
   if (!apiKey) throw new Error("RESEND_API_KEY manquant")
 
@@ -68,18 +96,26 @@ async function sendViaResend(to: string, subject: string, html: string) {
       ? `Youth Station Derneği Uygulaması <onboarding@resend.dev>`
       : `${from.name} <${from.email}>`
 
+  const payload: Record<string, unknown> = {
+    from: fromHeader,
+    to: [to],
+    subject,
+    html,
+  }
+  if (attachments && attachments.length > 0) {
+    payload.attachments = attachments.map((a) => ({
+      filename: a.filename,
+      content: toBase64(a.content),
+    }))
+  }
+
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      from: fromHeader,
-      to: [to],
-      subject,
-      html,
-    }),
+    body: JSON.stringify(payload),
   })
 
   if (!res.ok) {
@@ -92,16 +128,18 @@ export async function sendMail({
   to,
   subject,
   html,
+  attachments,
 }: {
   to: string
   subject: string
   html: string
+  attachments?: MailAttachment[]
 }) {
   const errors: string[] = []
 
   if (process.env.BREVO_API_KEY?.trim()) {
     try {
-      await sendViaBrevo(to, subject, html)
+      await sendViaBrevo(to, subject, html, attachments)
       return
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err))
@@ -110,7 +148,7 @@ export async function sendMail({
 
   if (resolveResendApiKey()) {
     try {
-      await sendViaResend(to, subject, html)
+      await sendViaResend(to, subject, html, attachments)
       return
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err))
