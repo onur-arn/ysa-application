@@ -140,6 +140,11 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
   }
 }
 
+function asArray<T>(value: T | T[] | null | undefined): T[] {
+  if (value == null) return []
+  return Array.isArray(value) ? value : [value]
+}
+
 function buildExportHtml(data: ExportData, opts: { title: string; subtitle: string; periodLabel?: string }) {
   const {
     profiles, posts, tasks, taskComments, igem, igemComments,
@@ -185,9 +190,9 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
   ])
 
   const postsHtml = posts.map((p) => {
-    const likes = (p.post_likes as Array<{ voter_name: string }>) ?? []
-    const comments = (p.post_comments as Array<{ author: string; text: string; created_at: string }>) ?? []
-    const polls = (p.polls as Array<{ question: string; poll_options: Array<{ text: string; poll_votes: Array<{ voter_name: string }> }> }>) ?? []
+    const likes = asArray(p.post_likes as Array<{ voter_name: string }> | { voter_name: string } | null)
+    const comments = asArray(p.post_comments as Array<{ author: string; text: string; created_at: string }> | { author: string; text: string; created_at: string } | null)
+    const polls = asArray(p.polls as Array<{ question: string; poll_options: Array<{ text: string; poll_votes: Array<{ voter_name: string }> }> }> | { question: string; poll_options: Array<{ text: string; poll_votes: Array<{ voter_name: string }> }> } | null)
     const likeList = likes.map((l) => escapeHtml(l.voter_name)).join(", ") || "—"
     const commentRows = comments.map((c) => [
       escapeHtml(c.author),
@@ -195,10 +200,10 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
       escapeHtml(c.text),
     ])
     const pollHtml = polls.map((poll) => {
-      const optRows = (poll.poll_options ?? []).map((o) => [
+      const optRows = asArray(poll.poll_options).map((o) => [
         escapeHtml(o.text),
-        String((o.poll_votes ?? []).length),
-        escapeHtml((o.poll_votes ?? []).map((v) => v.voter_name).join(", ")),
+        String(asArray(o.poll_votes).length),
+        escapeHtml(asArray(o.poll_votes).map((v) => v.voter_name).join(", ")),
       ])
       return `<p style="margin:8px 12px 4px;font-size:12px;font-weight:700">Sondage : ${escapeHtml(poll.question)}</p>${table(["Option", "Votes", "Votants"], optRows)}`
     }).join("")
@@ -323,8 +328,8 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
   }
 
   const convsHtml = (conversations as unknown as ConvRow[]).map((conv) => {
-    const members = (conv.conversation_members ?? []).map((m) => escapeHtml(m.member_name)).join(", ")
-    const msgs = (conv.chat_messages ?? [])
+    const members = asArray(conv.conversation_members).map((m) => escapeHtml(m.member_name)).join(", ")
+    const msgs = asArray(conv.chat_messages)
       .filter((m) => !m.is_system)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
     const msgRows = msgs.map((m) => {
