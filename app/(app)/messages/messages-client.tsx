@@ -2325,42 +2325,71 @@ function ChatView({
   }
 
   async function sendPoll(question: string, optionTexts: string[]) {
-    if (!conversationId) return
-    const supabase = createClient()
+    if (!conversationId || conversationId.startsWith("pending-")) return
     const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
-
-    const { data: msg } = await supabase.from("chat_messages").insert({
-      conversation_id: conversationId,
-      sender_name: senderName,
-      sender_initials: senderInitials,
-      text: `📊 ${question}`,
-    }).select().single()
-    if (!msg) return
-
-    const { data: poll } = await supabase.from("message_polls").insert({
-      message_id: msg.id,
-      question,
-    }).select().single()
-    if (!poll) return
-
-    await supabase.from("message_poll_options").insert(
-      optionTexts.map((text, i) => ({ id: `${poll.id}-opt-${i}`, poll_id: poll.id, text, position: i }))
-    )
-
-    const newMsg: ChatMessage = {
-      id: msg.id,
+    const tempId = `temp-poll-${Date.now()}`
+    const optimistic: ChatMessage = {
+      id: tempId,
       author: senderName,
       initials: senderInitials,
       text: `📊 ${question}`,
       time,
+      createdAt: new Date().toISOString(),
       self: true,
+      messageType: "poll",
       poll: {
-        id: poll.id,
+        id: tempId,
         question,
-        options: optionTexts.map((text, i) => ({ id: `${poll.id}-opt-${i}`, text, voters: [] })),
+        options: optionTexts.map((text, i) => ({ id: `${tempId}-opt-${i}`, text, voters: [] })),
       },
     }
-    setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, newMsg])
+    setMessages((prev) => [...prev, optimistic])
+    markConversationRead(conversationId)
+
+    try {
+      const res = await fetch("/api/chat/poll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          question,
+          options: optionTexts,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.id || !data.poll) {
+        console.error("[chat] poll send failed:", data.error ?? res.status)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert(data.error || "Anket gönderilemedi. Lütfen tekrar deneyin.")
+        return
+      }
+
+      const newMsg: ChatMessage = {
+        id: data.id as string,
+        author: (data.senderName as string) || senderName,
+        initials: (data.senderInitials as string) || senderInitials,
+        text: (data.text as string) || `📊 ${question}`,
+        time,
+        createdAt: (data.createdAt as string) || new Date().toISOString(),
+        self: true,
+        messageType: "poll",
+        poll: data.poll as ChatMessage["poll"],
+      }
+      setMessages((prev) => {
+        const updated = prev.some((m) => m.id === tempId)
+          ? prev.map((m) => (m.id === tempId ? newMsg : m))
+          : prev.some((m) => m.id === newMsg.id)
+            ? prev
+            : [...prev, newMsg]
+        onMessagesChange?.(updated)
+        return updated
+      })
+      void broadcastChatMessage(conversationId, newMsg)
+    } catch (e) {
+      console.error("[chat] poll:", e)
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      window.alert("Anket gönderilemedi. Lütfen tekrar deneyin.")
+    }
   }
 
   async function voteOnPoll(messageId: string, optionId: string) {
@@ -2386,9 +2415,23 @@ function ChatView({
       }
     }))
 
-    const supabase = createClient()
-    if (previousId) await supabase.from("message_poll_votes").delete().eq("option_id", previousId).eq("voter_name", senderName)
-    if (!clickedMine) await supabase.from("message_poll_votes").insert({ option_id: optionId, voter_name: senderName })
+    try {
+      const res = await fetch("/api/chat/poll", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          optionId,
+          previousOptionId: previousId ?? null,
+          clearOnly: clickedMine,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error("[chat] poll vote failed:", data.error ?? res.status)
+      }
+    } catch (e) {
+      console.error("[chat] poll vote:", e)
+    }
   }
 
   return (
