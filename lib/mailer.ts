@@ -1,6 +1,6 @@
 /**
  * Transactional email helper.
- * Prefer Brevo (verified youthstation.org), then Resend, then Gmail SMTP.
+ * Prefer Brevo (verified youthstation.org), then Resend.
  */
 
 export const ADMIN_TO = process.env.ADMIN_EMAIL || "secretaire@youthstation.org"
@@ -19,7 +19,6 @@ function resolveFromEmail(): { email: string; name: string } {
     process.env.BREVO_FROM_EMAIL,
     process.env.SENDGRID_FROM_EMAIL,
     process.env.RESEND_FROM,
-    process.env.GMAIL_USER,
     "secretaire@youthstation.org",
   ]
   for (const raw of candidates) {
@@ -64,7 +63,6 @@ async function sendViaResend(to: string, subject: string, html: string) {
   if (!apiKey) throw new Error("RESEND_API_KEY manquant")
 
   const from = resolveFromEmail()
-  // Resend test domain cannot deliver to arbitrary recipients
   const fromHeader =
     from.email.endsWith("@resend.dev")
       ? `Youth Station Derneği Uygulaması <onboarding@resend.dev>`
@@ -88,24 +86,6 @@ async function sendViaResend(to: string, subject: string, html: string) {
     const text = await res.text().catch(() => res.statusText)
     throw new Error(`Resend ${res.status}: ${text}`)
   }
-}
-
-async function sendViaGmail(to: string, subject: string, html: string) {
-  const user = process.env.GMAIL_USER?.trim()
-  const pass = process.env.GMAIL_APP_PASSWORD?.trim()
-  if (!user || !pass) throw new Error("GMAIL_USER / GMAIL_APP_PASSWORD manquants")
-
-  const nodemailer = await import("nodemailer")
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user, pass },
-  })
-  await transporter.sendMail({
-    from: `"Youth Station Derneği Uygulaması" <${user}>`,
-    to,
-    subject,
-    html,
-  })
 }
 
 export async function sendMail({
@@ -137,19 +117,10 @@ export async function sendMail({
     }
   }
 
-  if (process.env.GMAIL_USER?.trim() && process.env.GMAIL_APP_PASSWORD?.trim()) {
-    try {
-      await sendViaGmail(to, subject, html)
-      return
-    } catch (err) {
-      errors.push(err instanceof Error ? err.message : String(err))
-    }
-  }
-
   throw new Error(
     errors.length > 0
       ? `Envoi email impossible: ${errors.join(" | ")}`
-      : "Aucun fournisseur email configuré (BREVO_API_KEY / RESEND_API_KEY / Gmail)",
+      : "Aucun fournisseur email configuré (BREVO_API_KEY / RESEND_API_KEY)",
   )
 }
 

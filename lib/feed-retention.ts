@@ -1,0 +1,2 @@
+export const FEED_RETENTION_DAYS = 30
+export const FEED_RETENTION_MS = FEED_RETENTION_DAYS * 24 * 60 * 60 * 1000

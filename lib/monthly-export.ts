@@ -3,8 +3,7 @@ import { ADMIN_EMAILS } from "@/lib/admin"
 import { sendMail } from "@/lib/mailer"
 import { listArchives, type ArchiveEntry } from "@/lib/admin-archive"
 
-export const FEED_RETENTION_DAYS = 30
-export const FEED_RETENTION_MS = FEED_RETENTION_DAYS * 24 * 60 * 60 * 1000
+export { FEED_RETENTION_DAYS, FEED_RETENTION_MS } from "@/lib/feed-retention"
 
 function escapeHtml(s: unknown): string {
   return String(s ?? "")

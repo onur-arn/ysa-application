@@ -1,6 +1,6 @@
 
 import { createClient } from "@/lib/supabase/server"
-import { FEED_RETENTION_MS } from "@/lib/monthly-export"
+import { FEED_RETENTION_MS } from "@/lib/feed-retention"
 import { storyCutoffIso } from "@/lib/queries/stories"
 import { FeedClient } from "./feed-client"
 
