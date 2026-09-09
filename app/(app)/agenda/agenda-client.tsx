@@ -366,16 +366,12 @@ export function AgendaClient({
       ) : (
         <div className="flex flex-col gap-2 px-4">
           {[...filtered]
-            .sort((a, b) => {
-              const aPast = isEventPast(a) ? 1 : 0
-              const bPast = isEventPast(b) ? 1 : 0
-              if (aPast !== bPast) return aPast - bPast
-              return a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? "")
-            })
+            .filter((e) => !isEventPast(e))
+            .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? ""))
             .map((e) => (
               <EventRow key={e.id} event={e} onClick={() => setSelected(e)} showMonth />
             ))}
-          {filtered.length === 0 && (
+          {filtered.filter((e) => !isEventPast(e)).length === 0 && (
             <p className="py-10 text-center text-sm text-muted-foreground">{t("agenda.noEvents")}</p>
           )}
         </div>
