@@ -131,6 +131,7 @@ export function StoriesBar({
     if (!audio) return
     try {
       audio.pause()
+      audio.removeAttribute("data-ys-src")
       audio.removeAttribute("src")
       audio.load()
     } catch {}
@@ -150,37 +151,32 @@ export function StoriesBar({
     audio.volume = 0.85
     audio.onerror = () => setMusicBlocked(true)
 
-    // Same track already loaded
-    if (audio.getAttribute("data-ys-src") === src) {
-      if (audio.paused) {
-        void audio.play().then(() => setMusicBlocked(false)).catch(() => setMusicBlocked(true))
-      } else {
-        setMusicBlocked(false)
-      }
+    // Already actively playing this track — don't restart
+    const sameTrack = audio.getAttribute("data-ys-src") === src
+    if (sameTrack && !audio.paused && audio.currentSrc) {
+      setMusicBlocked(false)
       return
     }
 
+    // Always (re)load src on reopen — stopStoryMusic clears src but used to leave data-ys-src
+    const bust = `_ys=${Date.now()}`
+    const playSrc = src.includes("?") ? `${src}&${bust}` : `${src}?${bust}`
     audio.setAttribute("data-ys-src", src)
-    audio.src = src
-    // play() immediately in gesture; browser buffers as needed
-    const attempt = () =>
-      audio.play()
-        .then(() => setMusicBlocked(false))
-        .catch(() => {
-          const onReady = () => {
-            void audio.play()
-              .then(() => setMusicBlocked(false))
-              .catch(() => setMusicBlocked(true))
-          }
-          audio.addEventListener("canplay", onReady, { once: true })
-          audio.addEventListener("loadeddata", onReady, { once: true })
-          // Brief delayed retry still helps on Android
-          setTimeout(() => {
-            if (storyAudioRef.current === audio && audio.paused) onReady()
-          }, 120)
-          setMusicBlocked(true)
-        })
-    attempt()
+    audio.src = playSrc
+    void audio.play()
+      .then(() => setMusicBlocked(false))
+      .catch(() => {
+        const onReady = () => {
+          if (storyAudioRef.current !== audio) return
+          void audio.play()
+            .then(() => setMusicBlocked(false))
+            .catch(() => setMusicBlocked(true))
+        }
+        audio.addEventListener("canplay", onReady, { once: true })
+        audio.addEventListener("loadeddata", onReady, { once: true })
+        setTimeout(onReady, 180)
+        setMusicBlocked(true)
+      })
   }
 
   // Load seen IDs per user (shared device must not inherit another account's seen state)
