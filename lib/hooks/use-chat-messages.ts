@@ -43,6 +43,55 @@ export async function broadcastChatMessage(conversationId: string, msg: ChatMess
   setTimeout(() => { void supabase.removeChannel(channel) }, 2000)
 }
 
+export type ChatPollVoteBroadcast = {
+  optionId: string
+  voterName: string
+  previousOptionId?: string | null
+  action: "add" | "remove"
+}
+
+export async function broadcastChatPollVote(conversationId: string, vote: ChatPollVoteBroadcast) {
+  if (!conversationId || conversationId.startsWith("pending-")) return
+  const supabase = createClient()
+  const channel = supabase.channel(`chat-broadcast-${conversationId}`)
+  await new Promise<void>((resolve) => {
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") resolve()
+    })
+    setTimeout(resolve, 1500)
+  })
+  await channel.send({
+    type: "broadcast",
+    event: "poll_vote",
+    payload: vote,
+  })
+  setTimeout(() => { void supabase.removeChannel(channel) }, 2000)
+}
+
+function applyPollVoteToMessages(
+  prev: ChatMessage[],
+  vote: ChatPollVoteBroadcast,
+): ChatMessage[] {
+  return prev.map((msg) => {
+    if (!msg.poll?.options.some((o) => o.id === vote.optionId || o.id === vote.previousOptionId)) {
+      return msg
+    }
+    return {
+      ...msg,
+      poll: {
+        ...msg.poll,
+        options: msg.poll.options.map((o) => {
+          let voters = o.voters.filter((n) => n !== vote.voterName)
+          if (vote.action === "add" && o.id === vote.optionId && !voters.includes(vote.voterName)) {
+            voters = [...voters, vote.voterName]
+          }
+          return { ...o, voters }
+        }),
+      },
+    }
+  })
+}
+
 export function useChatMessages(
   conversationId: string | undefined,
   senderName: string,
@@ -160,6 +209,13 @@ export function useChatMessages(
       .on("broadcast", { event: "new_message" }, ({ payload }) => {
         if (!payload || typeof payload !== "object") return
         ingestMessage(payload as ChatMessage)
+      })
+      .on("broadcast", { event: "poll_vote" }, ({ payload }) => {
+        if (!payload || typeof payload !== "object") return
+        const vote = payload as ChatPollVoteBroadcast
+        qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+          applyPollVoteToMessages(prev, vote),
+        )
       })
 
     void subscribeChannel(supabase, pgChannel)

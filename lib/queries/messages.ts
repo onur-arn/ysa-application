@@ -26,12 +26,13 @@ const SELECT_NO_AUDIO =
 const SELECT_MIN =
   "id,sender_name,sender_initials,text,image_url,is_system,created_at"
 
-function parsePoll(rawPoll: RawPoll): ChatPoll | undefined {
-  if (!rawPoll) return undefined
+function parsePoll(rawPoll: RawPoll | RawPoll[] | null | undefined): ChatPoll | undefined {
+  const poll = Array.isArray(rawPoll) ? rawPoll[0] : rawPoll
+  if (!poll) return undefined
   return {
-    id: rawPoll.id,
-    question: rawPoll.question,
-    options: (rawPoll.message_poll_options ?? [])
+    id: poll.id,
+    question: poll.question,
+    options: (poll.message_poll_options ?? [])
       .sort((a, b) => a.position - b.position)
       .map((o) => ({
         id: o.id,
@@ -100,13 +101,40 @@ export async function fetchChatMessages(conversationId: string, senderName: stri
     throw new Error(errorMessage || "Mesajlar yüklenemedi")
   }
 
-  return [...data].reverse().map((m) =>
+  let messages = [...data].reverse().map((m) =>
     rowToChatMessage(
       m as unknown as RawMsg,
       senderName,
       parsePoll((m as Record<string, unknown>).message_polls as RawPoll),
     ),
   )
+
+  // RLS may hide other users' votes — hydrate full poll state via admin API
+  const pollMsgIds = messages.filter((m) => m.poll || m.messageType === "poll" || (m.text ?? "").startsWith("📊")).map((m) => m.id)
+  if (pollMsgIds.length > 0) {
+    try {
+      const res = await fetch("/api/chat/poll-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageIds: pollMsgIds }),
+      })
+      if (res.ok) {
+        const json = await res.json() as {
+          polls?: Record<string, { id: string; question: string; options: { id: string; text: string; voters: string[] }[] }>
+        }
+        const polls = json.polls ?? {}
+        messages = messages.map((m) => {
+          const full = polls[m.id]
+          if (!full) return m
+          return { ...m, poll: full, messageType: m.messageType ?? "poll" }
+        })
+      }
+    } catch (err) {
+      console.warn("[chat] poll-state hydrate failed:", err)
+    }
+  }
+
+  return messages
 }
 
 export function prefetchChatMessages(qc: QueryClient, conversationId: string, senderName: string) {

@@ -32,7 +32,7 @@ import { refreshNavUnreadFromStorage, setNavUnread, markConversationRead, isSame
 import { readNotifPrefs, showAppNotification } from "@/lib/notif-prefs"
 import { messageKeys } from "@/lib/queries/keys"
 import { insertConversationMembers } from "@/lib/queries/conversations"
-import { useChatMessages, broadcastChatMessage } from "@/lib/hooks/use-chat-messages"
+import { useChatMessages, broadcastChatMessage, broadcastChatPollVote } from "@/lib/hooks/use-chat-messages"
 import { chatDayLabel, sameChatDay } from "@/lib/chat-day"
 import { groupAvatarPublicUrl } from "@/lib/group-avatar"
 
@@ -2428,6 +2428,22 @@ function ChatView({
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         console.error("[chat] poll vote failed:", data.error ?? res.status)
+        return
+      }
+      if (conversationId) {
+        if (previousId && previousId !== optionId) {
+          void broadcastChatPollVote(conversationId, {
+            optionId: previousId,
+            voterName: senderName,
+            action: "remove",
+          })
+        }
+        void broadcastChatPollVote(conversationId, {
+          optionId,
+          voterName: senderName,
+          previousOptionId: previousId,
+          action: clickedMine ? "remove" : "add",
+        })
       }
     } catch (e) {
       console.error("[chat] poll vote:", e)
@@ -2502,23 +2518,29 @@ function ChatView({
             return (
               <div key={m.id}>
                 {daySep}
-                <div className={`flex flex-col gap-1 ${m.self ? "items-end" : "items-start"}`}>
-                  <div className="flex items-center gap-1.5 px-1">
+                <div className={`flex ${m.self ? "justify-end" : "justify-start"}`}>
+                  <div className={`flex max-w-[85%] gap-2 ${m.self ? "flex-row-reverse" : ""}`}>
                     {!m.self && (() => {
                       const photo = photoMap?.get(m.author)
                       return photo
-                        ? <img src={photo} alt={m.initials} className="size-5 rounded-full object-cover" />
-                        : <span className="flex size-5 items-center justify-center rounded-full bg-secondary text-[9px] font-bold text-secondary-foreground">{m.initials}</span>
+                        ? <img src={photo} alt={m.initials} className="mt-auto size-7 shrink-0 rounded-full object-cover" />
+                        : <span className="mt-auto flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{m.initials}</span>
                     })()}
-                    <span className="text-xs font-semibold text-foreground">{m.self ? "Sen" : m.author}</span>
-                    <span className="text-[10px] text-muted-foreground">{m.time}</span>
-                  </div>
-                  <div className="w-full max-w-[85%]">
-                    <ChatPollBlock
-                      poll={m.poll}
-                      voterName={senderName}
-                      onVote={(optId) => voteOnPoll(m.id, optId)}
-                    />
+                    <div className="min-w-0 flex-1">
+                      {/* Nom seulement en groupe — en DM comme les autres bulles */}
+                      {!isPrivate && (
+                        <div className="mb-1 flex items-center gap-1.5 px-1">
+                          <span className="text-xs font-semibold text-foreground">{m.self ? "Sen" : m.author}</span>
+                        </div>
+                      )}
+                      <ChatPollBlock
+                        poll={m.poll}
+                        voterName={senderName}
+                        time={m.time}
+                        self={!!m.self}
+                        onVote={(optId) => voteOnPoll(m.id, optId)}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2774,17 +2796,21 @@ function ChatView({
 
 // ── Chat poll block ───────────────────────────────────────────────────────────
 function ChatPollBlock({
-  poll, voterName, onVote,
+  poll, voterName, onVote, time, self,
 }: {
   poll: ChatPoll
   voterName: string
   onVote: (optionId: string) => void
+  time?: string
+  self?: boolean
 }) {
   const total = poll.options.reduce((s, o) => s + o.voters.length, 0)
   const myVote = poll.options.find((o) => o.voters.includes(voterName))?.id ?? null
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 shadow-sm">
+    <div className={`flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 shadow-sm ${
+      self ? "rounded-br-[5px]" : "rounded-bl-[5px]"
+    }`}>
       <div className="flex items-center gap-2">
         <BarChart2 className="size-4 shrink-0 text-primary" />
         <p className="font-semibold text-foreground text-sm">{poll.question}</p>
@@ -2827,7 +2853,12 @@ function ChatPollBlock({
           </div>
         )
       })}
-      <p className="text-right text-[11px] text-muted-foreground">{total} oy</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground">{total} oy</p>
+        {time && (
+          <span className="text-[10px] text-muted-foreground">{time}</span>
+        )}
+      </div>
     </div>
   )
 }

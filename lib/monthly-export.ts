@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { ADMIN_EMAILS } from "@/lib/admin"
+import { ADMIN_EMAILS, isAdminEmail } from "@/lib/admin"
 import { sendMail } from "@/lib/mailer"
 import { listArchives, type ArchiveEntry } from "@/lib/admin-archive"
 
@@ -452,21 +452,60 @@ export async function sendMonthlyExport(period?: ExportPeriod) {
   )
 }
 
-export async function sendManualExport(requestedBy: string) {
+const MAX_EMAIL_HTML_CHARS = 900_000
+
+function trimExportForEmail(html: string): string {
+  if (html.length <= MAX_EMAIL_HTML_CHARS) return html
+  return `${html.slice(0, MAX_EMAIL_HTML_CHARS)}
+<p style="font-family:sans-serif;color:#b45309;margin-top:24px"><strong>Note :</strong> rapport tronqué pour l'email (trop volumineux). Réessayez ou utilisez le téléchargement HTML depuis le panneau admin.</p>`
+}
+
+export async function buildManualExportHtml(requestedBy: string): Promise<string> {
   const data = await fetchExportData()
-  const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" })
-  const html = buildExportHtml(data, {
+  // Cap messages per conversation to keep exports email-safe
+  const capped: ExportData = {
+    ...data,
+    conversations: data.conversations.map((conv) => {
+      const msgs = ((conv.chat_messages as unknown[]) ?? []).slice(-80)
+      return { ...conv, chat_messages: msgs }
+    }),
+  }
+  return buildExportHtml(capped, {
     title: "Export complet — YouthStation",
     subtitle: `Demandé par : ${requestedBy} — toutes les données actives + suppressions archivées`,
   })
+}
 
-  await Promise.all(
-    ADMIN_EMAILS.map((to) =>
-      sendMail({
+export async function sendManualExport(requestedBy: string) {
+  const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" })
+  const html = trimExportForEmail(await buildManualExportHtml(requestedBy))
+  const intro = `<p style="font-family:sans-serif;color:#374151">Bonjour,<br><br>Export complet de l'application YouthStation (membres, événements passés/à venir, posts, stories, tâches, iGEM, messages, et éléments supprimés archivés).<br>Vous pouvez l'imprimer en PDF depuis votre client mail (Fichier → Imprimer → Enregistrer en PDF).</p>`
+
+  const recipients = new Set<string>(ADMIN_EMAILS.map((e) => e.toLowerCase()))
+  const maybeEmail = requestedBy.trim().toLowerCase()
+  if (maybeEmail.includes("@") && isAdminEmail(maybeEmail)) {
+    recipients.add(maybeEmail)
+  }
+
+  const errors: string[] = []
+  let sent = 0
+  for (const to of recipients) {
+    try {
+      await sendMail({
         to,
         subject: `[YouthStation] Export complet — ${now}`,
-        html: `<p style="font-family:sans-serif;color:#374151">Bonjour,<br><br>Export complet de l'application YouthStation (membres, événements passés/à venir, posts, stories, tâches, iGEM, messages, et éléments supprimés archivés).<br>Vous pouvez l'imprimer en PDF depuis votre client mail.</p>${html}`,
+        html: intro + html,
       })
-    )
-  )
+      sent += 1
+    } catch (err) {
+      errors.push(`${to}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  if (sent === 0) {
+    throw new Error(errors.join(" | ") || "Aucun email envoyé")
+  }
+  if (errors.length > 0) {
+    console.warn("[export] partial send failures:", errors.join(" | "))
+  }
 }

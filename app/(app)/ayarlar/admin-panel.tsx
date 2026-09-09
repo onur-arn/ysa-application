@@ -35,6 +35,7 @@ export function AdminPanel({ adminEmail }: { adminEmail: string }) {
   const [loading,  setLoading]  = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportDone, setExportDone] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   async function loadAll() {
     setLoading(true)
@@ -107,14 +108,40 @@ export function AdminPanel({ adminEmail }: { adminEmail: string }) {
 
   async function exportPdf() {
     setExporting(true)
-    await fetch("/api/export-pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestedBy: adminEmail }),
-    })
-    setExporting(false)
-    setExportDone(true)
-    setTimeout(() => setExportDone(false), 4000)
+    setExportError(null)
+    setExportDone(false)
+    try {
+      const res = await fetch("/api/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestedBy: adminEmail, mode: "email" }),
+      })
+      const json = await res.json().catch(() => ({})) as { ok?: boolean; error?: string }
+      if (!res.ok || json.ok === false) {
+        setExportError(json.error || `Échec envoi (${res.status})`)
+        const dl = await fetch("/api/export-pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requestedBy: adminEmail, mode: "download" }),
+        })
+        if (dl.ok) {
+          const blob = await dl.blob()
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement("a")
+          a.href = url
+          a.download = `youthstation-export-${new Date().toISOString().slice(0, 10)}.html`
+          a.click()
+          URL.revokeObjectURL(url)
+        }
+        return
+      }
+      setExportDone(true)
+      setTimeout(() => setExportDone(false), 5000)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Erreur réseau")
+    } finally {
+      setExporting(false)
+    }
   }
 
   const tabs: { key: typeof section; icon: typeof Shield; label: string; count: number }[] = [
@@ -157,7 +184,12 @@ export function AdminPanel({ adminEmail }: { adminEmail: string }) {
                 <div className="px-4 py-3 border-b border-border/50">
                   {exportDone && (
                     <p className="mb-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-600">
-                      ✓ PDF gönderildi
+                      ✓ PDF gönderildi (spam klasörünü de kontrol edin)
+                    </p>
+                  )}
+                  {exportError && (
+                    <p className="mb-2 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                      Mail gönderilemedi — HTML indirme denendi. {exportError}
                     </p>
                   )}
                   <button

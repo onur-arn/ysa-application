@@ -1,5 +1,6 @@
 
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { FEED_RETENTION_MS } from "@/lib/feed-retention"
 import { storyCutoffIso } from "@/lib/queries/stories"
 import { FeedClient } from "./feed-client"
@@ -11,13 +12,16 @@ export default async function FeedPage() {
   const postsCutoff = new Date(Date.now() - FEED_RETENTION_MS).toISOString()
   const storiesCutoff = storyCutoffIso()
 
+  // Service role for posts: RLS on poll_votes/post_likes otherwise returns only the current user's rows
+  const admin = createAdminClient()
+
   // Keep all content in DB for yönetici / export — only hide by date in the feed UI
   const [profileRes, allProfilesRes, postsRes, igemRes, storiesRes, igemCommentsRes] = await Promise.all([
     user
       ? supabase.from("profiles").select("name,initials,station,photo_url").eq("id", user.id).single()
       : Promise.resolve({ data: null }),
     supabase.from("profiles").select("id,name,photo_url"),
-    supabase
+    admin
       .from("posts")
       .select("id,author,initials,station,content,image_url,created_at,created_by,post_likes(voter_name),post_comments(id,author,initials,station,text,created_at),polls(id,question,poll_options(id,text,position,poll_votes(option_id,voter_name)))")
       .gte("created_at", postsCutoff)

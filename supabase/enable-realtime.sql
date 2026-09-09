@@ -13,6 +13,13 @@ do $$ begin alter publication supabase_realtime add table post_comments; excepti
 do $$ begin alter publication supabase_realtime add table post_likes; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table polls; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table poll_votes; exception when duplicate_object then null; end $$;
+do $$ begin alter publication supabase_realtime add table poll_options; exception when duplicate_object then null; end $$;
+
+-- DELETE payloads need full rows for composite keys / FKs
+alter table poll_votes replica identity full;
+alter table post_likes replica identity full;
+alter table post_comments replica identity full;
+alter table message_poll_votes replica identity full;
 
 do $$ begin alter publication supabase_realtime add table stories; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table story_reactions; exception when duplicate_object then null; end $$;

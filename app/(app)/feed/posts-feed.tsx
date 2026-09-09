@@ -7,8 +7,28 @@ import { type Post, type PostComment, type Poll, type PollOption } from "@/lib/d
 import { getStation, type StationId } from "@/lib/data/stations"
 import { FEED_RETENTION_MS } from "@/lib/feed-retention"
 import { createClient } from "@/lib/supabase/client"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 import { Modal } from "@/components/ui/modal"
 import { uploadPostImage } from "@/lib/chat-media"
+
+type FeedBroadcast =
+  | { kind: "comment"; postId: string; comment: PostComment }
+  | { kind: "comment_delete"; postId: string; commentId: string }
+  | { kind: "like"; postId: string; voterName: string; action: "add" | "remove" }
+  | { kind: "vote"; optionId: string; voterName: string; previousOptionId?: string | null; action: "add" | "remove" }
+
+async function broadcastFeed(event: FeedBroadcast) {
+  const supabase = createClient()
+  const channel = supabase.channel("feed-sync")
+  await new Promise<void>((resolve) => {
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") resolve()
+    })
+    setTimeout(resolve, 1500)
+  })
+  await channel.send({ type: "broadcast", event: "feed", payload: event })
+  setTimeout(() => { void supabase.removeChannel(channel) }, 2000)
+}
 
 
 function timeAgo(iso: string) {
@@ -40,9 +60,10 @@ function Avatar({ initials, station, size = 10, photoUrl }: { initials: string; 
   )
 }
 
-function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
+function PostCard({ post, onUpdate, onPatch, onDelete, me, photoMap }: {
   post: Post
   onUpdate: (p: Post) => void
+  onPatch: (id: string, fn: (p: Post) => Post) => void
   onDelete?: () => void
   me: { id: string; name: string; initials: string; station: string; photoUrl?: string | null }
   photoMap: Map<string, string>
@@ -95,9 +116,17 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
     const supabase = createClient()
     if (previousVotedId) {
       await supabase.from("poll_votes").delete().eq("option_id", previousVotedId).eq("voter_name", ME)
+      void broadcastFeed({ kind: "vote", optionId: previousVotedId, voterName: ME, action: "remove" })
     }
     if (!alreadyMine) {
       await supabase.from("poll_votes").insert({ option_id: optionId, voter_name: ME })
+      void broadcastFeed({
+        kind: "vote",
+        optionId,
+        voterName: ME,
+        previousOptionId: previousVotedId,
+        action: "add",
+      })
     }
   }
 
@@ -110,8 +139,10 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
     const supabase = createClient()
     if (nowLiked) {
       await supabase.from("post_likes").insert({ post_id: post.id, voter_name: ME })
+      void broadcastFeed({ kind: "like", postId: post.id, voterName: ME, action: "add" })
     } else {
       await supabase.from("post_likes").delete().eq("post_id", post.id).eq("voter_name", ME)
+      void broadcastFeed({ kind: "like", postId: post.id, voterName: ME, action: "remove" })
     }
   }
 
@@ -119,14 +150,49 @@ function PostCard({ post, onUpdate, onDelete, me, photoMap }: {
     if (!commentText.trim()) return
     const text = commentText.trim()
     setCommentText("")
-    const supabase = createClient()
-    await supabase.from("post_comments").insert({
-      post_id: post.id,
+    const tempId = `temp-${Date.now()}`
+    const optimistic: PostComment = {
+      id: tempId,
       author: me.name,
       initials: me.initials,
-      station: me.station,
+      station: me.station as StationId,
       text,
-    })
+      time: "şimdi",
+    }
+    onPatch(post.id, (p) => ({ ...p, comments: [...p.comments, optimistic] }))
+    setShowComments(true)
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from("post_comments")
+      .insert({
+        post_id: post.id,
+        author: me.name,
+        initials: me.initials,
+        station: me.station,
+        text,
+      })
+      .select("id,author,initials,station,text,created_at")
+      .single()
+    if (error || !data) {
+      onPatch(post.id, (p) => ({ ...p, comments: p.comments.filter((c) => c.id !== tempId) }))
+      return
+    }
+    const saved: PostComment = {
+      id: data.id,
+      author: data.author ?? me.name,
+      initials: data.initials ?? me.initials,
+      station: (data.station ?? me.station) as StationId,
+      text: data.text ?? text,
+      time: timeAgo(data.created_at),
+    }
+    onPatch(post.id, (p) => ({
+      ...p,
+      comments: [
+        ...p.comments.filter((c) => c.id !== tempId && c.id !== saved.id),
+        saved,
+      ],
+    }))
+    void broadcastFeed({ kind: "comment", postId: post.id, comment: saved })
   }
 
   return (
@@ -611,8 +677,12 @@ interface PostsFeedProps {
 
 function mapPostsFromRaw(postsRaw: Record<string, unknown>[]): Post[] {
   return postsRaw.map((p) => {
-    // polls is returned as a single object (not array) because post_id has UNIQUE constraint
-    const rawPoll = (p.polls as { id: string; question: string; poll_options: { id: string; text: string; position: number; poll_votes: { option_id: string; voter_name: string }[] }[] } | null) ?? null
+    // polls may be object (unique post_id) or array depending on client
+    const pollsField = p.polls as
+      | { id: string; question: string; poll_options: { id: string; text: string; position: number; poll_votes: { option_id: string; voter_name: string }[] }[] }
+      | { id: string; question: string; poll_options: { id: string; text: string; position: number; poll_votes: { option_id: string; voter_name: string }[] }[] }[]
+      | null
+    const rawPoll = Array.isArray(pollsField) ? (pollsField[0] ?? null) : (pollsField ?? null)
     const poll: Poll | undefined = rawPoll ? {
       question: rawPoll.question,
       options: (rawPoll.poll_options ?? [])
@@ -692,13 +762,15 @@ export function PostsFeed({
   const [posts, setPosts] = useState<Post[]>(() => mapPostsFromRaw(initialPosts))
   const [composeOpen, setComposeOpen] = useState(false)
   const latestPostTimeRef = useRef<string>("")
+  const postsRef = useRef(posts)
 
   // Keep latestPostTimeRef in sync so polling can fetch only new posts
   useEffect(() => {
+    postsRef.current = posts
     if (posts.length > 0) latestPostTimeRef.current = posts[0].createdAt
   }, [posts])
 
-  // Polling fallback: fetch posts newer than what we have
+  // Polling fallback: new posts + refresh interactions on existing posts
   useEffect(() => {
     async function refetchNew() {
       const since = latestPostTimeRef.current
@@ -720,8 +792,51 @@ export function PostsFeed({
       }
     }
 
-    const interval = setInterval(refetchNew, 30_000)
-    const onVisible = () => { if (document.visibilityState === "visible") refetchNew() }
+    async function refetchInteractions() {
+      const ids = postsRef.current.slice(0, 40).map((p) => p.id)
+      if (ids.length === 0) return
+      try {
+        const res = await fetch("/api/feed/interactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ postIds: ids }),
+        })
+        if (!res.ok) return
+        const json = await res.json() as { posts?: Record<string, unknown>[] }
+        const data = json.posts ?? []
+        if (data.length === 0) return
+        const byId = new Map(data.map((row) => [row.id as string, row]))
+        setPosts((prev) => prev.map((p) => {
+          const row = byId.get(p.id)
+          if (!row) return p
+          const mapped = mapPostsFromRaw([{
+            ...row,
+            author: p.author,
+            initials: p.initials,
+            station: p.station,
+            content: p.content,
+            image_url: p.imageUrl,
+            created_at: p.createdAt,
+            created_by: p.createdBy,
+          }])[0]
+          return {
+            ...p,
+            likedBy: mapped.likedBy,
+            comments: mapped.comments,
+            poll: mapped.poll ?? p.poll,
+          }
+        }))
+      } catch {
+        // ignore transient network errors
+      }
+    }
+
+    const tick = () => {
+      void refetchNew()
+      void refetchInteractions()
+    }
+    const interval = setInterval(tick, 8_000)
+    const onVisible = () => { if (document.visibilityState === "visible") tick() }
     document.addEventListener("visibilitychange", onVisible)
 
     return () => {
@@ -732,6 +847,58 @@ export function PostsFeed({
 
   useEffect(() => {
     const supabase = createClient()
+
+    const applyFeedEvent = (event: FeedBroadcast) => {
+      if (event.kind === "comment") {
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== event.postId) return p
+          if (p.comments.some((x) => x.id === event.comment.id)) return p
+          const withoutTemp = p.comments.filter(
+            (x) => !(x.id.startsWith("temp-") && x.author === event.comment.author && x.text === event.comment.text),
+          )
+          return { ...p, comments: [...withoutTemp, event.comment] }
+        }))
+        return
+      }
+      if (event.kind === "comment_delete") {
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== event.postId) return p
+          return { ...p, comments: p.comments.filter((x) => x.id !== event.commentId) }
+        }))
+        return
+      }
+      if (event.kind === "like") {
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== event.postId) return p
+          const likedBy = p.likedBy ?? []
+          if (event.action === "add") {
+            if (likedBy.includes(event.voterName)) return p
+            return { ...p, likedBy: [...likedBy, event.voterName] }
+          }
+          return { ...p, likedBy: likedBy.filter((n) => n !== event.voterName) }
+        }))
+        return
+      }
+      if (event.kind === "vote") {
+        setPosts((prev) => prev.map((p) => {
+          if (!p.poll) return p
+          if (!p.poll.options.some((o) => o.id === event.optionId || o.id === event.previousOptionId)) return p
+          return {
+            ...p,
+            poll: {
+              ...p.poll,
+              options: p.poll.options.map((o) => {
+                let voters = o.voters.filter((n) => n !== event.voterName)
+                if (event.action === "add" && o.id === event.optionId && !voters.includes(event.voterName)) {
+                  voters = [...voters, event.voterName]
+                }
+                return { ...o, voters }
+              }),
+            },
+          }
+        }))
+      }
+    }
 
     // Realtime: new posts appear instantly for all users
     const channel = supabase
@@ -776,28 +943,22 @@ export function PostsFeed({
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_comments" }, (payload) => {
         const c = payload.new as { id: string; post_id: string; author: string; initials: string; station: string; text: string; created_at: string }
-        setPosts((prev) => prev.map((p) => {
-          if (p.id !== c.post_id) return p
-          if (p.comments.some((x) => x.id === c.id)) return p
-          return {
-            ...p,
-            comments: [...p.comments, {
-              id: c.id,
-              author: c.author ?? "",
-              initials: c.initials ?? "?",
-              station: (c.station ?? "paris") as never,
-              text: c.text ?? "",
-              time: timeAgo(c.created_at),
-            }],
-          }
-        }))
+        applyFeedEvent({
+          kind: "comment",
+          postId: c.post_id,
+          comment: {
+            id: c.id,
+            author: c.author ?? "",
+            initials: c.initials ?? "?",
+            station: (c.station ?? "paris") as StationId,
+            text: c.text ?? "",
+            time: timeAgo(c.created_at),
+          },
+        })
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "post_comments" }, (payload) => {
         const c = payload.old as { id: string; post_id: string }
-        setPosts((prev) => prev.map((p) => {
-          if (p.id !== c.post_id) return p
-          return { ...p, comments: p.comments.filter((x) => x.id !== c.id) }
-        }))
+        applyFeedEvent({ kind: "comment_delete", postId: c.post_id, commentId: c.id })
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "polls" }, (payload) => {
         const poll = payload.new as { id: string; post_id: string; question: string }
@@ -831,39 +992,19 @@ export function PostsFeed({
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, (payload) => {
         const l = payload.new as { post_id: string; voter_name: string }
-        setPosts((prev) => prev.map((p) => {
-          if (p.id !== l.post_id) return p
-          if ((p.likedBy ?? []).includes(l.voter_name)) return p
-          return { ...p, likedBy: [...(p.likedBy ?? []), l.voter_name] }
-        }))
+        applyFeedEvent({ kind: "like", postId: l.post_id, voterName: l.voter_name, action: "add" })
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "post_likes" }, (payload) => {
         const l = payload.old as { post_id: string; voter_name: string }
-        setPosts((prev) => prev.map((p) => {
-          if (p.id !== l.post_id) return p
-          return { ...p, likedBy: (p.likedBy ?? []).filter((n) => n !== l.voter_name) }
-        }))
+        applyFeedEvent({ kind: "like", postId: l.post_id, voterName: l.voter_name, action: "remove" })
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "poll_votes" }, (payload) => {
         const v = payload.new as { option_id: string; voter_name: string }
-        setPosts(prev => prev.map(p => {
-          if (!p.poll) return p
-          if (!p.poll.options.some(o => o.id === v.option_id)) return p
-          return { ...p, poll: { ...p.poll, options: p.poll.options.map(o =>
-            o.id === v.option_id && !o.voters.includes(v.voter_name)
-              ? { ...o, voters: [...o.voters, v.voter_name] }
-              : o
-          ) } }
-        }))
+        applyFeedEvent({ kind: "vote", optionId: v.option_id, voterName: v.voter_name, action: "add" })
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "poll_votes" }, (payload) => {
         const v = payload.old as { option_id: string; voter_name: string }
-        setPosts(prev => prev.map(p => {
-          if (!p.poll) return p
-          return { ...p, poll: { ...p.poll, options: p.poll.options.map(o =>
-            o.id === v.option_id ? { ...o, voters: o.voters.filter(n => n !== v.voter_name) } : o
-          ) } }
-        }))
+        applyFeedEvent({ kind: "vote", optionId: v.option_id, voterName: v.voter_name, action: "remove" })
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "igem_requests" }, (payload) => {
         const r = payload.new as { id: string; author: string; initials: string; station: string; motivation: string; created_at: string; created_by?: string }
@@ -910,16 +1051,31 @@ export function PostsFeed({
           return next
         })
       })
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR") console.error("[posts-realtime] channel error:", err)
-        if (status === "TIMED_OUT") console.warn("[posts-realtime] timed out")
+
+    const bc = supabase
+      .channel("feed-sync")
+      .on("broadcast", { event: "feed" }, ({ payload }) => {
+        applyFeedEvent(payload as FeedBroadcast)
       })
 
-    return () => { supabase.removeChannel(channel) }
+    void subscribeChannel(supabase, channel, (status, err) => {
+      if (status === "CHANNEL_ERROR") console.error("[posts-realtime] channel error:", err)
+      if (status === "TIMED_OUT") console.warn("[posts-realtime] timed out")
+    })
+    void subscribeChannel(supabase, bc)
+
+    return () => {
+      supabase.removeChannel(channel)
+      supabase.removeChannel(bc)
+    }
   }, [])
 
   function updatePost(updated: Post) {
     setPosts(prev => prev.map(p => p.id === updated.id ? updated : p))
+  }
+
+  function patchPost(id: string, fn: (p: Post) => Post) {
+    setPosts((prev) => prev.map((p) => (p.id === id ? fn(p) : p)))
   }
 
   async function deletePost(id: string) {
@@ -1084,6 +1240,7 @@ export function PostsFeed({
         key={item.data.id}
         post={item.data}
         onUpdate={updatePost}
+        onPatch={patchPost}
         onDelete={() => deletePost(item.data.id)}
         me={me}
         photoMap={photoMap}

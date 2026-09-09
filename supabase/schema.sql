@@ -101,7 +101,14 @@ create table if not exists poll_votes (
 );
 alter table poll_votes enable row level security;
 drop policy if exists "Authenticated can manage votes" on poll_votes;
-create policy "Authenticated can manage votes" on poll_votes for all to authenticated using (true) with check (true);
+drop policy if exists "Anyone authenticated can read poll votes" on poll_votes;
+drop policy if exists "Users insert own poll votes" on poll_votes;
+drop policy if exists "Users delete own poll votes" on poll_votes;
+create policy "Anyone authenticated can read poll votes" on poll_votes for select to authenticated using (true);
+create policy "Users insert own poll votes" on poll_votes for insert to authenticated
+  with check (voter_name = (select p.name from profiles p where p.id = auth.uid() limit 1));
+create policy "Users delete own poll votes" on poll_votes for delete to authenticated
+  using (voter_name = (select p.name from profiles p where p.id = auth.uid() limit 1));
 
 -- ── MESSAGE POLLS ────────────────────────────────────────────────────────────
 create table if not exists message_polls (
@@ -134,7 +141,14 @@ create table if not exists message_poll_votes (
 );
 alter table message_poll_votes enable row level security;
 drop policy if exists "Authenticated can manage message_poll_votes" on message_poll_votes;
-create policy "Authenticated can manage message_poll_votes" on message_poll_votes for all to authenticated using (true) with check (true);
+drop policy if exists "Anyone authenticated can read message poll votes" on message_poll_votes;
+drop policy if exists "Users insert own message poll votes" on message_poll_votes;
+drop policy if exists "Users delete own message poll votes" on message_poll_votes;
+create policy "Anyone authenticated can read message poll votes" on message_poll_votes for select to authenticated using (true);
+create policy "Users insert own message poll votes" on message_poll_votes for insert to authenticated
+  with check (voter_name = (select p.name from profiles p where p.id = auth.uid() limit 1));
+create policy "Users delete own message poll votes" on message_poll_votes for delete to authenticated
+  using (voter_name = (select p.name from profiles p where p.id = auth.uid() limit 1));
 
 -- ── COMMENTS ─────────────────────────────────────────────────────────────────
 create table if not exists post_comments (
@@ -162,7 +176,14 @@ create table if not exists post_likes (
 );
 alter table post_likes enable row level security;
 drop policy if exists "Authenticated can manage likes" on post_likes;
-create policy "Authenticated can manage likes" on post_likes for all to authenticated using (true) with check (true);
+drop policy if exists "Anyone authenticated can read likes" on post_likes;
+drop policy if exists "Users insert own likes" on post_likes;
+drop policy if exists "Users delete own likes" on post_likes;
+create policy "Anyone authenticated can read likes" on post_likes for select to authenticated using (true);
+create policy "Users insert own likes" on post_likes for insert to authenticated
+  with check (voter_name = (select p.name from profiles p where p.id = auth.uid() limit 1));
+create policy "Users delete own likes" on post_likes for delete to authenticated
+  using (voter_name = (select p.name from profiles p where p.id = auth.uid() limit 1));
 
 -- ── STORIES ──────────────────────────────────────────────────────────────────
 create table if not exists stories (

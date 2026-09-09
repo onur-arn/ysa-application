@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { isAdminEmail } from "@/lib/admin"
-import { sendManualExport } from "@/lib/monthly-export"
+import { buildManualExportHtml, sendManualExport } from "@/lib/monthly-export"
 import { createClient } from "@/lib/supabase/server"
 
 export async function POST(req: NextRequest) {
@@ -10,15 +10,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
   }
 
-  const body = await req.json()
-  const { requestedBy } = body
+  const body = await req.json().catch(() => ({}))
+  const requestedBy = (body as { requestedBy?: string }).requestedBy ?? user.email ?? "Admin"
+  const mode = (body as { mode?: string }).mode ?? "email"
 
   try {
-    await sendManualExport(requestedBy ?? user.email ?? "Admin")
-    return NextResponse.json({ ok: true })
+    if (mode === "download") {
+      const html = await buildManualExportHtml(requestedBy)
+      const stamp = new Date().toISOString().slice(0, 10)
+      return new NextResponse(html, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Disposition": `attachment; filename="youthstation-export-${stamp}.html"`,
+        },
+      })
+    }
+
+    await sendManualExport(requestedBy)
+    return NextResponse.json({
+      ok: true,
+      recipients: ["secretaire@youthstation.org", "president@youthstation.org", "feyza.simsek09@gmail.com"],
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error("[export-pdf] Email failed:", message)
+    console.error("[export-pdf] failed:", message)
     return NextResponse.json({ ok: false, error: message }, { status: 500 })
   }
 }
