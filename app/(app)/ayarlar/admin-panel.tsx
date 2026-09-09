@@ -53,7 +53,17 @@ export function AdminPanel({ adminEmail }: { adminEmail: string }) {
     setIgemReqs(ig.data ?? [])
     setTasks(t.data ?? [])
     setPosts(p.data ?? [])
-    setConvs((c.data ?? []) as Conv[])
+    const convRows = (c.data ?? []) as Conv[]
+    convRows.sort((a, b) => {
+      const lastA = (a.chat_messages ?? [])
+        .filter((m) => !m.is_system)
+        .reduce((max, m) => (m.created_at > max ? m.created_at : max), a.created_at || "")
+      const lastB = (b.chat_messages ?? [])
+        .filter((m) => !m.is_system)
+        .reduce((max, m) => (m.created_at > max ? m.created_at : max), b.created_at || "")
+      return lastB.localeCompare(lastA)
+    })
+    setConvs(convRows)
     setLoading(false)
   }
 
