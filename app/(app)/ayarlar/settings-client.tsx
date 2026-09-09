@@ -6,8 +6,9 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   User, Bell, Info, LogOut, Moon, Sun, Rocket, X, Camera,
   Pencil, Mail, Lock, Phone, Cake, ExternalLink, MapPin, Check,
-  ChevronDown, ZoomIn, Loader2, Briefcase,
+  ChevronDown, ZoomIn, Loader2, Briefcase, Shield,
 } from "lucide-react"
+import Link from "next/link"
 import Cropper from "react-easy-crop"
 import type { Area } from "react-easy-crop"
 import { useI18n } from "@/lib/i18n/context"
@@ -16,7 +17,6 @@ import { requestAndSubscribe, unsubscribePush } from "@/lib/push"
 import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
-import { AdminPanel } from "./admin-panel"
 import { isAdminEmail } from "@/lib/admin"
 
 type ProfileData = {
@@ -286,10 +286,6 @@ export function SettingsClient({
           </div>
         </Section>
 
-
-        {/* Admin panel — admins only */}
-        {isAdminEmail(initialEmail) && <AdminPanel adminEmail={initialEmail} />}
-
         {/* Logout */}
         <button
           onClick={logout}
@@ -300,8 +296,8 @@ export function SettingsClient({
           {t("settings.logout")}
         </button>
 
-        {/* Developer credit */}
-        <div className="mb-4 mt-5 flex flex-col items-center gap-1 text-center text-[11px] text-muted-foreground/55">
+        {/* Developer credit + discrete admin entry */}
+        <div className="mb-4 mt-5 flex flex-col items-center gap-2 text-center text-[11px] text-muted-foreground/55">
           <p>
             <span className="font-medium text-muted-foreground/75">Onur Arslan</span> tarafından geliştirilmiştir.
           </p>
@@ -311,6 +307,16 @@ export function SettingsClient({
               secretaire@youthstation.org
             </a>
           </p>
+          {isAdminEmail(initialEmail) && (
+            <Link
+              href="/yonetici"
+              aria-label="Yönetici"
+              title="Yönetici"
+              className="mt-1 flex size-6 items-center justify-center rounded-full opacity-35 transition-opacity hover:opacity-70 active:opacity-90"
+            >
+              <Shield className="size-3.5 text-amber-500" strokeWidth={2} />
+            </Link>
+          )}
         </div>
       </div>
 

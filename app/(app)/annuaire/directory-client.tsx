@@ -24,16 +24,35 @@ interface DirectoryClientProps {
   initialProfiles?: Record<string, unknown>[]
 }
 
+function profileDisplayName(name: string, email: string) {
+  const trimmed = name.trim()
+  if (trimmed) return trimmed
+  const local = email.split("@")[0]?.trim()
+  return local || "Üye"
+}
+
+function profileInitials(name: string, email: string, initials: string) {
+  const trimmed = initials.trim()
+  if (trimmed) return trimmed.slice(0, 2).toUpperCase()
+  const display = profileDisplayName(name, email)
+  if (display === "Üye") return "?"
+  return display.split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?"
+}
+
 function mapProfiles(profiles: Record<string, unknown>[]): Member[] {
-  return profiles.map((p) => ({
+  return profiles.map((p) => {
+    const email = (p.email as string) ?? ""
+    const rawName = (p.name as string) ?? ""
+    const name = profileDisplayName(rawName, email)
+    return {
     id: p.id as string,
-    name: (p.name as string) ?? "",
-    initials: (p.initials as string) ?? "",
+    name,
+    initials: profileInitials(rawName, email, (p.initials as string) ?? ""),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     role: ((p.role as string) ?? "") as any,
     station: ((p.station ?? "paris") as StationId),
     city: (p.station as string) ?? "paris",
-    email: (p.email as string) ?? "",
+    email,
     phone: (p.phone as string) ?? "",
     birthday: (p.birthday as string) ?? "",
     linkedin: (p.linkedin as string) ?? "",
@@ -41,7 +60,7 @@ function mapProfiles(profiles: Record<string, unknown>[]): Member[] {
     igemEgitimi: (p.igem_egitimi as "evet" | "hayır") ?? undefined,
     photoUrl: (p.photo_url as string) ?? undefined,
     online: false,
-  }))
+  }})
 }
 
 export function DirectoryClient({
@@ -104,13 +123,14 @@ export function DirectoryClient({
     const q = search.toLowerCase()
     return [...visibleMembers]
       .filter((m) => {
-        if (!m.name) return false
         const matchesSearch =
           !q ||
           m.name.toLowerCase().includes(q) ||
+          m.email.toLowerCase().includes(q) ||
           m.role.toLowerCase().includes(q) ||
           getStation(m.station).name.toLowerCase().includes(q) ||
-          (m.city ?? "").toLowerCase().includes(q)
+          (m.city ?? "").toLowerCase().includes(q) ||
+          (m.memleket ?? "").toLowerCase().includes(q)
         const matchesStation = stationFilter === "all" || m.station === stationFilter
         return matchesSearch && matchesStation
       })

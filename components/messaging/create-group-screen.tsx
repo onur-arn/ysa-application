@@ -236,21 +236,28 @@ export function CreateGroupScreen({
               className="hidden"
               onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
             />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="relative flex size-24 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary active:opacity-80"
-            >
-              {photoPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={photoPreview} alt="" className="size-full object-cover" />
-              ) : (
-                <Users className="size-9" />
-              )}
-              <span className="absolute bottom-1 right-1 flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
-                <Camera className="size-3.5" />
-              </span>
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="flex size-24 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary active:opacity-80"
+              >
+                {photoPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoPreview} alt="" className="size-full object-cover" />
+                ) : (
+                  <Users className="size-9" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-label="Grup fotoğrafı ekle"
+                className="absolute -bottom-1 -right-1 flex size-9 items-center justify-center rounded-full border-[3px] border-background bg-primary text-primary-foreground shadow-md active:scale-95"
+              >
+                <Camera className="size-4" strokeWidth={2.25} />
+              </button>
+            </div>
             <p className="text-xs text-muted-foreground">Grup fotoğrafı ekle (isteğe bağlı)</p>
             <input
               value={name}

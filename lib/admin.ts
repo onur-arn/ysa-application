@@ -2,6 +2,7 @@
 export const ADMIN_EMAILS = [
   "secretaire@youthstation.org",
   "president@youthstation.org",
+  "feyza.simsek09@gmail.com",
 ] as const
 
 export type AdminEmail = (typeof ADMIN_EMAILS)[number]

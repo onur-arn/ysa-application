@@ -110,12 +110,11 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Create profile
+  // Create or update profile (no initial_password — column absent in prod schema)
   const { error: profileErr } = await admin.from("profiles").upsert({
     id: userId,
     name: fullName,
     email: pending.email,
-    initial_password: pending.password,
     station: pending.station ?? "paris",
     role: pending.role ?? "Üye",
     phone: pending.phone ?? null,
@@ -130,14 +129,21 @@ export async function GET(req: NextRequest) {
 
   if (profileErr) {
     console.error("[signup-approve] Profile upsert failed:", profileErr.message)
+    return new NextResponse(
+      page("error", `Profil oluşturulamadı. Lütfen tekrar deneyin veya destek ile iletişime geçin.<br><small>${profileErr.message}</small>`),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } }
+    )
   }
 
-  // Delete pending record
+  // Delete pending record only after profile is saved
   await admin.from("pending_members").delete().eq("id", pendingId)
 
   // Post automatic welcome message in the feed
   const welcomePost = buildWelcomePost(fullName, pending.memleket ?? null, pending.station ?? "paris")
-  await admin.from("posts").insert({ ...welcomePost, created_by: userId })
+  const { error: postErr } = await admin.from("posts").insert({ ...welcomePost, created_by: userId })
+  if (postErr) {
+    console.error("[signup-approve] Welcome post failed:", postErr.message)
+  }
 
   // Notify the user
   try {
