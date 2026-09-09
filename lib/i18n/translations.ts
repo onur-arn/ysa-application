@@ -353,7 +353,7 @@ const tr: Dict = {
   "settings.igem": "iGEM",
   "settings.igemRequestBtn": "iGEM Talebi Gönder",
   "settings.igemSent": "Talebiniz gönderildi ve fil'de yayınlandı!",
-  "settings.igemDesc": "iGEM programına katılmak istediğinizi bildirin.",
+  "settings.igemDesc": "IGEM düzenlemek isterim",
   "settings.igemMotivation": "Açıklama",
   "settings.igemMotivationPlaceholder": "Açıklamanızı yazınız…",
   "directory.memleket": "Memleket",

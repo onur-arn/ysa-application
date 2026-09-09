@@ -442,17 +442,6 @@ function TaskCard({
             >
               {station.short}
             </span>
-            {task.dueDate && (
-              <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                overdue
-                  ? "bg-destructive/10 text-destructive"
-                  : "bg-secondary text-muted-foreground"
-              }`}>
-                <CalendarClock className="size-3" />
-                {formatDueDate(task.dueDate)}
-                {overdue ? " · Gecikti" : ""}
-              </span>
-            )}
             {/* assignedBy → assignee */}
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <MiniAvatar name={task.assignedBy} initials={task.assignedByInitials} photoMap={photoMap} colorClass="bg-primary/15 text-primary" />
@@ -462,6 +451,17 @@ function TaskCard({
               <span className="max-w-[72px] truncate">{task.assignee}</span>
             </span>
           </div>
+          {task.dueDate && (
+            <div className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+              overdue
+                ? "bg-destructive/10 text-destructive"
+                : "bg-secondary text-muted-foreground"
+            }`}>
+              <CalendarClock className="size-3" />
+              {formatDueDate(task.dueDate)}
+              {overdue ? " · Gecikti" : ""}
+            </div>
+          )}
         </div>
       </div>
 
