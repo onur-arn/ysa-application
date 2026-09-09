@@ -267,6 +267,51 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     })
   }
 
+  async function deleteConversation(id: string) {
+    const ok = window.confirm(
+      "Bu sohbeti her yerden silmek istediğinize emin misiniz? Mesajlar ve üyeler de silinir (arşive kaydedilir).",
+    )
+    if (!ok) return
+    setConvs((prev) => prev.filter((c) => c.id !== id))
+    setMsgCounts((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setLastPreviews((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setLastAts((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    if (selectedConvId === id) {
+      setSelectedConvId(null)
+      setMessages([])
+    }
+    const res = await fetch("/api/admin/delete-conversation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: id }),
+    })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({})) as { error?: string }
+      window.alert(json.error || "Sohbet silinemedi")
+      void load({ silent: true })
+      return
+    }
+    try {
+      const archRes = await fetch("/api/admin/archives")
+      if (archRes.ok) {
+        const json = await archRes.json()
+        setArchives(json.archives ?? [])
+      }
+    } catch { /* ignore */ }
+  }
+
   async function exportPdf() {
     setExporting(true)
     setExportError(null)
@@ -412,35 +457,43 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
                 const active = selectedConvId === conv.id
                 const members = convParticipants(conv)
                 return (
-                  <button
+                  <div
                     key={conv.id}
-                    onClick={() => setSelectedConvId(conv.id)}
-                    className={`flex w-full items-start gap-3 border-b border-border/40 px-3 py-3 text-left transition-colors ${
-                      active ? "bg-primary/10" : "active:bg-secondary"
+                    className={`flex w-full items-start gap-2 border-b border-border/40 px-2 py-2 transition-colors ${
+                      active ? "bg-primary/10" : ""
                     }`}
                   >
-                    <span className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl ${
-                      conv.type === "dm" ? "bg-sky-500/15 text-sky-600" : "bg-amber-500/15 text-amber-600"
-                    }`}>
-                      {conv.type === "dm" ? <UserRound className="size-4" /> : <UsersRound className="size-4" />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-semibold text-foreground">{convTitle(conv)}</p>
-                        <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-bold text-foreground">
-                          {msgCounts[conv.id] ?? 0}
-                        </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedConvId(conv.id)}
+                      className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-1 py-1 text-left active:bg-secondary"
+                    >
+                      <span className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl ${
+                        conv.type === "dm" ? "bg-sky-500/15 text-sky-600" : "bg-amber-500/15 text-amber-600"
+                      }`}>
+                        {conv.type === "dm" ? <UserRound className="size-4" /> : <UsersRound className="size-4" />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-foreground">{convTitle(conv)}</p>
+                          <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-bold text-foreground">
+                            {msgCounts[conv.id] ?? 0}
+                          </span>
+                        </div>
+                        <p className="truncate text-[11px] font-medium text-sky-700 dark:text-sky-400">
+                          {conv.type === "dm"
+                            ? `Kimler: ${members.join(" ↔ ") || "—"}`
+                            : `Üyeler: ${members.slice(0, 5).join(", ")}${members.length > 5 ? ` +${members.length - 5}` : ""}`}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground/80">
+                          {lastPreviews[conv.id] ?? "Henüz mesaj yok"}
+                        </p>
                       </div>
-                      <p className="truncate text-[11px] font-medium text-sky-700 dark:text-sky-400">
-                        {conv.type === "dm"
-                          ? `Kimler: ${members.join(" ↔ ") || "—"}`
-                          : `Üyeler: ${members.slice(0, 5).join(", ")}${members.length > 5 ? ` +${members.length - 5}` : ""}`}
-                      </p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground/80">
-                        {lastPreviews[conv.id] ?? "Henüz mesaj yok"}
-                      </p>
+                    </button>
+                    <div className="shrink-0 self-center pr-1">
+                      <DeleteButton onConfirm={() => deleteConversation(conv.id)} />
                     </div>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -469,6 +522,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
                       {" · "}{visibleMsgs.length} mesaj
                     </p>
                   </div>
+                  <DeleteButton onConfirm={() => deleteConversation(selectedConv.id)} />
                 </div>
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-5">
                   {msgsLoading ? (

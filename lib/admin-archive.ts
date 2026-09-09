@@ -7,6 +7,7 @@ export type ArchiveTable =
   | "igem_requests"
   | "stories"
   | "profiles"
+  | "conversations"
 
 const BUCKET = "admin-archive"
 
@@ -73,7 +74,7 @@ export async function listArchives(limit = 500): Promise<ArchiveEntry[]> {
     return []
   }
 
-  const tables: ArchiveTable[] = ["posts", "tasks", "events", "igem_requests", "stories", "profiles"]
+  const tables: ArchiveTable[] = ["posts", "tasks", "events", "igem_requests", "stories", "profiles", "conversations"]
   const entries: ArchiveEntry[] = []
 
   for (const table of tables) {
