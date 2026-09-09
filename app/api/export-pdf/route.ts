@@ -3,6 +3,8 @@ import { isAdminEmail } from "@/lib/admin"
 import { buildManualExportHtml, sendManualExport } from "@/lib/monthly-export"
 import { createClient } from "@/lib/supabase/server"
 
+export const maxDuration = 120
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

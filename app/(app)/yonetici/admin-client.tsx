@@ -388,7 +388,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
 
         {exportDone && (
           <p className="mb-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-600">
-            ✓ PDF özeti admin maillerine gönderildi (spam klasörünü de kontrol edin)
+            ✓ Tam rapor (tüm mesajlar) admin maillerine ek olarak gönderildi — spam klasörünü de kontrol edin
           </p>
         )}
         {exportError && (
