@@ -93,6 +93,45 @@ export function DirectoryClient({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [messageError, setMessageError] = useState<string | null>(null)
 
+  // Live sync: profile create / update / delete across devices
+  useEffect(() => {
+    const supabase = createClient()
+    const ch = supabase
+      .channel("directory-profiles")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "profiles" }, (payload) => {
+        const mapped = mapProfiles([payload.new as Record<string, unknown>])[0]
+        if (!mapped || isAdminEmail(mapped.email)) return
+        setAllMembers((prev) => (prev.some((m) => m.id === mapped.id) ? prev : [...prev, mapped]))
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
+        const mapped = mapProfiles([payload.new as Record<string, unknown>])[0]
+        if (!mapped) return
+        if (isAdminEmail(mapped.email)) {
+          setAllMembers((prev) => prev.filter((m) => m.id !== mapped.id))
+          return
+        }
+        setAllMembers((prev) => {
+          const idx = prev.findIndex((m) => m.id === mapped.id)
+          if (idx < 0) return [...prev, mapped]
+          const next = [...prev]
+          next[idx] = { ...mapped, online: prev[idx].online }
+          return next
+        })
+        setSelected((cur) => (cur?.id === mapped.id ? { ...mapped, online: cur.online } : cur))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "profiles" }, (payload) => {
+        const id = (payload.old as { id?: string }).id
+        if (!id) return
+        setAllMembers((prev) => prev.filter((m) => m.id !== id))
+        setSelected((cur) => (cur?.id === id ? null : cur))
+      })
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[directory-realtime] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[directory-realtime] timed out")
+      })
+    return () => { supabase.removeChannel(ch) }
+  }, [])
+
   // Deep-link: /annuaire?user=<id>
   useEffect(() => {
     const userId = searchParams.get("user")

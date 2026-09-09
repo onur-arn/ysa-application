@@ -121,6 +121,7 @@ export function AgendaClient({
             station: ((e.station as StationId) ?? x.station),
             description: (e.description as string) ?? undefined,
             link: (e.link as string) ?? undefined,
+            endDate: (e.end_date as string) ?? undefined,
           } : x
         ))
       })

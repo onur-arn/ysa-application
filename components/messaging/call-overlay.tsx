@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Phone, PhoneOff } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from "lucide-react"
 import type { CallType } from "@/lib/call/call-context"
 import { formatCallDuration } from "@/lib/call/call-event"
 
@@ -42,10 +42,8 @@ function useOutgoingRingtone(playing: boolean) {
     function playCycle() {
       if (cancelled) return
       const t0 = ctx.currentTime
-      // bip
       tone(880, t0, 0.14)
       tone(700, t0, 0.14)
-      // bip
       tone(880, t0 + 0.22, 0.14)
       tone(700, t0 + 0.22, 0.14)
       loopTimer = setTimeout(playCycle, 1400)
@@ -63,11 +61,47 @@ function useOutgoingRingtone(playing: boolean) {
   }, [playing])
 }
 
+async function applySpeakerOutput(el: HTMLAudioElement, speakerOn: boolean) {
+  // setSinkId: Chrome/Android — pick loudspeaker vs default (often earpiece on mobile)
+  const mediaEl = el as HTMLAudioElement & {
+    setSinkId?: (id: string) => Promise<void>
+  }
+  if (typeof mediaEl.setSinkId !== "function") return
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const outputs = devices.filter((d) => d.kind === "audiooutput")
+    if (outputs.length === 0) return
+
+    if (speakerOn) {
+      // Prefer a non-earpiece / communications device when labeled
+      const speaker =
+        outputs.find((d) => /speaker|haut|loud|speakerphone/i.test(d.label)) ??
+        outputs.find((d) => d.deviceId === "default") ??
+        outputs[0]
+      await mediaEl.setSinkId(speaker.deviceId)
+    } else {
+      const ear =
+        outputs.find((d) => /earpiece|receiver|phone|écouteur|communication/i.test(d.label)) ??
+        outputs.find((d) => d.deviceId === "default") ??
+        outputs[0]
+      await mediaEl.setSinkId(ear.deviceId)
+    }
+  } catch (err) {
+    console.warn("[call] setSinkId failed", err)
+  }
+}
+
 export function CallOverlay({
   userName,
   incoming,
   active,
+  remoteStream,
   error,
+  muted = false,
+  speakerOn = true,
+  onToggleMute,
+  onToggleSpeaker,
   onAnswer,
   onDecline,
   onEnd,
@@ -79,6 +113,10 @@ export function CallOverlay({
   localStream: MediaStream | null
   remoteStream: MediaStream | null
   error?: string | null
+  muted?: boolean
+  speakerOn?: boolean
+  onToggleMute?: () => void
+  onToggleSpeaker?: () => void
   onAnswer: () => void
   onDecline: () => void
   onEnd: () => void
@@ -86,12 +124,40 @@ export function CallOverlay({
 }) {
   const session = incoming ?? active
   const [elapsed, setElapsed] = useState(0)
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const isIncoming = !!incoming
   const isConnected = !isIncoming && (session?.status === "active")
   const isOutgoingRinging = !!session && !isIncoming && !isConnected && !error
 
   useOutgoingRingtone(isOutgoingRinging)
+
+  // Attach remote WebRTC audio — without this, neither side hears the other
+  useEffect(() => {
+    const el = remoteAudioRef.current
+    if (!el) return
+    if (!remoteStream) {
+      el.srcObject = null
+      return
+    }
+    el.srcObject = remoteStream
+    el.muted = false
+    el.volume = 1
+    const play = () => {
+      void el.play().catch((err) => console.warn("[call] remote audio play", err))
+    }
+    play()
+    // Some browsers need a second attempt after tracks settle
+    const t = setTimeout(play, 250)
+    return () => clearTimeout(t)
+  }, [remoteStream])
+
+  // Speakerphone routing
+  useEffect(() => {
+    const el = remoteAudioRef.current
+    if (!el) return
+    void applySpeakerOutput(el, speakerOn)
+  }, [speakerOn, remoteStream])
 
   useEffect(() => {
     if (!isConnected) {
@@ -138,6 +204,14 @@ export function CallOverlay({
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-white">
+      {/* Hidden but required — plays peer's microphone */}
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        className="pointer-events-none absolute h-px w-px opacity-0"
+      />
+
       <div className="relative z-20 flex flex-1 flex-col items-center justify-center gap-3 px-6">
         <div
           className={`flex size-24 items-center justify-center rounded-full bg-white/10 text-3xl font-bold ${
@@ -151,11 +225,14 @@ export function CallOverlay({
           <p className="text-xs text-white/50">Grup araması</p>
         )}
         <p className={`text-sm ${error ? "text-red-300" : "text-white/70"}`}>{statusText}</p>
+        {isConnected && muted && (
+          <p className="text-xs text-amber-300">Mikrofon kapalı</p>
+        )}
       </div>
 
-      <div className="relative z-20 flex items-center justify-center gap-8 pb-12 pt-6">
+      <div className="relative z-20 flex flex-col items-center gap-8 pb-12 pt-6">
         {isIncoming ? (
-          <>
+          <div className="flex items-center justify-center gap-8">
             <button
               type="button"
               onClick={onDecline}
@@ -172,16 +249,47 @@ export function CallOverlay({
             >
               <Phone className="size-7" />
             </button>
-          </>
+          </div>
         ) : (
-          <button
-            type="button"
-            onClick={onEnd}
-            className="flex size-16 items-center justify-center rounded-full bg-red-500 shadow-lg"
-            aria-label="Kapat"
-          >
-            <PhoneOff className="size-7" />
-          </button>
+          <>
+            {(isConnected || isOutgoingRinging) && (
+              <div className="flex items-center justify-center gap-6">
+                <button
+                  type="button"
+                  onClick={onToggleMute}
+                  className={`flex size-14 flex-col items-center justify-center rounded-full ${
+                    muted ? "bg-white text-zinc-900" : "bg-white/15 text-white"
+                  }`}
+                  aria-label={muted ? "Mikrofonu aç" : "Mikrofonu kapat"}
+                >
+                  {muted ? <MicOff className="size-6" /> : <Mic className="size-6" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleSpeaker}
+                  className={`flex size-14 flex-col items-center justify-center rounded-full ${
+                    speakerOn ? "bg-white text-zinc-900" : "bg-white/15 text-white"
+                  }`}
+                  aria-label={speakerOn ? "Hoparlörü kapat" : "Hoparlörü aç"}
+                >
+                  {speakerOn ? <Volume2 className="size-6" /> : <VolumeX className="size-6" />}
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={onEnd}
+              className="flex size-16 items-center justify-center rounded-full bg-red-500 shadow-lg"
+              aria-label="Kapat"
+            >
+              <PhoneOff className="size-7" />
+            </button>
+            {(isConnected || isOutgoingRinging) && (
+              <p className="text-[11px] text-white/45">
+                {speakerOn ? "Hoparlör açık" : "Kulaklık / ahize"}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>

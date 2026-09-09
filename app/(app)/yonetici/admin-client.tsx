@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import Link from "next/link"
 import {
   Shield, ArrowLeft, Loader2, Users, CalendarDays, Rocket, ListTodo,
@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client"
 import { getStation } from "@/lib/data/stations"
 import { isAdminEmail } from "@/lib/admin"
 import { useNavVisibility } from "@/lib/nav-visibility"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 
 type Member = { id: string; name: string; email: string; station: string; role: string; photo_url?: string | null }
 type Event  = { id: string; title: string; date: string; station: string; place: string }
@@ -74,69 +75,79 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     return () => setHideNav(false)
   }, [setHideNav])
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const supabase = createClient()
-      const [m, e, ig, t, p, c, s] = await Promise.all([
-        supabase.from("profiles").select("id,name,email,station,role,photo_url").order("name"),
-        supabase.from("events").select("id,title,date,station,place").order("date", { ascending: false }),
-        supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at").order("created_at", { ascending: false }),
-        supabase.from("tasks").select("id,title,station,assignee,status").order("created_at", { ascending: false }),
-        supabase.from("posts").select("id,author,content,station,created_at").order("created_at", { ascending: false }),
-        supabase.from("conversations").select("id,type,name,created_at,conversation_members(member_name)").order("created_at", { ascending: false }),
-        supabase.from("stories").select("id,author_name,station,created_at").order("created_at", { ascending: false }),
-      ])
-      setMembers((m.data ?? []).filter((x) => !isAdminEmail(x.email)))
-      setEvents(e.data ?? [])
-      setIgemReqs(ig.data ?? [])
-      setTasks(t.data ?? [])
-      setPosts(p.data ?? [])
-      setStories((s.data ?? []) as Array<{ id: string; author_name: string; station: string; created_at: string }>)
-      const conversationRows = (c.data ?? []) as ConvRow[]
-      setConvs(conversationRows)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
+    const supabase = createClient()
+    const [m, e, ig, t, p, s, convRes] = await Promise.all([
+      supabase.from("profiles").select("id,name,email,station,role,photo_url").order("name"),
+      supabase.from("events").select("id,title,date,station,place").order("date", { ascending: false }),
+      supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at").order("created_at", { ascending: false }),
+      supabase.from("tasks").select("id,title,station,assignee,status").order("created_at", { ascending: false }),
+      supabase.from("posts").select("id,author,content,station,created_at").order("created_at", { ascending: false }),
+      supabase.from("stories").select("id,author_name,station,created_at").order("created_at", { ascending: false }),
+      fetch("/api/admin/conversations").then((r) => r.ok ? r.json() : null).catch(() => null),
+    ])
+    setMembers((m.data ?? []).filter((x) => !isAdminEmail(x.email)))
+    setEvents(e.data ?? [])
+    setIgemReqs(ig.data ?? [])
+    setTasks(t.data ?? [])
+    setPosts(p.data ?? [])
+    setStories((s.data ?? []) as Array<{ id: string; author_name: string; station: string; created_at: string }>)
 
-      try {
-        const archRes = await fetch("/api/admin/archives")
-        if (archRes.ok) {
-          const json = await archRes.json()
-          setArchives(json.archives ?? [])
-        }
-      } catch {}
-
-      if (conversationRows.length > 0) {
-        const ids = conversationRows.map((x) => x.id)
-        const { data: recent } = await supabase
-          .from("chat_messages")
-          .select("conversation_id,text,image_url,gif_url,audio_url,created_at")
-          .in("conversation_id", ids)
-          .eq("is_system", false)
-          .order("created_at", { ascending: false })
-
-        const counts: Record<string, number> = {}
-        const previews: Record<string, string> = {}
-        for (const row of recent ?? []) {
-          const cid = row.conversation_id as string
-          counts[cid] = (counts[cid] ?? 0) + 1
-          if (!previews[cid]) {
-            if (row.text) previews[cid] = row.text
-            else if (row.image_url) previews[cid] = "📷 Fotoğraf"
-            else if (row.gif_url) previews[cid] = "GIF"
-            else if (row.audio_url) previews[cid] = "🎤 Sesli mesaj"
-            else previews[cid] = "Mesaj"
-          }
-        }
-        setMsgCounts(counts)
-        setLastPreviews(previews)
-
-        if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
-          setSelectedConvId((prev) => prev ?? conversationRows[0]?.id ?? null)
-        }
+    if (convRes?.conversations) {
+      setConvs(convRes.conversations as ConvRow[])
+      setMsgCounts((convRes.msgCounts as Record<string, number>) ?? {})
+      setLastPreviews((convRes.lastPreviews as Record<string, string>) ?? {})
+      const conversationRows = convRes.conversations as ConvRow[]
+      if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+        setSelectedConvId((prev) => prev ?? conversationRows[0]?.id ?? null)
       }
-      setLoading(false)
+    } else {
+      // Fallback if API fails
+      const { data: c } = await supabase
+        .from("conversations")
+        .select("id,type,name,created_at,conversation_members(member_name)")
+        .order("created_at", { ascending: false })
+      setConvs((c ?? []) as ConvRow[])
     }
-    load()
+
+    try {
+      const archRes = await fetch("/api/admin/archives")
+      if (archRes.ok) {
+        const json = await archRes.json()
+        setArchives(json.archives ?? [])
+      }
+    } catch {}
+
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  // Keep admin lists in sync with other devices / user activity
+  useEffect(() => {
+    const supabase = createClient()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const schedule = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { void load({ silent: true }) }, 400)
+    }
+    const tables = [
+      "profiles", "events", "tasks", "posts", "stories",
+      "igem_requests", "conversations", "conversation_members", "chat_messages",
+    ] as const
+    let ch = supabase.channel("admin-realtime")
+    for (const table of tables) {
+      ch = ch.on("postgres_changes", { event: "*", schema: "public", table }, schedule)
+    }
+    void subscribeChannel(supabase, ch)
+    return () => {
+      if (timer) clearTimeout(timer)
+      supabase.removeChannel(ch)
+    }
+  }, [load])
 
   useEffect(() => {
     if (!selectedConvId) {
@@ -146,16 +157,22 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     let cancelled = false
     async function loadMessages() {
       setMsgsLoading(true)
-      const supabase = createClient()
-      const { data } = await supabase
-        .from("chat_messages")
-        .select("id,conversation_id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at")
-        .eq("conversation_id", selectedConvId)
-        .order("created_at", { ascending: true })
-        .limit(5000)
-      if (!cancelled) {
-        setMessages((data ?? []) as ChatMsg[])
-        setMsgsLoading(false)
+      try {
+        const res = await fetch("/api/admin/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId: selectedConvId }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!cancelled) {
+          setMessages((json.messages ?? []) as ChatMsg[])
+          setMsgsLoading(false)
+        }
+      } catch {
+        if (!cancelled) {
+          setMessages([])
+          setMsgsLoading(false)
+        }
       }
     }
     loadMessages()
@@ -333,7 +350,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
               )}
               {filteredConvs.map((conv) => {
                 const active = selectedConvId === conv.id
-                const members = conv.conversation_members.map((m) => m.member_name)
+                const members = convParticipants(conv)
                 return (
                   <button
                     key={conv.id}
@@ -354,8 +371,10 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
                           {msgCounts[conv.id] ?? 0}
                         </span>
                       </div>
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {members.slice(0, 4).join(", ")}{members.length > 4 ? ` +${members.length - 4}` : ""}
+                      <p className="truncate text-[11px] font-medium text-sky-700 dark:text-sky-400">
+                        {conv.type === "dm"
+                          ? `Kimler: ${members.join(" ↔ ") || "—"}`
+                          : `Üyeler: ${members.slice(0, 5).join(", ")}${members.length > 5 ? ` +${members.length - 5}` : ""}`}
                       </p>
                       <p className="mt-0.5 truncate text-xs text-muted-foreground/80">
                         {lastPreviews[conv.id] ?? "Henüz mesaj yok"}
@@ -383,10 +402,11 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
                   </button>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold text-foreground">{convTitle(selectedConv)}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {selectedConv.type === "dm" ? "Özel mesaj" : "Grup"} ·{" "}
-                      {selectedConv.conversation_members.map((m) => m.member_name).join(", ")} ·{" "}
-                      {visibleMsgs.length} mesaj
+                    <p className="truncate text-xs font-medium text-sky-700 dark:text-sky-400">
+                      {selectedConv.type === "dm"
+                        ? `Kimler: ${convParticipants(selectedConv).join(" ↔ ") || "—"}`
+                        : `Üyeler: ${convParticipants(selectedConv).join(", ") || "—"}`}
+                      {" · "}{visibleMsgs.length} mesaj
                     </p>
                   </div>
                 </div>
@@ -596,12 +616,23 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
   )
 }
 
+function convParticipants(conv: ConvRow): string[] {
+  const names = (conv.conversation_members ?? [])
+    .map((m) => m.member_name?.trim())
+    .filter((n): n is string => !!n)
+  return [...new Set(names)]
+}
+
 function convTitle(conv: ConvRow) {
+  const members = convParticipants(conv)
   if (conv.type === "dm") {
-    const members = conv.conversation_members.map((m) => m.member_name)
-    return `DM · ${members.join(" & ") || "Özel"}`
+    if (members.length >= 2) return `${members[0]} ↔ ${members[1]}`
+    if (members.length === 1) return `DM · ${members[0]}`
+    return "DM · Özel"
   }
-  return conv.name?.trim() || "Grup"
+  const groupName = conv.name?.trim() || "Grup"
+  if (members.length === 0) return groupName
+  return `${groupName} (${members.length} üye)`
 }
 
 function MessageBubble({ msg }: { msg: ChatMsg }) {

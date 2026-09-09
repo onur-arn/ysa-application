@@ -113,7 +113,7 @@ export function BottomNav({ hasUnread = false }: { hasUnread?: boolean }) {
                   />
                   {/* Unread dot — only on messages tab */}
                   {item.href === "/messages" && hasUnread && (
-                    <span className="absolute -right-1 -top-1 size-2 rounded-full bg-rose-500" />
+                    <span className="absolute -right-1.5 -top-1 size-2.5 rounded-full bg-red-500 ring-2 ring-card" />
                   )}
                 </div>
                 <span className={cn(

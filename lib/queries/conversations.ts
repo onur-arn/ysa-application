@@ -150,31 +150,43 @@ export async function syncConversationMembership(
   }
 }
 
-/** Insert members — prefer schema without user_id (prod may not have the column yet). */
+/** Insert members — prefer schema without user_id (prod may not have the column yet).
+ *  Inserts self-row first when possible so RLS membership checks succeed for the rest. */
 export async function insertConversationMembers(
   supabase: SupabaseClient,
   rows: { conversation_id: string; member_name: string; user_id?: string | null; is_admin?: boolean }[],
 ): Promise<boolean> {
   if (rows.length === 0) return true
 
-  const legacy = rows.map((r) => ({
-    conversation_id: r.conversation_id,
-    member_name: r.member_name,
-    is_admin: r.is_admin ?? false,
-  }))
+  const { data: { user } } = await supabase.auth.getUser()
+  const myId = user?.id
+  const ordered = [...rows].sort((a, b) => {
+    const aMine = myId && a.user_id === myId ? 0 : 1
+    const bMine = myId && b.user_id === myId ? 0 : 1
+    return aMine - bMine
+  })
 
-  const legacyRes = await supabase.from("conversation_members").insert(legacy)
-  if (!legacyRes.error) return true
-
-  const withUid = rows.map((r) => ({
-    conversation_id: r.conversation_id,
-    member_name: r.member_name,
-    is_admin: r.is_admin ?? false,
-    user_id: r.user_id ?? null,
-  }))
-  const uidRes = await supabase.from("conversation_members").insert(withUid)
-  if (!uidRes.error) return true
-
-  console.error("[insertConversationMembers]", legacyRes.error.message, uidRes.error?.message)
-  return false
+  for (const r of ordered) {
+    const legacy = {
+      conversation_id: r.conversation_id,
+      member_name: r.member_name,
+      is_admin: r.is_admin ?? false,
+    }
+    let { error } = await supabase.from("conversation_members").insert(legacy)
+    if (error) {
+      const withUid = {
+        ...legacy,
+        user_id: r.user_id ?? null,
+      }
+      const retry = await supabase.from("conversation_members").insert(withUid)
+      if (retry.error) {
+        // Ignore duplicate (already member)
+        if (!/duplicate|unique/i.test(retry.error.message) && !/duplicate|unique/i.test(error.message)) {
+          console.error("[insertConversationMembers]", error.message, retry.error?.message)
+          return false
+        }
+      }
+    }
+  }
+  return true
 }

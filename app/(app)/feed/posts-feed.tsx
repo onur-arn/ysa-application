@@ -792,6 +792,13 @@ export function PostsFeed({
           }
         }))
       })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "post_comments" }, (payload) => {
+        const c = payload.old as { id: string; post_id: string }
+        setPosts((prev) => prev.map((p) => {
+          if (p.id !== c.post_id) return p
+          return { ...p, comments: p.comments.filter((x) => x.id !== c.id) }
+        }))
+      })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "polls" }, (payload) => {
         const poll = payload.new as { id: string; post_id: string; question: string }
         // Wait for poll_options to be inserted, then patch the post
@@ -868,6 +875,31 @@ export function PostsFeed({
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "igem_requests" }, (payload) => {
         const old = payload.old as { id: string }
         setIgemRequests((prev) => prev.filter((r) => r.id !== old.id))
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "igem_comments" }, (payload) => {
+        const c = payload.new as { id: string; igem_id: string; author: string; initials: string; station: string; text: string; created_at: string }
+        setIgemRequests((prev) => prev.map((r) => {
+          if (r.id !== c.igem_id) return r
+          if (r.comments.some((x) => x.id === c.id)) return r
+          return {
+            ...r,
+            comments: [...r.comments, {
+              id: c.id,
+              author: c.author ?? "",
+              initials: c.initials ?? "?",
+              station: c.station ?? "intl",
+              text: c.text ?? "",
+              time: timeAgo(c.created_at),
+            }],
+          }
+        }))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "igem_comments" }, (payload) => {
+        const c = payload.old as { id: string; igem_id: string }
+        setIgemRequests((prev) => prev.map((r) => {
+          if (r.id !== c.igem_id) return r
+          return { ...r, comments: r.comments.filter((x) => x.id !== c.id) }
+        }))
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, (payload) => {
         const p = payload.new as { id: string; name: string; photo_url: string | null }

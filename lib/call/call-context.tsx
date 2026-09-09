@@ -35,6 +35,10 @@ type CallContextValue = {
   localStream: MediaStream | null
   remoteStream: MediaStream | null
   callError: string | null
+  muted: boolean
+  speakerOn: boolean
+  toggleMute: () => void
+  toggleSpeaker: () => Promise<void>
   answerCall: () => Promise<void>
   declineCall: () => Promise<void>
   endCall: () => Promise<void>
@@ -54,7 +58,18 @@ export function useCall() {
 }
 
 async function acquireMedia(): Promise<MediaStream> {
-  return await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: false,
+  })
+  for (const track of stream.getAudioTracks()) {
+    track.enabled = true
+  }
+  return stream
 }
 
 export function CallProvider({ userName, children }: { userName: string; children: ReactNode }) {
@@ -63,6 +78,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [callError, setCallError] = useState<string | null>(null)
+  const [muted, setMuted] = useState(false)
+  const [speakerOn, setSpeakerOn] = useState(true)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const sessionRef = useRef<CallSession | null>(null)
@@ -75,6 +92,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
   const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectedAtRef = useRef<number | null>(null)
   const postedEventRef = useRef(false)
+  /** ICE that arrived before remote description / PC was ready */
+  const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
 
   useEffect(() => { activeRef.current = active }, [active])
   useEffect(() => { incomingRef.current = incoming }, [incoming])
@@ -122,10 +141,65 @@ export function CallProvider({ userName, children }: { userName: string; childre
     isCallerRef.current = false
     connectedAtRef.current = null
     postedEventRef.current = false
+    pendingIceRef.current.clear()
+    setMuted(false)
+    setSpeakerOn(true)
     setActive(null)
     setIncoming(null)
     setCallError(null)
   }, [clearRingTimer, resetPc])
+
+  const queueOrAddIce = useCallback(async (sessionId: string, candidate: RTCIceCandidateInit) => {
+    const pc = pcRef.current
+    const session = sessionRef.current ?? activeRef.current ?? incomingRef.current
+    if (pc && pc.remoteDescription && session && session.id === sessionId) {
+      try {
+        await pc.addIceCandidate(candidate)
+      } catch { /* ignore stale */ }
+      return
+    }
+    const q = pendingIceRef.current.get(sessionId) ?? []
+    q.push(candidate)
+    pendingIceRef.current.set(sessionId, q)
+  }, [])
+
+  const flushPendingIce = useCallback(async (sessionId: string, pc: RTCPeerConnection) => {
+    const q = pendingIceRef.current.get(sessionId) ?? []
+    pendingIceRef.current.delete(sessionId)
+    for (const candidate of q) {
+      try {
+        await pc.addIceCandidate(candidate)
+      } catch { /* ignore */ }
+    }
+  }, [])
+
+  const loadStoredIce = useCallback(async (sessionId: string, pc: RTCPeerConnection) => {
+    const supabase = createClient()
+    const { data } = await supabase
+      .from("call_signals")
+      .select("payload")
+      .eq("session_id", sessionId)
+      .eq("signal_type", "ice")
+      .order("created_at", { ascending: true })
+    for (const row of data ?? []) {
+      try {
+        await pc.addIceCandidate(row.payload as RTCIceCandidateInit)
+      } catch { /* ignore */ }
+    }
+    await flushPendingIce(sessionId, pc)
+  }, [flushPendingIce])
+
+  const toggleMute = useCallback(() => {
+    const next = !muted
+    setMuted(next)
+    localStreamRef.current?.getAudioTracks().forEach((t) => {
+      t.enabled = !next
+    })
+  }, [muted])
+
+  const toggleSpeaker = useCallback(async () => {
+    setSpeakerOn((prev) => !prev)
+  }, [])
 
   const postCallEvent = useCallback(async (
     session: CallSession,
@@ -165,9 +239,13 @@ export function CallProvider({ userName, children }: { userName: string; childre
     resetPc()
 
     const iceServers = await loadIceServers()
-    const pc = new RTCPeerConnection({ iceServers })
+    const pc = new RTCPeerConnection({
+      iceServers,
+      iceCandidatePoolSize: 4,
+    })
     pc.ontrack = (e) => {
-      setRemoteStream(e.streams[0] ?? null)
+      const streamFromEvent = e.streams[0] ?? new MediaStream([e.track])
+      setRemoteStream(streamFromEvent)
     }
     pc.onicecandidate = (e) => {
       if (!e.candidate) {
@@ -182,10 +260,20 @@ export function CallProvider({ userName, children }: { userName: string; childre
         }, 150)
       }
     }
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed") {
+        console.warn("[call] connection failed")
+        setCallError("Bağlantı koptu. Tekrar deneyin.")
+      }
+    }
 
-    const audioTrack = stream.getAudioTracks()[0]
-    if (audioTrack) {
-      pc.addTransceiver(audioTrack, { direction: "sendrecv", streams: [stream] })
+    // Prefer addTrack — more reliable send path than addTransceiver(track)
+    const audioTracks = stream.getAudioTracks()
+    if (audioTracks.length > 0) {
+      for (const track of audioTracks) {
+        track.enabled = true
+        pc.addTrack(track, stream)
+      }
     } else {
       pc.addTransceiver("audio", { direction: "recvonly" })
     }
@@ -385,6 +473,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
       const remote = offerSig?.payload as RTCSessionDescriptionInit | undefined
       if (remote?.type === "offer" && remote.sdp) {
         await pc.setRemoteDescription({ type: "offer", sdp: remote.sdp })
+        // Apply ICE that arrived while we were ringing / from DB
+        await loadStoredIce(session.id, pc)
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
         await supabase.from("call_signals").insert({
@@ -396,6 +486,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
             sdp: answer.sdp,
           },
         })
+        flushIce(session.id)
       } else {
         throw new Error("Teklif bulunamadı")
       }
@@ -525,6 +616,12 @@ export function CallProvider({ userName, children }: { userName: string; childre
           return
         }
 
+        // Buffer ICE for ringing incoming call (PC not ready yet)
+        if (sig.signal_type === "ice" && incoming && incoming.id === sig.session_id) {
+          await queueOrAddIce(sig.session_id, sig.payload as RTCIceCandidateInit)
+          return
+        }
+
         const session = sessionRef.current ?? activeRef.current
         if (!session || session.id !== sig.session_id) return
         const pc = pcRef.current
@@ -539,14 +636,13 @@ export function CallProvider({ userName, children }: { userName: string; childre
             const remote = sig.payload as RTCSessionDescriptionInit
             if (pc && remote?.type === "answer" && remote.sdp && pc.signalingState === "have-local-offer") {
               await pc.setRemoteDescription({ type: "answer", sdp: remote.sdp })
+              await loadStoredIce(session.id, pc)
             }
           } catch (err) {
             console.error("[call] setRemoteDescription failed:", err)
           }
         } else if (sig.signal_type === "ice") {
-          try {
-            if (pc) await pc.addIceCandidate(sig.payload as RTCIceCandidateInit)
-          } catch { /* ignore */ }
+          await queueOrAddIce(sig.session_id, sig.payload as RTCIceCandidateInit)
         } else if (sig.signal_type === "hangup" || sig.signal_type === "decline") {
           cleanup()
         }
@@ -559,10 +655,14 @@ export function CallProvider({ userName, children }: { userName: string; childre
       supabase.removeChannel(sessionsChannel)
       supabase.removeChannel(signalsChannel)
     }
-  }, [userName, cleanup, clearRingTimer])
+  }, [userName, cleanup, clearRingTimer, queueOrAddIce, loadStoredIce])
 
   return (
-    <CallContext.Provider value={{ startCall, incoming, active, localStream, remoteStream, callError, answerCall, declineCall, endCall }}>
+    <CallContext.Provider value={{
+      startCall, incoming, active, localStream, remoteStream, callError,
+      muted, speakerOn, toggleMute, toggleSpeaker,
+      answerCall, declineCall, endCall,
+    }}>
       {children}
       <CallOverlay
         userName={userName}
@@ -571,6 +671,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
         localStream={localStream}
         remoteStream={remoteStream}
         error={callError}
+        muted={muted}
+        speakerOn={speakerOn}
+        onToggleMute={toggleMute}
+        onToggleSpeaker={() => { void toggleSpeaker() }}
         onAnswer={answerCall}
         onDecline={declineCall}
         onEnd={endCall}

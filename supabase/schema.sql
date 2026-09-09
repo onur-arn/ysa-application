@@ -356,6 +356,10 @@ create table if not exists chat_messages (
 alter table chat_messages enable row level security;
 drop policy if exists "Authenticated can read chat messages"   on chat_messages;
 drop policy if exists "Authenticated can insert chat messages" on chat_messages;
+drop policy if exists "Members read own chat messages" on chat_messages;
+drop policy if exists "Members insert own chat messages" on chat_messages;
+-- Privacy: see supabase/fix-chat-privacy-rls.sql (is_conversation_member / is_platform_admin).
+-- Until that SQL is applied in production, temporary open access:
 create policy "Authenticated can read chat messages"   on chat_messages for select to authenticated using (true);
 create policy "Authenticated can insert chat messages" on chat_messages for insert to authenticated with check (true);
 create index if not exists chat_messages_conv_created_idx on chat_messages (conversation_id, created_at desc);

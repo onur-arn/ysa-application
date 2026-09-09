@@ -110,7 +110,20 @@ export function TasksClient({
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, (payload) => {
         const t = payload.new as Record<string, unknown>
-        setTasks((prev) => prev.map((x) => x.id === (t.id as string) ? { ...x, status: (t.status as TaskStatus) ?? x.status } : x))
+        setTasks((prev) => prev.map((x) => x.id === (t.id as string) ? {
+          ...x,
+          title: (t.title as string) ?? x.title,
+          description: (t.description as string) ?? x.description,
+          status: (t.status as TaskStatus) ?? x.status,
+          priority: (t.priority as TaskPriority) ?? x.priority,
+          station: (t.station as StationId) ?? x.station,
+          assignee: (t.assignee as string) ?? x.assignee,
+          assigneeInitials: (t.assignee_initials as string) ?? x.assigneeInitials,
+          assignedBy: (t.assigned_by as string) ?? x.assignedBy,
+          assignedByInitials: (t.assigned_by_initials as string) ?? x.assignedByInitials,
+          assignedByStation: (t.assigned_by_station as StationId) ?? x.assignedByStation,
+          dueDate: (t.due_date as string) || undefined,
+        } : x))
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, (payload) => {
         setTasks((prev) => prev.filter((x) => x.id !== (payload.old as Record<string, unknown>).id))

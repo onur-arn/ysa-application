@@ -12,6 +12,9 @@ import { CallProvider } from "@/lib/call/call-context"
 import { QueryProvider } from "@/components/providers/query-provider"
 import { registerSW } from "@/lib/push"
 import { subscribeChannel } from "@/lib/supabase/realtime"
+import { getNavUnread, setNavUnread, NAV_UNREAD_EVENT, isSameSender } from "@/lib/nav-unread"
+import { readNotifPrefs, showAppNotification } from "@/lib/notif-prefs"
+import { NotificationListeners } from "@/components/notification-listeners"
 
 const PAGE_TITLES: { path: string; label: string }[] = [
   { path: "/feed",      label: "Ana Sayfa" },
@@ -81,11 +84,31 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const [avatar, setAvatar] = useState<{ photoUrl?: string | null; initials: string; color: string } | null>(null)
   const [userName, setUserName] = useState("")
+  const [userStation, setUserStation] = useState("")
   const [hasUnread, setHasUnread] = useState(false)
 
   useMidnightLogout()
 
   useEffect(() => { registerSW() }, [])
+
+  // Restore nav badge immediately (survives remount / hard refresh)
+  useEffect(() => {
+    setHasUnread(getNavUnread())
+    const onUnread = (e: Event) => {
+      const detail = (e as CustomEvent<{ hasUnread?: boolean }>).detail
+      if (typeof detail?.hasUnread === "boolean") setHasUnread(detail.hasUnread)
+      else setHasUnread(getNavUnread())
+    }
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "ys-nav-unread" || e.key === "ys-last-read") setHasUnread(getNavUnread())
+    }
+    window.addEventListener(NAV_UNREAD_EVENT, onUnread)
+    window.addEventListener("storage", onStorage)
+    return () => {
+      window.removeEventListener(NAV_UNREAD_EVENT, onUnread)
+      window.removeEventListener("storage", onStorage)
+    }
+  }, [])
 
   useEffect(() => {
     const supabase = createClient()
@@ -110,6 +133,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       setAvatar({ photoUrl: p.photo_url, initials: p.initials || "?", color: colors[p.station] || "262 83% 58%" })
       setUserName(p.name ?? "")
+      setUserStation(p.station ?? "")
     }
 
     loadAvatar()
@@ -121,29 +145,69 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (p.id !== userId) return
         setAvatar({ photoUrl: p.photo_url, initials: p.initials || "?", color: colors[p.station] || "262 83% 58%" })
         setUserName(p.name ?? "")
+        setUserStation(p.station ?? "")
       })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Unread badge + desktop notification when away from messages
+  // Unread badge + desktop notification — ONLY for conversations I'm in
   useEffect(() => {
     if (!userName) return
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
       void Notification.requestPermission()
     }
     const supabase = createClient()
+    const myConvIds = new Set<string>()
+    let userId = ""
+
+    async function refreshMyConversations() {
+      const { data: { user } } = await supabase.auth.getUser()
+      userId = user?.id ?? ""
+      const queries = []
+      if (userId) {
+        queries.push(
+          supabase.from("conversation_members").select("conversation_id").eq("user_id", userId),
+        )
+      }
+      if (userName) {
+        queries.push(
+          supabase.from("conversation_members").select("conversation_id").eq("member_name", userName),
+        )
+      }
+      const results = await Promise.all(queries)
+      myConvIds.clear()
+      for (const res of results) {
+        for (const row of res.data ?? []) {
+          myConvIds.add(row.conversation_id as string)
+        }
+      }
+    }
+
     const channel = supabase
       .channel("shell-unread")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
-        const msg = payload.new as { sender_name?: string; text?: string; message_type?: string; conversation_id?: string }
-        if (msg.sender_name === userName) return
-        if (!pathname.startsWith("/messages")) setHasUnread(true)
+        const msg = payload.new as {
+          sender_name?: string
+          text?: string
+          message_type?: string
+          conversation_id?: string
+          is_system?: boolean
+        }
+        if (msg.is_system) return
+        // Never notify / badge for my own sends
+        if (isSameSender(msg.sender_name, userName)) return
+        // Ignore call system-ish events posted under message_type call from self already filtered;
+        // still require membership
+        if (!msg.conversation_id || !myConvIds.has(msg.conversation_id)) return
+        if (msg.message_type === "call") return
+
+        setNavUnread(true)
+        setHasUnread(true)
         try {
-          const prefs = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
-          if (prefs.messages === false) return
-          // Notify when tab hidden OR user is not inside that conversation
+          const prefs = readNotifPrefs()
+          if (!prefs.messages) return
           const onMessages = pathname.startsWith("/messages")
           if (onMessages && document.visibilityState === "visible") return
           const body = msg.message_type === "audio" || msg.text?.startsWith("🎤")
@@ -151,37 +215,40 @@ export function AppShell({ children }: { children: ReactNode }) {
             : msg.text
               ? `${msg.sender_name}: ${msg.text}`
               : `${msg.sender_name} bir mesaj gönderdi`
-          const show = () => {
-            if (typeof Notification === "undefined" || Notification.permission !== "granted") return
-            navigator.serviceWorker?.ready.then((reg) => {
-              void reg.showNotification("Yeni Mesaj", {
-                body,
-                icon: "/icon.png",
-                badge: "/icon.png",
-                tag: msg.conversation_id ? `msg-${msg.conversation_id}` : "msg",
-                data: { url: msg.conversation_id ? `/messages?open=${msg.conversation_id}` : "/messages" },
-              })
-            }).catch(() => {
-              new Notification("Yeni Mesaj", { body, icon: "/icon.png" })
-            })
-          }
-          show()
+          showAppNotification("Yeni Mesaj", {
+            body,
+            tag: msg.conversation_id ? `msg-${msg.conversation_id}` : "msg",
+            url: msg.conversation_id ? `/messages?open=${msg.conversation_id}` : "/messages",
+          })
         } catch {}
       })
-    void subscribeChannel(supabase, channel)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversation_members" }, (payload) => {
+        const row = payload.new as { conversation_id?: string; member_name?: string; user_id?: string }
+        if (!row.conversation_id) return
+        if (row.user_id === userId || row.member_name === userName) {
+          myConvIds.add(row.conversation_id)
+        }
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_members" }, (payload) => {
+        const row = payload.old as { conversation_id?: string; member_name?: string; user_id?: string }
+        if (!row.conversation_id) return
+        if (row.user_id === userId || row.member_name === userName) {
+          myConvIds.delete(row.conversation_id)
+        }
+      })
+    void (async () => {
+      await refreshMyConversations()
+      void subscribeChannel(supabase, channel)
+    })()
     return () => { supabase.removeChannel(channel) }
   }, [userName, pathname])
-
-  // Clear nav dot when user navigates to messages
-  useEffect(() => {
-    if (pathname.startsWith("/messages")) setHasUnread(false)
-  }, [pathname])
 
   return (
     <QueryProvider>
     <NavVisibilityProvider>
     <PresenceProvider userName={userName}>
     <CallProvider userName={userName}>
+    <NotificationListeners userName={userName} userStation={userStation} />
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background">
       <AppHeader pageTitle={pageTitle} onSettings={onSettings} avatar={avatar} />
       <MainWrapper>{children}</MainWrapper>

@@ -28,6 +28,8 @@ import { MemberProfileSheet } from "@/components/messaging/member-profile-sheet"
 import { useCallOptional } from "@/lib/call/call-context"
 import { openDMViaApi } from "@/lib/dm"
 import { prefetchChatMessages } from "@/lib/queries/messages"
+import { refreshNavUnreadFromStorage, setNavUnread, markConversationRead, isSameSender } from "@/lib/nav-unread"
+import { readNotifPrefs, showAppNotification } from "@/lib/notif-prefs"
 import { messageKeys } from "@/lib/queries/keys"
 import { insertConversationMembers } from "@/lib/queries/conversations"
 import { useChatMessages, broadcastChatMessage } from "@/lib/hooks/use-chat-messages"
@@ -249,24 +251,27 @@ export function MessagesClient({
     [],
   )
 
-  // Restore unread counts from localStorage on mount
+  // Restore unread counts from localStorage on mount — only if LAST msg is from someone else
   const [customGroups, setCustomGroups] = useState<CustomGroup[]>(() => {
     try {
+      const myName = (initialProfile?.name ?? "").trim()
       const lastRead: Record<string, string> = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
       return initialMapped.groups.map((g) => {
         const read = lastRead[g.id]
         if (!read || !g.lastTime) return g
-        // lastTime is HH:MM — compare via raw lastMessage timestamp stored separately
-        // Use the raw conversations to find the actual ISO timestamp
         const conv = initialConversations.find((c) => (c as Record<string,unknown>).id === g.id)
-        const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean}[] | undefined) ?? []
-        const lastMsgTime = msgs.filter(m => !m.is_system).at(-1)?.created_at ?? ""
-        return { ...g, unread: lastMsgTime > read ? 1 : 0 }
+        const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean;sender_name?:string}[] | undefined) ?? []
+        const lastMsg = msgs.filter(m => !m.is_system).at(-1)
+        if (!lastMsg) return g
+        // Own last message → never unread
+        if (isSameSender(lastMsg.sender_name, myName)) return { ...g, unread: 0 }
+        return { ...g, unread: lastMsg.created_at > read ? 1 : 0 }
       })
     } catch { return initialMapped.groups }
   })
   const [customDMs, setCustomDMs] = useState<CustomDM[]>(() => {
     try {
+      const myName = (initialProfile?.name ?? "").trim()
       const hidden = readHiddenConvIds()
       const lastRead: Record<string, string> = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
       return initialMapped.dms
@@ -275,9 +280,11 @@ export function MessagesClient({
           const read = lastRead[d.id]
           if (!read || !d.lastTime) return d
           const conv = initialConversations.find((c) => (c as Record<string,unknown>).id === d.id)
-          const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean}[] | undefined) ?? []
-          const lastMsgTime = msgs.filter(m => !m.is_system).at(-1)?.created_at ?? ""
-          return { ...d, unread: lastMsgTime > read ? 1 : 0 }
+          const msgs = ((conv as Record<string,unknown>)?.chat_messages as {created_at:string;is_system?:boolean;sender_name?:string}[] | undefined) ?? []
+          const lastMsg = msgs.filter(m => !m.is_system).at(-1)
+          if (!lastMsg) return d
+          if (isSameSender(lastMsg.sender_name, myName)) return { ...d, unread: 0 }
+          return { ...d, unread: lastMsg.created_at > read ? 1 : 0 }
         })
     } catch { return initialMapped.dms }
   })
@@ -920,11 +927,64 @@ export function MessagesClient({
     })
   }
 
+  // Keep bottom-nav red dot in sync with inbox unread state
+  useEffect(() => {
+    refreshNavUnreadFromStorage([
+      ...customGroups.map((g) => ({ id: g.id, lastAt: g.lastAt, unread: g.unread })),
+      ...customDMs.map((d) => ({ id: d.id, lastAt: d.lastAt, unread: d.unread })),
+    ])
+  }, [customGroups, customDMs])
+
   // Refs to avoid stale closures in global realtime subscription
   const openIdRef      = useRef(openId)
   const currentNameRef = useRef(currentUser.name)
   useEffect(() => { openIdRef.current = openId }, [openId])
   useEffect(() => { currentNameRef.current = currentUser.name }, [currentUser.name])
+
+  // New DM / group membership appears live in the inbox
+  useEffect(() => {
+    if (!currentUser.name) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel("inbox-membership")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversation_members" }, (payload) => {
+        const row = payload.new as { conversation_id?: string; member_name?: string }
+        if (!row.conversation_id || !row.member_name) return
+        if (row.member_name === currentNameRef.current) {
+          void ensureConversationInState(row.conversation_id)
+          return
+        }
+        // Someone else joined a conversation I already have open in inbox
+        if (!convIdsRef.current.has(row.conversation_id)) return
+        setCustomGroups((prev) => prev.map((g) => {
+          if (g.id !== row.conversation_id) return g
+          if (g.memberNames.includes(row.member_name!)) return g
+          return { ...g, memberNames: [...g.memberNames, row.member_name!] }
+        }))
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversation_members" }, (payload) => {
+        const row = payload.old as { conversation_id?: string; member_name?: string }
+        if (!row.conversation_id) return
+        if (row.member_name === currentNameRef.current) {
+          setCustomGroups((prev) => prev.filter((g) => g.id !== row.conversation_id))
+          setCustomDMs((prev) => prev.filter((d) => d.id !== row.conversation_id))
+          if (openIdRef.current === row.conversation_id) closeConversation()
+          return
+        }
+        if (!row.member_name || !convIdsRef.current.has(row.conversation_id)) return
+        setCustomGroups((prev) => prev.map((g) => {
+          if (g.id !== row.conversation_id) return g
+          return {
+            ...g,
+            memberNames: g.memberNames.filter((n) => n !== row.member_name),
+            adminNames: g.adminNames.filter((n) => n !== row.member_name),
+          }
+        }))
+      })
+
+    void subscribeChannel(supabase, channel)
+    return () => { supabase.removeChannel(channel) }
+  }, [currentUser.name, ensureConversationInState, closeConversation])
 
   // Open a conversation instantly; hydrate membership in background if needed
   function openConversation(id: string) {
@@ -947,17 +1007,14 @@ export function MessagesClient({
     })
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: 0 } : g))
     setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: 0 } : d))
-    try {
-      const lastRead = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
-      lastRead[id] = new Date().toISOString()
-      localStorage.setItem("ys-last-read", JSON.stringify(lastRead))
-    } catch {}
+    markConversationRead(id)
   }
 
   function markUnread(id: string) {
     setForcedUnread((prev) => ({ ...prev, [id]: 1 }))
     setCustomGroups((prev) => prev.map((g) => g.id === id ? { ...g, unread: Math.max(1, g.unread) } : g))
     setCustomDMs((prev) => prev.map((d) => d.id === id ? { ...d, unread: Math.max(1, d.unread) } : d))
+    setNavUnread(true)
     try {
       const lastRead = JSON.parse(localStorage.getItem("ys-last-read") ?? "{}")
       lastRead[id] = "1970-01-01T00:00:00.000Z"
@@ -994,7 +1051,7 @@ export function MessagesClient({
       }, (payload) => {
         const m = payload.new as { id: string; conversation_id: string; sender_name: string; text: string | null; created_at: string; is_system?: boolean; message_type?: string; gif_url?: string; audio_url?: string; image_url?: string }
         if (m.is_system) return
-        const isOwn  = m.sender_name === currentNameRef.current
+        const isOwn  = isSameSender(m.sender_name, currentNameRef.current)
         const isOpen = m.conversation_id === openIdRef.current
         const time   = new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
         const preview = messagePreview({
@@ -1006,6 +1063,12 @@ export function MessagesClient({
           audio: m.audio_url ?? undefined,
         })
 
+        // Own messages / open thread: never unread, and advance last-read
+        if (isOwn || isOpen) {
+          markConversationRead(m.conversation_id, m.created_at)
+        }
+
+        // Only the other person creates unread + notifications
         const bumpUnread = !isOpen && !isOwn
 
         setCustomGroups((prev) => {
@@ -1016,7 +1079,7 @@ export function MessagesClient({
             lastMessage: preview || prev[idx].lastMessage,
             lastTime: time,
             lastAt: m.created_at,
-            unread: bumpUnread ? prev[idx].unread + 1 : prev[idx].unread,
+            unread: bumpUnread ? prev[idx].unread + 1 : (isOwn || isOpen ? 0 : prev[idx].unread),
           }
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
@@ -1028,34 +1091,25 @@ export function MessagesClient({
             lastMessage: preview || prev[idx].lastMessage,
             lastTime: time,
             lastAt: m.created_at,
-            unread: bumpUnread ? prev[idx].unread + 1 : prev[idx].unread,
+            unread: bumpUnread ? prev[idx].unread + 1 : (isOwn || isOpen ? 0 : prev[idx].unread),
           }
           return [updated, ...prev.filter((_, i) => i !== idx)]
         })
 
         if (bumpUnread) {
+          setNavUnread(true)
           try {
-            const prefs = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
-            if (prefs.messages === false) return
+            const prefs = readNotifPrefs()
+            if (!prefs.messages) return
             const title = "Yeni Mesaj"
             const body = preview
               ? `${m.sender_name}: ${preview}`
               : `${m.sender_name} bir mesaj gönderdi`
-            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              navigator.serviceWorker?.ready.then((reg) => {
-                void reg.showNotification(title, {
-                  body,
-                  icon: "/icon.png",
-                  badge: "/icon.png",
-                  tag: `msg-${m.conversation_id}`,
-                  data: { url: `/messages?open=${m.conversation_id}` },
-                })
-              }).catch(() => {
-                new Notification(title, { body, icon: "/icon.png", tag: `msg-${m.conversation_id}` })
-              })
-            } else if (typeof Notification !== "undefined" && Notification.permission === "default") {
-              void Notification.requestPermission()
-            }
+            showAppNotification(title, {
+              body,
+              tag: `msg-${m.conversation_id}`,
+              url: `/messages?open=${m.conversation_id}`,
+            })
           } catch { /* ignore */ }
         }
       })
@@ -2062,6 +2116,7 @@ function ChatView({
     setMessages((prev) => [...prev, optimistic])
     setDraft("")
     setAttached(null)
+    markConversationRead(conversationId, createdAt)
 
     try {
       const res = await fetch("/api/chat/send", {
@@ -2128,6 +2183,7 @@ function ChatView({
       gif: url,
       messageType: "gif" as const,
     }])
+    markConversationRead(conversationId, createdAt)
 
     try {
       const res = await fetch("/api/chat/send", {
@@ -2197,6 +2253,7 @@ function ChatView({
       messageType: "audio",
     }
     setMessages((prev) => [...prev, optimistic])
+    markConversationRead(conversationId, createdAt)
     setUploading(true)
 
     try {

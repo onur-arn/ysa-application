@@ -14,6 +14,7 @@ import type { Area } from "react-easy-crop"
 import { useI18n } from "@/lib/i18n/context"
 import { useTheme } from "@/lib/theme/context"
 import { requestAndSubscribe, unsubscribePush } from "@/lib/push"
+import { readNotifPrefs, writeNotifPrefs, type NotifPrefs, DEFAULT_NOTIF_PREFS } from "@/lib/notif-prefs"
 import { getStation, SEHIRLER, STATIONS_SORTED } from "@/lib/data/stations"
 import { getCroppedImg } from "@/lib/crop"
 import { createClient } from "@/lib/supabase/client"
@@ -62,32 +63,28 @@ export function SettingsClient({
   const router = useRouter()
   const { t } = useI18n()
   const { theme, toggle } = useTheme()
-  const [notifs, setNotifs] = useState(() => {
+  const [notifs, setNotifs] = useState<NotifPrefs>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem("ys-notif-prefs") ?? "{}")
-      return {
-        gorev:         saved.gorev         ?? false,
-        messages:      saved.messages      ?? false,
-        eventReminder: saved.eventReminder ?? false,
-      }
+      return readNotifPrefs()
     } catch {
-      return { gorev: false, messages: false, eventReminder: false }
+      return { ...DEFAULT_NOTIF_PREFS }
     }
   })
 
-  async function toggleNotif(key: keyof typeof notifs) {
+  async function toggleNotif(key: keyof NotifPrefs) {
     const turning_on = !notifs[key]
     if (turning_on) {
       const result = await requestAndSubscribe()
       if (result === "denied") return
     } else {
-      // Only unsubscribe if all notifs will be off
-      const willAllOff = Object.keys(notifs).every((k) => k === key || !notifs[k as keyof typeof notifs])
+      const willAllOff = (Object.keys(notifs) as (keyof NotifPrefs)[]).every(
+        (k) => k === key || !notifs[k],
+      )
       if (willAllOff) await unsubscribePush()
     }
     setNotifs((prev) => {
       const next = { ...prev, [key]: !prev[key] }
-      try { localStorage.setItem("ys-notif-prefs", JSON.stringify(next)) } catch {}
+      writeNotifPrefs(next)
       return next
     })
   }
@@ -255,9 +252,10 @@ export function SettingsClient({
 
         {/* Notifications */}
         <Section title={t("settings.notifications")} icon={Bell}>
+          <Toggle label="Genel Bilgiler" checked={notifs.genel} onChange={() => toggleNotif("genel")} />
           <Toggle label="Yeni Görev" checked={notifs.gorev} onChange={() => toggleNotif("gorev")} />
           <Toggle label="Yeni Mesaj" checked={notifs.messages} onChange={() => toggleNotif("messages")} />
-          <Toggle label="Etkinlik Hatırlatıcısı (J-1)" checked={notifs.eventReminder} onChange={() => toggleNotif("eventReminder")} last />
+          <Toggle label="Etkinlikler (J-1)" checked={notifs.eventReminder} onChange={() => toggleNotif("eventReminder")} last />
         </Section>
 
         {/* iGEM */}

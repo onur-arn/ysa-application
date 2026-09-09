@@ -14,7 +14,11 @@ import { fetchStories, mapStoryRow, STORY_RETENTION_MS, type StoryRow } from "@/
 import { storyKeys } from "@/lib/queries/keys"
 import { preloadImages } from "@/lib/utils/preload-images"
 
-const SEEN_KEY = "ys-seen-story-ids"
+const SEEN_KEY_PREFIX = "ys-seen-story-ids"
+
+function seenStorageKey(userName: string) {
+  return userName ? `${SEEN_KEY_PREFIX}:${userName}` : SEEN_KEY_PREFIX
+}
 
 function storyTimeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
@@ -117,19 +121,52 @@ export function StoriesBar({
     } catch {}
   }
 
-  // Load seen IDs from localStorage on mount
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SEEN_KEY)
-      if (raw) setSeenIds(new Set(JSON.parse(raw) as string[]))
-    } catch {}
-  }, [])
+  /** Must run inside a user gesture (tap) so iOS/Safari allow playback. */
+  function playStoryMusic(previewUrl?: string) {
+    destroyStoryAudio()
+    setMusicBlocked(false)
+    if (!previewUrl) return
+    musicGestureRef.current = true
+    const audio = new Audio(previewUrl)
+    audio.preload = "auto"
+    audio.loop = true
+    audio.volume = 0.7
+    storyAudioRef.current = audio
+    audio.onerror = () => setMusicBlocked(true)
+    void audio.play()
+      .then(() => setMusicBlocked(false))
+      .catch(() => {
+        // One retry after canplay (still often within gesture window on Android)
+        const retry = () => {
+          if (storyAudioRef.current !== audio) return
+          void audio.play()
+            .then(() => setMusicBlocked(false))
+            .catch(() => setMusicBlocked(true))
+        }
+        audio.addEventListener("canplay", retry, { once: true })
+        setMusicBlocked(true)
+      })
+  }
 
-  function markStationSeen(stationId: string, currentStories: Story[]) {
-    const ids = currentStories.filter(s => s.station === stationId).map(s => s.id)
-    setSeenIds(prev => {
+  // Load seen IDs per user (shared device must not inherit another account's seen state)
+  useEffect(() => {
+    if (!user.name) return
+    try {
+      const raw = localStorage.getItem(seenStorageKey(user.name))
+      if (raw) setSeenIds(new Set(JSON.parse(raw) as string[]))
+      else setSeenIds(new Set())
+    } catch {
+      setSeenIds(new Set())
+    }
+  }, [user.name])
+
+  function markStoriesSeen(ids: string[]) {
+    if (ids.length === 0) return
+    setSeenIds((prev) => {
       const next = new Set([...prev, ...ids])
-      try { localStorage.setItem(SEEN_KEY, JSON.stringify([...next])) } catch {}
+      try {
+        localStorage.setItem(seenStorageKey(user.name), JSON.stringify([...next]))
+      } catch {}
       return next
     })
   }
@@ -138,15 +175,17 @@ export function StoriesBar({
   const myStories = stories.filter((s) => s.authorName === user.name)
 
   function openStation(stationId: string, startIdx = 0, myBtn = false) {
-    const stationStories = stories.filter((s) => s.station === stationId)
+    const stationStories = myBtn
+      ? stories.filter((s) => s.station === stationId && s.authorName === user.name)
+      : stories.filter((s) => s.station === stationId)
     preloadImages(stationStories.map((s) => s.imageUrl))
-    musicGestureRef.current = true
-    setMusicBlocked(false)
     setActive(stationId)
     setStoryIdx(startIdx)
     setFromMyButton(myBtn)
     setPaused(false)
-    markStationSeen(stationId, stories)
+    // Only mark stories that are actually in this viewing session
+    markStoriesSeen(stationStories.map((s) => s.id))
+    playStoryMusic(stationStories[startIdx]?.musicPreviewUrl)
   }
 
   function prefetchStation(stationId: string) {
@@ -229,6 +268,35 @@ export function StoriesBar({
     return stories.some(s => s.station === stationId && !seenIds.has(s.id))
   }
 
+  // Stories INSERT/DELETE — appear/disappear live on every device
+  useEffect(() => {
+    const supabase = createClient()
+    const ch = supabase
+      .channel("stories-rows")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "stories" }, (payload) => {
+        const row = mapStoryRow(payload.new as Record<string, unknown>)
+        setStories((prev) => {
+          if (prev.some((s) => s.id === row.id)) return prev
+          return [...prev, row]
+        })
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "stories" }, (payload) => {
+        const id = (payload.old as { id?: string }).id
+        if (!id) return
+        setStories((prev) => prev.filter((s) => s.id !== id))
+        setActive((cur) => (cur === id ? null : cur))
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "stories" }, (payload) => {
+        const row = mapStoryRow(payload.new as Record<string, unknown>)
+        setStories((prev) => prev.map((s) => (s.id === row.id ? row : s)))
+      })
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") console.error("[stories-rows] channel error:", err)
+        if (status === "TIMED_OUT") console.warn("[stories-rows] timed out")
+      })
+    return () => { supabase.removeChannel(ch) }
+  }, [setStories])
+
   // Load reactions + subscribe to broadcast for instant updates
   useEffect(() => {
     if (stories.length === 0 || !user.name) return
@@ -270,6 +338,35 @@ export function StoriesBar({
           const arr = [...(n.get(storyId) ?? [])]
           if (action === "add" && !arr.includes(userName)) n.set(storyId, [...arr, userName])
           if (action === "remove") n.set(storyId, arr.filter(u => u !== userName))
+          return n
+        })
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "story_reactions" }, (payload) => {
+        const r = payload.new as { story_id: string; user_name: string }
+        if (r.user_name === user.name) return
+        setReactionCounts(prev => {
+          const n = new Map(prev)
+          n.set(r.story_id, (n.get(r.story_id) ?? 0) + 1)
+          return n
+        })
+        setReactionDetails(prev => {
+          const n = new Map(prev)
+          const arr = n.get(r.story_id) ?? []
+          if (!arr.includes(r.user_name)) n.set(r.story_id, [...arr, r.user_name])
+          return n
+        })
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "story_reactions" }, (payload) => {
+        const r = payload.old as { story_id: string; user_name: string }
+        if (r.user_name === user.name) return
+        setReactionCounts(prev => {
+          const n = new Map(prev)
+          n.set(r.story_id, Math.max(0, (n.get(r.story_id) ?? 1) - 1))
+          return n
+        })
+        setReactionDetails(prev => {
+          const n = new Map(prev)
+          n.set(r.story_id, (n.get(r.story_id) ?? []).filter((u) => u !== r.user_name))
           return n
         })
       })
@@ -344,73 +441,10 @@ export function StoriesBar({
     preloadImages(urls)
   }, [active, storyIdx, stories, fromMyButton, user.station, user.name])
 
-  // Play/stop music when the viewed story changes
+  // Stop music when the viewer closes
   useEffect(() => {
-    let cancelled = false
-    let audio: HTMLAudioElement | null = null
-
-    destroyStoryAudio()
-    setMusicBlocked(false)
-
-    const previewUrl = currentStory?.musicPreviewUrl
-    if (!active || !previewUrl) {
-      return () => { cancelled = true }
-    }
-
-    // Bust CDN/browser cache so Deezer preview reloads cleanly on reopen
-    const src = `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}_ys=${Date.now()}`
-    audio = new Audio()
-    audio.preload = "auto"
-    audio.loop = true
-    audio.volume = 0.7
-    storyAudioRef.current = audio
-
-    const tryPlay = () => {
-      if (cancelled || storyAudioRef.current !== audio) return
-      audio!.play()
-        .then(() => {
-          if (!cancelled) {
-            setMusicBlocked(false)
-            musicGestureRef.current = false
-          }
-        })
-        .catch(() => {
-          if (cancelled) return
-          setMusicBlocked(true)
-          // Retry once when the buffer is ready (helps after reopen)
-          const retry = () => {
-            if (cancelled || storyAudioRef.current !== audio) return
-            audio!.play()
-              .then(() => {
-                setMusicBlocked(false)
-                musicGestureRef.current = false
-              })
-              .catch(() => setMusicBlocked(true))
-          }
-          audio!.addEventListener("canplay", retry, { once: true })
-        })
-    }
-
-    audio.onerror = () => {
-      if (!cancelled) setMusicBlocked(true)
-    }
-    audio.src = src
-    audio.load()
-    tryPlay()
-
-    return () => {
-      cancelled = true
-      if (audio) {
-        try {
-          audio.pause()
-          audio.onerror = null
-          audio.removeAttribute("src")
-          audio.load()
-        } catch {}
-      }
-      if (storyAudioRef.current === audio) storyAudioRef.current = null
-    }
-  }, [active, currentStory?.id, currentStory?.musicPreviewUrl])
+    if (!active) destroyStoryAudio()
+  }, [active])
 
   // Pause/resume music with story hold-to-pause (respect intentional mute)
   useEffect(() => {
@@ -423,16 +457,24 @@ export function StoriesBar({
     if (!musicBlocked) {
       audio.play().catch(() => setMusicBlocked(true))
     }
-  }, [paused])
+  }, [paused, musicBlocked])
 
   function toggleMusic() {
     const audio = storyAudioRef.current
-    if (!audio) return
+    const url = currentStory?.musicPreviewUrl
+    if (!audio || !audio.src) {
+      if (url) playStoryMusic(url)
+      return
+    }
     musicGestureRef.current = true
     if (musicBlocked || audio.paused) {
-      audio.play()
+      void audio.play()
         .then(() => setMusicBlocked(false))
-        .catch(() => setMusicBlocked(true))
+        .catch(() => {
+          // Re-create under this gesture if the element is stuck
+          if (url) playStoryMusic(url)
+          else setMusicBlocked(true)
+        })
     } else {
       audio.pause()
       setMusicBlocked(true)
@@ -441,14 +483,21 @@ export function StoriesBar({
 
   function goNext() {
     if (storyIdx < activeStories.length - 1) {
+      const next = activeStories[storyIdx + 1]
       setStoryIdx(storyIdx + 1)
+      markStoriesSeen([next.id])
+      playStoryMusic(next.musicPreviewUrl)
     } else {
       setActive(null)
     }
   }
 
   function goPrev() {
-    if (storyIdx > 0) setStoryIdx(storyIdx - 1)
+    if (storyIdx > 0) {
+      const prev = activeStories[storyIdx - 1]
+      setStoryIdx(storyIdx - 1)
+      playStoryMusic(prev.musicPreviewUrl)
+    }
   }
 
   // Sort stations: unseen first, then seen-with-stories, then no stories
@@ -518,8 +567,8 @@ export function StoriesBar({
           const ringStyle = !hasStory
             ? "bg-muted"
             : isUnseen
-              ? "bg-primary"
-              : "bg-border"
+              ? "bg-[linear-gradient(135deg,#1d9bf0_0%,#0095f6_45%,#38bdf8_100%)]"
+              : "bg-neutral-300 dark:bg-neutral-600"
 
           return (
             <button
@@ -631,7 +680,7 @@ export function StoriesBar({
                 )}
 
                 {/* Like + Music buttons */}
-                <div className="pointer-events-auto absolute bottom-36 right-5 flex flex-col items-center gap-3">
+                <div className="pointer-events-auto absolute bottom-36 right-5 z-20 flex flex-col items-center gap-3">
                   {currentStory.musicPreviewUrl && (
                     <button
                       onClick={toggleMusic}
