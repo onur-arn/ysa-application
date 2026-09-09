@@ -148,6 +148,10 @@ export function DirectoryClient({
   }, [filtered])
 
   async function assignRole(member: Member, role: Role) {
+    const taken = allMembers.some(
+      (m) => m.station === member.station && m.id !== member.id && m.role === role,
+    )
+    if (taken) return
     try {
       const supabase = createClient()
       await supabase.from("profiles").update({ role }).eq("id", member.id)
@@ -284,10 +288,17 @@ export function DirectoryClient({
                       onClick={() => setAssignOpen(true)}
                       className="w-full rounded-xl bg-primary/10 py-2.5 text-sm font-semibold text-primary transition-colors active:bg-primary/20"
                     >
-                      Görev ver / değiştir
+                      Görev değiştir
                     </button>
                   ) : (
-                    <RoleAssignPanel member={selected} onAssign={(role) => assignRole(selected, role)} onCancel={() => setAssignOpen(false)} />
+                    <RoleAssignPanel
+                      member={selected}
+                      takenRoles={allMembers
+                        .filter((m) => m.station === selected.station && m.id !== selected.id && m.role)
+                        .map((m) => m.role)}
+                      onAssign={(role) => assignRole(selected, role)}
+                      onCancel={() => setAssignOpen(false)}
+                    />
                   )}
                 </div>
               )}
@@ -334,8 +345,19 @@ export function DirectoryClient({
   )
 }
 
-function RoleAssignPanel({ member, onAssign, onCancel }: { member: Member; onAssign: (r: Role) => void; onCancel: () => void }) {
+function RoleAssignPanel({
+  member,
+  takenRoles,
+  onAssign,
+  onCancel,
+}: {
+  member: Member
+  takenRoles: string[]
+  onAssign: (r: Role) => void
+  onCancel: () => void
+}) {
   const [selected, setSelected] = useState<Role>(member.role)
+  const taken = useMemo(() => new Set(takenRoles), [takenRoles])
 
   return (
     <div className="flex flex-col gap-3">
@@ -343,11 +365,23 @@ function RoleAssignPanel({ member, onAssign, onCancel }: { member: Member; onAss
       <div className="max-h-52 overflow-y-auto rounded-xl border border-border">
         <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Yönetim Kurulu</p>
         {YONETIM_KURULU_ROLES.map((r) => (
-          <RoleOption key={r} role={r} checked={selected === r} onSelect={() => setSelected(r)} />
+          <RoleOption
+            key={r}
+            role={r}
+            checked={selected === r}
+            disabled={taken.has(r) && r !== member.role}
+            onSelect={() => setSelected(r)}
+          />
         ))}
         <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground border-t border-border mt-1">Yürütme Kurulu</p>
         {YURUTME_KURULU_ROLES.map((r) => (
-          <RoleOption key={r} role={r} checked={selected === r} onSelect={() => setSelected(r)} />
+          <RoleOption
+            key={r}
+            role={r}
+            checked={selected === r}
+            disabled={taken.has(r) && r !== member.role}
+            onSelect={() => setSelected(r)}
+          />
         ))}
       </div>
       <div className="flex gap-2">
@@ -356,7 +390,7 @@ function RoleAssignPanel({ member, onAssign, onCancel }: { member: Member; onAss
         </button>
         <button
           onClick={() => onAssign(selected)}
-          disabled={selected === member.role}
+          disabled={selected === member.role || (taken.has(selected) && selected !== member.role)}
           className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-40"
         >
           Kaydet
@@ -366,13 +400,29 @@ function RoleAssignPanel({ member, onAssign, onCancel }: { member: Member; onAss
   )
 }
 
-function RoleOption({ role, checked, onSelect }: { role: string; checked: boolean; onSelect: () => void }) {
+function RoleOption({
+  role,
+  checked,
+  disabled,
+  onSelect,
+}: {
+  role: string
+  checked: boolean
+  disabled?: boolean
+  onSelect: () => void
+}) {
   return (
     <button
       onClick={onSelect}
-      className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition-colors ${checked ? "bg-primary/10 font-semibold text-primary" : "text-foreground"}`}
+      disabled={disabled}
+      className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        checked ? "bg-primary/10 font-semibold text-primary" : "text-foreground"
+      }`}
     >
-      {role}
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate">{role}</span>
+        {disabled && <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Dolu</span>}
+      </span>
       {checked && <Check className="size-4 shrink-0 text-primary" />}
     </button>
   )
