@@ -12,7 +12,7 @@ export default async function AgendaPage() {
       : Promise.resolve({ data: null }),
     supabase
       .from("events")
-      .select("id,title,date,time,place,station,description,link,created_by")
+      .select("id,title,date,time,place,station,description,link,created_by,end_date")
       .order("date", { ascending: true }),
   ])
 

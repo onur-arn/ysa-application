@@ -306,6 +306,8 @@ export function AgendaClient({
               const allClickable = hasEvents || hasPeriod
               const allDayItems = [...dayEvents, ...periodDays.map((p) => p.event)]
               const unique = allDayItems.filter((e, idx, arr) => arr.findIndex((x) => x.id === e.id) === idx)
+              const allPast = unique.length > 0 && unique.every((e) => isEventPast(e))
+              const hasUpcoming = unique.some((e) => !isEventPast(e))
               return (
                 <button
                   key={day}
@@ -316,7 +318,9 @@ export function AgendaClient({
                   }}
                   className={`relative flex aspect-square flex-col items-center justify-start rounded-xl pt-1.5 text-sm transition-colors ${
                     allClickable ? "font-semibold text-foreground" : "text-muted-foreground"
-                  } ${hasEvents && !hasPeriod && day !== todayDay ? "bg-primary/10" : ""}`}
+                  } ${hasEvents && !hasPeriod && day !== todayDay && hasUpcoming ? "bg-primary/10" : ""}
+                  ${hasEvents && !hasPeriod && day !== todayDay && allPast ? "bg-muted/60" : ""}
+                  ${allPast && allClickable ? "opacity-55" : ""}`}
                 >
                   <span className={day === todayDay
                     ? "flex size-6 -mt-0.5 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground"
@@ -327,7 +331,7 @@ export function AgendaClient({
                       {dayEvents.slice(0, 3).map((e) => (
                         <span
                           key={e.id}
-                          className="size-1.5 rounded-full"
+                          className={`size-1.5 rounded-full ${isEventPast(e) ? "opacity-40 grayscale" : ""}`}
                           style={{ backgroundColor: `hsl(${getStation(e.station).color})` }}
                         />
                       ))}
@@ -343,7 +347,7 @@ export function AgendaClient({
                               type === "end"    ? "-left-1 right-[38%] rounded-r-full" :
                               type === "only"   ? "left-[15%] right-[15%] rounded-full" :
                               "-left-1 -right-1"
-                            }`}
+                            } ${isEventPast(event) ? "opacity-35 grayscale" : ""}`}
                             style={{ backgroundColor: `hsl(${getStation(event.station).color})` }}
                           />
                         </div>
@@ -362,7 +366,12 @@ export function AgendaClient({
       ) : (
         <div className="flex flex-col gap-2 px-4">
           {[...filtered]
-            .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? ""))
+            .sort((a, b) => {
+              const aPast = isEventPast(a) ? 1 : 0
+              const bPast = isEventPast(b) ? 1 : 0
+              if (aPast !== bPast) return aPast - bPast
+              return a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? "")
+            })
             .map((e) => (
               <EventRow key={e.id} event={e} onClick={() => setSelected(e)} showMonth />
             ))}
@@ -391,20 +400,40 @@ export function AgendaClient({
           <div className="flex flex-col gap-2">
             {selectedDayEvents.map((e) => {
               const station = getStation(e.station)
+              const past = isEventPast(e)
+              const ongoing = isEventOngoing(e)
               return (
                 <button
                   key={e.id}
                   onClick={() => { setSelectedDayEvents(null); setSelected(e) }}
-                  className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 text-left transition-colors active:bg-secondary"
+                  className={`flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors active:bg-secondary ${
+                    past
+                      ? "border-border/60 bg-muted/40 opacity-70"
+                      : ongoing
+                        ? "border-primary/40 bg-primary/5"
+                        : "border-border bg-card"
+                  }`}
                 >
                   <span
-                    className="flex size-10 shrink-0 items-center justify-center rounded-xl text-white"
-                    style={{ backgroundColor: `hsl(${station.color})` }}
+                    className={`flex size-10 shrink-0 items-center justify-center rounded-xl text-white ${past ? "grayscale" : ""}`}
+                    style={{ backgroundColor: past ? "hsl(220 8% 55%)" : `hsl(${station.color})` }}
                   >
                     <CalendarDays className="size-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-foreground">{e.title}</p>
+                    <div className="flex items-center gap-2">
+                      <p className={`truncate font-semibold ${past ? "text-muted-foreground" : "text-foreground"}`}>{e.title}</p>
+                      {past && (
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          Geçmiş
+                        </span>
+                      )}
+                      {ongoing && !past && (
+                        <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                          Güncel
+                        </span>
+                      )}
+                    </div>
                     <p className="flex items-center gap-1 text-xs text-muted-foreground">
                       {e.endDate
                         ? <><CalendarDays className="size-3 shrink-0" /> {formatShortDate(e.date)} → {formatShortDate(e.endDate)}</>
@@ -423,20 +452,35 @@ export function AgendaClient({
 
       {/* Event detail */}
       <Modal open={!!selected} onClose={() => setSelected(null)} title={t("agenda.eventDetail")}>
-        {selected && (
-          <div className="flex flex-col gap-4">
+        {selected && (() => {
+          const past = isEventPast(selected)
+          const ongoing = isEventOngoing(selected)
+          const stationColor = past ? "220 8% 55%" : getStation(selected.station).color
+          return (
+          <div className={`flex flex-col gap-4 ${past ? "opacity-90" : ""}`}>
             <div
               className="rounded-2xl p-4 text-white"
               style={{
-                background: `linear-gradient(135deg, hsl(${getStation(selected.station).color}), hsl(${getStation(selected.station).color} / 0.7))`,
+                background: `linear-gradient(135deg, hsl(${stationColor}), hsl(${stationColor} / 0.7))`,
               }}
             >
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {past && (
+                  <span className="rounded-full bg-black/25 px-2 py-0.5 text-[11px] font-semibold">Geçmiş etkinlik</span>
+                )}
+                {ongoing && !past && (
+                  <span className="rounded-full bg-white/25 px-2 py-0.5 text-[11px] font-semibold">Güncel</span>
+                )}
+                {!past && !ongoing && (
+                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold">Yaklaşan</span>
+                )}
+              </div>
               <h3 className="font-heading text-lg font-bold text-balance">{selected.title}</h3>
               <p className="mt-1 text-sm text-white/90">{getStation(selected.station).name}</p>
             </div>
 
             <div className="flex items-center gap-3 text-sm">
-              <CalendarDays className="size-5 shrink-0 text-primary" />
+              <CalendarDays className={`size-5 shrink-0 ${past ? "text-muted-foreground" : "text-primary"}`} />
               {selected.endDate ? (
                 <span>{formatLongDate(selected.date)} — {formatLongDate(selected.endDate)}</span>
               ) : (
@@ -445,23 +489,23 @@ export function AgendaClient({
             </div>
             {!selected.endDate && (
               <div className="flex items-center gap-3 text-sm">
-                <Clock className="size-5 shrink-0 text-primary" />
+                <Clock className={`size-5 shrink-0 ${past ? "text-muted-foreground" : "text-primary"}`} />
                 <span>{selected.time}</span>
               </div>
             )}
             <div className="flex items-center gap-3 text-sm">
-              <MapPin className="size-5 shrink-0 text-primary" />
+              <MapPin className={`size-5 shrink-0 ${past ? "text-muted-foreground" : "text-primary"}`} />
               <span>{selected.place}</span>
             </div>
             {selected.description && (
               <div className="flex items-start gap-3 text-sm">
-                <FileText className="size-5 shrink-0 text-primary mt-0.5" />
+                <FileText className={`size-5 shrink-0 mt-0.5 ${past ? "text-muted-foreground" : "text-primary"}`} />
                 <span className="text-foreground">{selected.description}</span>
               </div>
             )}
             {selected.link && (
               <div className="flex items-center gap-3 text-sm">
-                <LinkIcon className="size-5 shrink-0 text-primary" />
+                <LinkIcon className={`size-5 shrink-0 ${past ? "text-muted-foreground" : "text-primary"}`} />
                 <a
                   href={selected.link}
                   target="_blank"
@@ -491,7 +535,8 @@ export function AgendaClient({
               </div>
             )}
           </div>
-        )}
+          )
+        })()}
       </Modal>
 
       {/* Insert error banner */}
@@ -598,20 +643,42 @@ function EventRow({
 }) {
   const station = getStation(event.station)
   const d = localDate(event.date)
+  const past = isEventPast(event)
+  const ongoing = isEventOngoing(event)
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 text-left transition-colors active:bg-secondary"
+      className={`flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors active:bg-secondary ${
+        past
+          ? "border-border/60 bg-muted/35 opacity-70"
+          : ongoing
+            ? "border-primary/35 bg-primary/5"
+            : "border-border bg-card"
+      }`}
     >
       <div
-        className="flex size-12 shrink-0 flex-col items-center justify-center rounded-xl text-white"
-        style={{ backgroundColor: `hsl(${station.color})` }}
+        className={`flex size-12 shrink-0 flex-col items-center justify-center rounded-xl text-white ${past ? "grayscale" : ""}`}
+        style={{ backgroundColor: past ? "hsl(220 8% 55%)" : `hsl(${station.color})` }}
       >
         <span className="text-base font-bold leading-none">{d.getDate()}</span>
         {showMonth && <span className="text-[10px] uppercase">{MONTHS_TR[d.getMonth()].slice(0, 3)}</span>}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold text-foreground">{event.title}</p>
+        <div className="flex items-center gap-2">
+          <p className={`truncate font-semibold ${past ? "text-muted-foreground line-through decoration-muted-foreground/40" : "text-foreground"}`}>
+            {event.title}
+          </p>
+          {past && (
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              Geçmiş
+            </span>
+          )}
+          {ongoing && !past && (
+            <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+              Güncel
+            </span>
+          )}
+        </div>
         <div className="mt-0.5 flex flex-col gap-0.5 text-xs text-muted-foreground">
           {event.endDate ? (
             <span className="flex items-center gap-1">
@@ -790,6 +857,36 @@ function EventFormModal({
 // Parse date string as local time (avoids UTC→local offset shifting the day)
 function localDate(dateStr: string) {
   return new Date(dateStr + "T00:00:00")
+}
+
+/** True when the event has fully ended (period → end of endDate; once → date+time). */
+function isEventPast(event: EventItem, now = new Date()): boolean {
+  if (event.endDate) {
+    const end = localDate(event.endDate)
+    end.setHours(23, 59, 59, 999)
+    return end.getTime() < now.getTime()
+  }
+  const start = localDate(event.date)
+  const [hh, mm] = (event.time || "23:59").split(":").map((x) => Number(x) || 0)
+  start.setHours(hh, mm, 0, 0)
+  return start.getTime() < now.getTime()
+}
+
+function isEventOngoing(event: EventItem, now = new Date()): boolean {
+  if (!event.endDate) {
+    const start = localDate(event.date)
+    return (
+      start.getFullYear() === now.getFullYear() &&
+      start.getMonth() === now.getMonth() &&
+      start.getDate() === now.getDate() &&
+      !isEventPast(event, now)
+    )
+  }
+  const start = localDate(event.date)
+  start.setHours(0, 0, 0, 0)
+  const end = localDate(event.endDate)
+  end.setHours(23, 59, 59, 999)
+  return now.getTime() >= start.getTime() && now.getTime() <= end.getTime()
 }
 
 function formatLongDate(iso: string) {
