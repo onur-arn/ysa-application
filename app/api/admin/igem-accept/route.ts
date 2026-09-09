@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { isAdminEmail } from "@/lib/admin"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { archiveThenDelete } from "@/lib/admin-archive"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
   if (profile) {
     await admin.from("profiles").update({ igem_egitimi: "evet", igem_tarihi: igemDate ?? null }).eq("id", profile.id)
   }
-  await admin.from("igem_requests").delete().eq("id", requestId)
+  await archiveThenDelete("igem_requests", requestId, user.email ?? "admin")
 
   return NextResponse.json({ ok: true })
 }

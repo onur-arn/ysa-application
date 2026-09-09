@@ -5,7 +5,7 @@ import Link from "next/link"
 import {
   Shield, ArrowLeft, Loader2, Users, CalendarDays, Rocket, ListTodo,
   FileDown, MessageCircle, Newspaper, Search, UsersRound, UserRound,
-  Image as ImageIcon, Mic, Film,
+  Image as ImageIcon, Mic, Film, Trash2,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getStation } from "@/lib/data/stations"
@@ -38,7 +38,15 @@ type ChatMsg = {
   created_at: string
 }
 
-type Tab = "convs" | "members" | "events" | "igem" | "tasks" | "posts"
+type Tab = "convs" | "members" | "events" | "igem" | "tasks" | "posts" | "archive"
+type ArchiveItem = {
+  table: string
+  id: string
+  deletedBy: string | null
+  deletedAt: string
+  row: Record<string, unknown>
+  path?: string
+}
 
 export function AdminClient({ adminEmail }: { adminEmail: string }) {
   const { setHideNav } = useNavVisibility()
@@ -58,6 +66,8 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
   const [convSearch, setConvSearch] = useState("")
   const [exporting, setExporting] = useState(false)
   const [exportDone, setExportDone] = useState(false)
+  const [archives, setArchives] = useState<ArchiveItem[]>([])
+  const [stories, setStories] = useState<Array<{ id: string; author_name: string; station: string; created_at: string }>>([])
 
   useEffect(() => {
     setHideNav(true)
@@ -68,21 +78,31 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     async function load() {
       setLoading(true)
       const supabase = createClient()
-      const [m, e, ig, t, p, c] = await Promise.all([
+      const [m, e, ig, t, p, c, s] = await Promise.all([
         supabase.from("profiles").select("id,name,email,station,role,photo_url").order("name"),
         supabase.from("events").select("id,title,date,station,place").order("date", { ascending: false }),
         supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at").order("created_at", { ascending: false }),
         supabase.from("tasks").select("id,title,station,assignee,status").order("created_at", { ascending: false }),
         supabase.from("posts").select("id,author,content,station,created_at").order("created_at", { ascending: false }),
         supabase.from("conversations").select("id,type,name,created_at,conversation_members(member_name)").order("created_at", { ascending: false }),
+        supabase.from("stories").select("id,author_name,station,created_at").order("created_at", { ascending: false }),
       ])
       setMembers((m.data ?? []).filter((x) => !isAdminEmail(x.email)))
       setEvents(e.data ?? [])
       setIgemReqs(ig.data ?? [])
       setTasks(t.data ?? [])
       setPosts(p.data ?? [])
+      setStories((s.data ?? []) as Array<{ id: string; author_name: string; station: string; created_at: string }>)
       const conversationRows = (c.data ?? []) as ConvRow[]
       setConvs(conversationRows)
+
+      try {
+        const archRes = await fetch("/api/admin/archives")
+        if (archRes.ok) {
+          const json = await archRes.json()
+          setArchives(json.archives ?? [])
+        }
+      } catch {}
 
       if (conversationRows.length > 0) {
         const ids = conversationRows.map((x) => x.id)
@@ -187,8 +207,11 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
 
   async function deletePost(id: string) {
     setPosts((prev) => prev.filter((p) => p.id !== id))
-    const supabase = createClient()
-    await supabase.from("posts").delete().eq("id", id)
+    await fetch("/api/admin/delete-post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId: id }),
+    })
   }
 
   async function rejectIgem(id: string) {
@@ -218,7 +241,8 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     { key: "events",  icon: CalendarDays,  label: "Etkinlik",  count: events.length },
     { key: "igem",    icon: Rocket,        label: "iGEM",      count: igemReqs.length },
     { key: "tasks",   icon: ListTodo,      label: "Görevler",  count: tasks.length },
-    { key: "posts",   icon: Newspaper,     label: "Paylaşım",  count: posts.length },
+    { key: "posts",   icon: Newspaper,     label: "Paylaşım",  count: posts.length + stories.length },
+    { key: "archive", icon: Trash2,        label: "Arşiv",     count: archives.length },
   ]
 
   return (
@@ -253,7 +277,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
 
         {exportDone && (
           <p className="mb-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-600">
-            ✓ PDF raporu gönderildi
+            ✓ PDF özeti admin maillerine gönderildi
           </p>
         )}
 
@@ -488,22 +512,79 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
           )}
 
           {tab === "posts" && (
-            <ListBlock empty="Paylaşım yok" count={posts.length}>
-              {posts.map((p) => {
-                const s = getStation(p.station as never)
+            <div className="flex flex-col">
+              <ListBlock empty="Paylaşım yok" count={posts.length}>
+                {posts.map((p) => {
+                  const s = getStation(p.station as never)
+                  return (
+                    <div key={p.id} className="flex items-center gap-3 px-4 py-3">
+                      <span
+                        className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
+                        style={{ backgroundColor: `hsl(${s.color})` }}
+                      >
+                        {s.short}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-foreground">{p.author}</p>
+                        <p className="truncate text-xs text-muted-foreground">{p.content}</p>
+                      </div>
+                      <DeleteButton onConfirm={() => deletePost(p.id)} />
+                    </div>
+                  )
+                })}
+              </ListBlock>
+              {stories.length > 0 && (
+                <div className="border-t border-border/60">
+                  <p className="px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Stories ({stories.length})
+                  </p>
+                  {stories.map((st) => {
+                    const s = getStation(st.station as never)
+                    return (
+                      <div key={st.id} className="flex items-center gap-3 px-4 py-3">
+                        <span
+                          className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
+                          style={{ backgroundColor: `hsl(${s.color})` }}
+                        >
+                          {s.short}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-foreground">{st.author_name}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {new Date(st.created_at).toLocaleString("tr-TR")}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "archive" && (
+            <ListBlock empty="Arşivde silinmiş kayıt yok" count={archives.length}>
+              {archives.map((a, i) => {
+                const row = a.row ?? {}
+                const label =
+                  (row.title as string) ||
+                  (row.content as string) ||
+                  (row.motivation as string) ||
+                  (row.name as string) ||
+                  (row.author_name as string) ||
+                  (row.author as string) ||
+                  a.id
                 return (
-                  <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-                    <span
-                      className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
-                      style={{ backgroundColor: `hsl(${s.color})` }}
-                    >
-                      {s.short}
+                  <div key={`${a.path ?? a.id}-${i}`} className="flex items-start gap-3 px-4 py-3">
+                    <span className="mt-0.5 rounded-lg bg-destructive/10 px-2 py-1 text-[10px] font-bold uppercase text-destructive">
+                      {a.table}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-foreground">{p.author}</p>
-                      <p className="truncate text-xs text-muted-foreground">{p.content}</p>
+                      <p className="truncate text-sm font-semibold text-foreground">{String(label).slice(0, 100)}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        Silen: {a.deletedBy || "—"} · {a.deletedAt ? new Date(a.deletedAt).toLocaleString("tr-TR") : "—"}
+                      </p>
                     </div>
-                    <DeleteButton onConfirm={() => deletePost(p.id)} />
                   </div>
                 )
               })}

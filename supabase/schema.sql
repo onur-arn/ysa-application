@@ -485,3 +485,17 @@ create table if not exists password_reset_tokens (
 );
 alter table password_reset_tokens enable row level security;
 -- Only service-role (admin client) can access this table
+
+-- ── SOFT DELETE (admin archive — keep all history) ───────────────────────────
+alter table profiles add column if not exists deleted_at timestamptz;
+alter table profiles add column if not exists deleted_by text;
+alter table posts add column if not exists deleted_at timestamptz;
+alter table posts add column if not exists deleted_by text;
+alter table tasks add column if not exists deleted_at timestamptz;
+alter table tasks add column if not exists deleted_by text;
+alter table events add column if not exists deleted_at timestamptz;
+alter table events add column if not exists deleted_by text;
+alter table igem_requests add column if not exists deleted_at timestamptz;
+alter table igem_requests add column if not exists deleted_by text;
+alter table stories add column if not exists deleted_at timestamptz;
+alter table stories add column if not exists deleted_by text;

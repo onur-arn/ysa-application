@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { isAdminEmail } from "@/lib/admin"
 import { createClient } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { archiveThenDelete } from "@/lib/admin-archive"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -13,8 +13,7 @@ export async function POST(req: NextRequest) {
   const { requestId } = await req.json()
   if (!requestId) return NextResponse.json({ error: "Missing requestId" }, { status: 400 })
 
-  const admin = createAdminClient()
-  const { error } = await admin.from("igem_requests").delete().eq("id", requestId)
+  const { error } = await archiveThenDelete("igem_requests", requestId, user.email ?? "admin")
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ ok: true })

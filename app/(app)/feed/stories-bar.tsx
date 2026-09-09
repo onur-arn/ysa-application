@@ -203,8 +203,11 @@ export function StoriesBar({
     const updated = stories.filter((s) => s.id !== id)
     setStories(updated)
     try {
-      const supabase = createClient()
-      await supabase.from("stories").delete().eq("id", id)
+      await fetch("/api/admin/delete-story", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: id, authorName: user.name }),
+      })
     } catch {}
     const remaining = updated.filter((s) =>
       fromMyButton && active === user.station

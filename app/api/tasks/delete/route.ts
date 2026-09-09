@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { isAdminEmail } from "@/lib/admin"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { archiveThenDelete } from "@/lib/admin-archive"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Bu görevi silme yetkiniz yok" }, { status: 403 })
   }
 
-  const { error } = await admin.from("tasks").delete().eq("id", taskId)
+  const { error } = await archiveThenDelete("tasks", taskId, user.email ?? user.id)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

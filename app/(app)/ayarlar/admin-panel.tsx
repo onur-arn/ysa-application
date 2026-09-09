@@ -89,8 +89,11 @@ export function AdminPanel({ adminEmail }: { adminEmail: string }) {
 
   async function deletePost(id: string) {
     setPosts(prev => prev.filter(p => p.id !== id))
-    const supabase = createClient()
-    await supabase.from("posts").delete().eq("id", id)
+    await fetch("/api/admin/delete-post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId: id }),
+    })
   }
 
   async function rejectIgem(id: string) {

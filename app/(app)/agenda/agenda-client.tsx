@@ -195,9 +195,12 @@ export function AgendaClient({
   }
 
   async function handleDelete(eventId: string) {
-    const supabase = createClient()
-    const { error } = await supabase.from("events").delete().eq("id", eventId)
-    if (!error) {
+    const res = await fetch("/api/events/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId }),
+    })
+    if (res.ok) {
       setEvents((prev) => prev.filter((e) => e.id !== eventId))
       setSelected(null)
     }
