@@ -39,7 +39,7 @@ type ChatMsg = {
   created_at: string
 }
 
-type Tab = "convs" | "members" | "events" | "igem" | "tasks" | "posts" | "archive"
+type Tab = "convs" | "members" | "events" | "igem" | "tasks" | "posts" | "stories" | "archive"
 type ArchiveItem = {
   table: string
   id: string
@@ -47,6 +47,16 @@ type ArchiveItem = {
   deletedAt: string
   row: Record<string, unknown>
   path?: string
+}
+type StoryItem = {
+  id: string
+  author_name: string
+  station: string
+  created_at: string
+  image_url?: string | null
+  music_label?: string | null
+  music_preview_url?: string | null
+  initials?: string | null
 }
 
 export function AdminClient({ adminEmail }: { adminEmail: string }) {
@@ -68,7 +78,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
   const [exporting, setExporting] = useState(false)
   const [exportDone, setExportDone] = useState(false)
   const [archives, setArchives] = useState<ArchiveItem[]>([])
-  const [stories, setStories] = useState<Array<{ id: string; author_name: string; station: string; created_at: string }>>([])
+  const [stories, setStories] = useState<StoryItem[]>([])
 
   useEffect(() => {
     setHideNav(true)
@@ -84,7 +94,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
       supabase.from("igem_requests").select("id,author,initials,station,motivation,created_at").order("created_at", { ascending: false }),
       supabase.from("tasks").select("id,title,station,assignee,status").order("created_at", { ascending: false }),
       supabase.from("posts").select("id,author,content,station,created_at").order("created_at", { ascending: false }),
-      supabase.from("stories").select("id,author_name,station,created_at").order("created_at", { ascending: false }),
+      supabase.from("stories").select("id,author_name,station,created_at,image_url,music_label,music_preview_url,initials").order("created_at", { ascending: false }),
       fetch("/api/admin/conversations").then((r) => r.ok ? r.json() : null).catch(() => null),
     ])
     setMembers((m.data ?? []).filter((x) => !isAdminEmail(x.email)))
@@ -92,7 +102,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     setIgemReqs(ig.data ?? [])
     setTasks(t.data ?? [])
     setPosts(p.data ?? [])
-    setStories((s.data ?? []) as Array<{ id: string; author_name: string; station: string; created_at: string }>)
+    setStories((s.data ?? []) as StoryItem[])
 
     if (convRes?.conversations) {
       setConvs(convRes.conversations as ConvRow[])
@@ -231,6 +241,15 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     })
   }
 
+  async function deleteStory(id: string, authorName: string) {
+    setStories((prev) => prev.filter((s) => s.id !== id))
+    await fetch("/api/admin/delete-story", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storyId: id, authorName }),
+    })
+  }
+
   async function rejectIgem(id: string) {
     setIgemReqs((prev) => prev.filter((r) => r.id !== id))
     await fetch("/api/admin/delete-igem", {
@@ -258,7 +277,8 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     { key: "events",  icon: CalendarDays,  label: "Etkinlik",  count: events.length },
     { key: "igem",    icon: Rocket,        label: "iGEM",      count: igemReqs.length },
     { key: "tasks",   icon: ListTodo,      label: "Görevler",  count: tasks.length },
-    { key: "posts",   icon: Newspaper,     label: "Paylaşım",  count: posts.length + stories.length },
+    { key: "posts",   icon: Newspaper,     label: "Paylaşım",  count: posts.length },
+    { key: "stories", icon: Film,          label: "Stories",   count: stories.length },
     { key: "archive", icon: Trash2,        label: "Arşiv",     count: archives.length },
   ]
 
@@ -532,54 +552,63 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
           )}
 
           {tab === "posts" && (
-            <div className="flex flex-col">
-              <ListBlock empty="Paylaşım yok" count={posts.length}>
-                {posts.map((p) => {
-                  const s = getStation(p.station as never)
-                  return (
-                    <div key={p.id} className="flex items-center gap-3 px-4 py-3">
+            <ListBlock empty="Paylaşım yok" count={posts.length}>
+              {posts.map((p) => {
+                const s = getStation(p.station as never)
+                return (
+                  <div key={p.id} className="flex items-center gap-3 px-4 py-3">
+                    <span
+                      className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
+                      style={{ backgroundColor: `hsl(${s.color})` }}
+                    >
+                      {s.short}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-foreground">{p.author}</p>
+                      <p className="truncate text-xs text-muted-foreground">{p.content}</p>
+                    </div>
+                    <DeleteButton onConfirm={() => deletePost(p.id)} />
+                  </div>
+                )
+              })}
+            </ListBlock>
+          )}
+
+          {tab === "stories" && (
+            <ListBlock empty="Story yok" count={stories.length}>
+              {stories.map((st) => {
+                const s = getStation(st.station as never)
+                return (
+                  <div key={st.id} className="flex items-center gap-3 px-4 py-3">
+                    {st.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={st.image_url}
+                        alt=""
+                        className="size-12 shrink-0 rounded-xl object-cover"
+                      />
+                    ) : (
                       <span
-                        className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
+                        className="flex size-12 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
                         style={{ backgroundColor: `hsl(${s.color})` }}
                       >
                         {s.short}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-foreground">{p.author}</p>
-                        <p className="truncate text-xs text-muted-foreground">{p.content}</p>
-                      </div>
-                      <DeleteButton onConfirm={() => deletePost(p.id)} />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-foreground">{st.author_name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {s.name} · {new Date(st.created_at).toLocaleString("tr-TR")}
+                      </p>
+                      {st.music_label && (
+                        <p className="truncate text-[11px] text-primary">♪ {st.music_label}</p>
+                      )}
                     </div>
-                  )
-                })}
-              </ListBlock>
-              {stories.length > 0 && (
-                <div className="border-t border-border/60">
-                  <p className="px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                    Stories ({stories.length})
-                  </p>
-                  {stories.map((st) => {
-                    const s = getStation(st.station as never)
-                    return (
-                      <div key={st.id} className="flex items-center gap-3 px-4 py-3">
-                        <span
-                          className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white"
-                          style={{ backgroundColor: `hsl(${s.color})` }}
-                        >
-                          {s.short}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-foreground">{st.author_name}</p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {new Date(st.created_at).toLocaleString("tr-TR")}
-                          </p>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+                    <DeleteButton onConfirm={() => deleteStory(st.id, st.author_name)} />
+                  </div>
+                )
+              })}
+            </ListBlock>
           )}
 
           {tab === "archive" && (

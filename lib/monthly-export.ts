@@ -42,6 +42,7 @@ type ExportData = {
   igemComments: Record<string, unknown>[]
   events: Record<string, unknown>[]
   stories: Record<string, unknown>[]
+  storyReactions: Array<{ story_id: string; user_name: string }>
   pendingMembers: Record<string, unknown>[]
   conversations: Record<string, unknown>[]
   archives: ArchiveEntry[]
@@ -80,7 +81,7 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
     .select("id, type, name, created_at, conversation_members(member_name), chat_messages(sender_name, text, image_url, gif_url, audio_url, created_at, is_system)")
     .order("created_at", { ascending: true })
 
-  const [profRes, postRes, taskRes, taskComRes, igemRes, igemComRes, eventRes, storyRes, pendRes, convRes, archives] =
+  const [profRes, postRes, taskRes, taskComRes, igemRes, igemComRes, eventRes, storyRes, storyReactRes, pendRes, convRes, archives] =
     await Promise.all([
       admin.from("profiles").select("*").order("name"),
       postsQuery,
@@ -90,6 +91,7 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
       admin.from("igem_comments").select("*").order("created_at", { ascending: true }),
       eventsQuery,
       storiesQuery,
+      admin.from("story_reactions").select("story_id,user_name"),
       admin.from("pending_members").select("*").order("created_at", { ascending: false }),
       convQuery,
       listArchives(800),
@@ -131,6 +133,7 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
     igemComments: igemComRes.data ?? [],
     events: eventRes.data ?? [],
     stories: storyRes.data ?? [],
+    storyReactions: (storyReactRes.data ?? []) as Array<{ story_id: string; user_name: string }>,
     pendingMembers: pendRes.data ?? [],
     conversations,
     archives: filteredArchives,
@@ -140,7 +143,7 @@ async function fetchExportData(period?: ExportPeriod): Promise<ExportData> {
 function buildExportHtml(data: ExportData, opts: { title: string; subtitle: string; periodLabel?: string }) {
   const {
     profiles, posts, tasks, taskComments, igem, igemComments,
-    events, stories, pendingMembers, conversations, archives,
+    events, stories, storyReactions, pendingMembers, conversations, archives,
   } = data
   const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" })
 
@@ -274,13 +277,33 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
     ]
   })
 
-  const storiesRows = stories.map((s) => [
-    escapeHtml(s.author_name),
-    escapeHtml(s.station),
-    escapeHtml(s.music_label),
-    escapeHtml(s.created_at ? new Date(s.created_at as string).toLocaleString("fr-FR") : ""),
-    s.image_url ? "Oui" : "Non",
-  ])
+  const reactionsByStory = new Map<string, string[]>()
+  for (const r of storyReactions) {
+    const sid = r.story_id
+    const arr = reactionsByStory.get(sid) ?? []
+    if (!arr.includes(r.user_name)) arr.push(r.user_name)
+    reactionsByStory.set(sid, arr)
+  }
+
+  const storiesRows = stories.map((s) => {
+    const id = String(s.id ?? "")
+    const likers = reactionsByStory.get(id) ?? []
+    const img = s.image_url
+      ? `<a href="${escapeHtml(s.image_url)}" target="_blank" rel="noopener"><img src="${escapeHtml(s.image_url)}" alt="story" style="max-width:120px;max-height:180px;border-radius:8px;object-fit:cover;display:block" /></a>`
+      : "—"
+    return [
+      escapeHtml(s.author_name),
+      escapeHtml(s.station),
+      escapeHtml(s.music_label) || "—",
+      escapeHtml(s.created_at ? new Date(s.created_at as string).toLocaleString("fr-FR") : ""),
+      img,
+      likers.length > 0 ? `${likers.length} ♥ — ${escapeHtml(likers.join(", "))}` : "0",
+    ]
+  })
+
+  const storiesHtml = stories.length > 0
+    ? table(["Auteur", "Station", "Musique", "Date", "Image", "Réactions"], storiesRows)
+    : "<p style='color:#6b7280;font-size:13px'>Aucune story.</p>"
 
   type ConvRow = {
     id: string
@@ -378,11 +401,7 @@ function buildExportHtml(data: ExportData, opts: { title: string; subtitle: stri
     posts.length > 0 ? postsHtml : "<p style='color:#6b7280;font-size:13px'>Aucune publication.</p>"
   )}
 
-  ${section("📲 Stories (" + stories.length + ")",
-    stories.length > 0
-      ? table(["Auteur", "Station", "Musique", "Date", "Image"], storiesRows)
-      : "<p style='color:#6b7280;font-size:13px'>Aucune story.</p>"
-  )}
+  ${section("📲 Stories (" + stories.length + ")", storiesHtml)}
 
   ${section("✅ Tâches (" + tasks.length + ")",
     tasks.length > 0
