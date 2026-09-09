@@ -269,9 +269,21 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
 
   async function deleteConversation(id: string) {
     const ok = window.confirm(
-      "Bu sohbeti her yerden silmek istediğinize emin misiniz? Mesajlar ve üyeler de silinir (arşive kaydedilir).",
+      "Bu sohbeti her yerden kalıcı olarak silmek istediğinize emin misiniz? Mesajlar da silinir ve geri gelmez.",
     )
     if (!ok) return
+
+    const res = await fetch("/api/admin/delete-conversation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: id }),
+    })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({})) as { error?: string }
+      window.alert(json.error || "Sohbet silinemedi")
+      return
+    }
+
     setConvs((prev) => prev.filter((c) => c.id !== id))
     setMsgCounts((prev) => {
       const next = { ...prev }
@@ -292,24 +304,6 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
       setSelectedConvId(null)
       setMessages([])
     }
-    const res = await fetch("/api/admin/delete-conversation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: id }),
-    })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({})) as { error?: string }
-      window.alert(json.error || "Sohbet silinemedi")
-      void load({ silent: true })
-      return
-    }
-    try {
-      const archRes = await fetch("/api/admin/archives")
-      if (archRes.ok) {
-        const json = await archRes.json()
-        setArchives(json.archives ?? [])
-      }
-    } catch { /* ignore */ }
   }
 
   async function exportPdf() {
@@ -358,7 +352,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
     { key: "igem",    icon: Rocket,        label: "iGEM",      count: igemReqs.length },
     { key: "tasks",   icon: ListTodo,      label: "Görevler",  count: tasks.length },
     { key: "posts",   icon: Newspaper,     label: "Paylaşım",  count: posts.length },
-    { key: "stories", icon: Film,          label: "Stories",   count: stories.length },
+    { key: "stories", icon: Film,          label: "Hikayeler", count: stories.length },
     { key: "archive", icon: Trash2,        label: "Arşiv",     count: archives.length },
   ]
 
@@ -669,7 +663,7 @@ export function AdminClient({ adminEmail }: { adminEmail: string }) {
           )}
 
           {tab === "stories" && (
-            <ListBlock empty="Story yok" count={stories.length}>
+            <ListBlock empty="Hikaye yok" count={stories.length}>
               {stories.map((st) => {
                 const s = getStation(st.station as never)
                 return (

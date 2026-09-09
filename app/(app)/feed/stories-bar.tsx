@@ -568,9 +568,9 @@ export function StoriesBar({
               : "border-2 border-dashed border-primary/50 bg-primary/5"
           }`}>
             {myStories.length > 0 ? (
-              <img src={myStories[myStories.length - 1].imageUrl} alt="Ma story" className="h-full w-full object-cover" />
+              <img src={myStories[myStories.length - 1].imageUrl} alt="Hikayem" className="h-full w-full object-cover" />
             ) : user.photoUrl ? (
-              <img src={user.photoUrl} alt="Mon profil" className="h-full w-full object-cover" />
+              <img src={user.photoUrl} alt="Hikayem" className="h-full w-full object-cover" />
             ) : (
               <Plus className="h-6 w-6 text-primary" />
             )}
