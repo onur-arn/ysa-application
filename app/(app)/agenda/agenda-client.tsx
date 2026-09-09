@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText, Trash2, Pencil } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
@@ -557,13 +557,13 @@ export function AgendaClient({
           setInsertError(null)
           const supabase = createClient()
           const { data: { user } } = await supabase.auth.getUser()
-          // Pre-generate UUID client-side to avoid relying on .select() after insert
-          // (which fails when PostgREST schema cache is stale)
-          const newId = crypto.randomUUID()
+          const newId = e.id || crypto.randomUUID()
           const newEvent = { ...e, id: newId, createdBy: user?.id }
 
-          // Show event immediately in UI
-          setEvents((prev) => [...prev, newEvent])
+          setEvents((prev) => {
+            if (prev.some((x) => x.id === newId)) return prev
+            return [...prev, newEvent]
+          })
           if (e.date) {
             const d = new Date(e.date + "T00:00:00")
             setCursor(new Date(d.getFullYear(), d.getMonth(), 1))
@@ -727,33 +727,43 @@ function EventFormModal({
   const [description, setDescription] = useState(initialValues?.description ?? "")
   const [link, setLink]         = useState(initialValues?.link ?? "")
   const [station, setStation]   = useState<string>(initialValues?.station ?? userStation)
+  const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     if (!initialValues) setStation(userStation)
   }, [userStation, initialValues])
 
-  function submit() {
+  async function submit() {
     if (!title.trim() || !day) return
     if (eventType === "once" && !time) return
     if (eventType === "period" && !endDay) return
-    onSubmit({
-      id: initialValues?.id ?? String(Date.now()),
-      title: title.trim(),
-      date: day,
-      time: eventType === "period" ? "00:00" : time,
-      place: place || "—",
-      station: station as StationId,
-      description: description.trim() || undefined,
-      link: link.trim() || undefined,
-      endDate: eventType === "period" ? endDay : undefined,
-      likes: 0,
-      participantsCount: 0,
-      notAttendingCount: 0,
-      comments: [],
-    })
-    if (!isEdit) {
-      setTitle(""); setDay(""); setEndDay(""); setTime(currentRounded()); setPlace("")
-      setDescription(""); setLink(""); setStation(userStation); setEventType("once")
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      await onSubmit({
+        id: initialValues?.id ?? crypto.randomUUID(),
+        title: title.trim(),
+        date: day,
+        time: eventType === "period" ? "00:00" : time,
+        place: place || "—",
+        station: station as StationId,
+        description: description.trim() || undefined,
+        link: link.trim() || undefined,
+        endDate: eventType === "period" ? endDay : undefined,
+        likes: 0,
+        participantsCount: 0,
+        notAttendingCount: 0,
+        comments: [],
+      })
+      if (!isEdit) {
+        setTitle(""); setDay(""); setEndDay(""); setTime(currentRounded()); setPlace("")
+        setDescription(""); setLink(""); setStation(userStation); setEventType("once")
+      }
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -845,8 +855,13 @@ function EventFormModal({
             </div>
           </Field>
         )}
-        <Button onClick={submit} disabled={!title.trim() || !day || (eventType === "once" && !time) || (eventType === "period" && !endDay)} className="mt-1 h-12">
-          {isEdit ? "Kaydet" : t("agenda.create")}
+        <Button
+          type="button"
+          onClick={submit}
+          disabled={submitting || !title.trim() || !day || (eventType === "once" && !time) || (eventType === "period" && !endDay)}
+          className="mt-1 h-12"
+        >
+          {submitting ? "Kaydediliyor…" : isEdit ? "Kaydet" : t("agenda.create")}
         </Button>
       </div>
     </Modal>

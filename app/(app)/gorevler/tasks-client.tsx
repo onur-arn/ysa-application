@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown, Check, Trash2, CalendarClock } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
@@ -254,11 +254,15 @@ export function TasksClient({
         creatorName={myName}
         creatorInitials={myInitials}
         onCreate={async (task) => {
-          setTasks((prev) => [task, ...prev])
+          setTasks((prev) => {
+            if (prev.some((t) => t.id === task.id)) return prev
+            return [task, ...prev]
+          })
           setCreateOpen(false)
           const supabase = createClient()
           const { data: { user: u } } = await supabase.auth.getUser()
-          const { data, error } = await supabase.from("tasks").insert({
+          const { error } = await supabase.from("tasks").insert({
+            id: task.id,
             title: task.title,
             description: task.description || null,
             status: task.status,
@@ -271,13 +275,13 @@ export function TasksClient({
             assigned_by_station: task.assignedByStation || null,
             created_by: u?.id ?? null,
             due_date: task.dueDate || null,
-          }).select().single()
-          if (!error && data) {
-            // Replace temp ID with real UUID, and set createdById
-            setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, id: data.id, createdById: u?.id ?? undefined } : t))
-          } else if (error) {
-            // Rollback
+          })
+          if (error) {
             setTasks((prev) => prev.filter((t) => t.id !== task.id))
+          } else {
+            setTasks((prev) =>
+              prev.map((t) => (t.id === task.id ? { ...t, createdById: u?.id ?? undefined } : t)),
+            )
           }
         }}
       />
@@ -558,6 +562,8 @@ function CreateTaskModal({
   const [dueDate, setDueDate]                   = useState("")
   const [selectedAssignee, setSelectedAssignee] = useState<AssigneeMember | null>(null)
   const [stationMembers, setStationMembers]     = useState<AssigneeMember[]>([])
+  const [submitting, setSubmitting]             = useState(false)
+  const submittingRef = useRef(false)
 
   const targetStation = isIntl ? station : creatorStation
 
@@ -585,29 +591,36 @@ function CreateTaskModal({
     loadFromSupabase()
   }, [targetStation])
 
-  function submit() {
-    if (!title.trim()) return
-    onCreate({
-      id: String(Date.now()),
-      title: title.trim(),
-      description: description.trim(),
-      station: targetStation as StationId,
-      priority,
-      assignedBy: creatorName || "Uluslararası Büro",
-      assignedByInitials: creatorInitials || "INT",
-      assignedByStation: creatorStation,
-      assignee: selectedAssignee?.name ?? "Atanmadı",
-      assigneeInitials: selectedAssignee?.initials ?? "NA",
-      status: "todo",
-      comments: [],
-      dueDate: dueDate || undefined,
-    })
-    setTitle("")
-    setDescription("")
-    setStation(isIntl ? "paris" : creatorStation)
-    setPriority("normal")
-    setDueDate("")
-    setSelectedAssignee(null)
+  async function submit() {
+    if (!title.trim() || submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      await onCreate({
+        id: crypto.randomUUID(),
+        title: title.trim(),
+        description: description.trim(),
+        station: targetStation as StationId,
+        priority,
+        assignedBy: creatorName || "Uluslararası Büro",
+        assignedByInitials: creatorInitials || "INT",
+        assignedByStation: creatorStation,
+        assignee: selectedAssignee?.name ?? "Atanmadı",
+        assigneeInitials: selectedAssignee?.initials ?? "NA",
+        status: "todo",
+        comments: [],
+        dueDate: dueDate || undefined,
+      })
+      setTitle("")
+      setDescription("")
+      setStation(isIntl ? "paris" : creatorStation)
+      setPriority("normal")
+      setDueDate("")
+      setSelectedAssignee(null)
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
   }
 
   const priorities: { value: TaskPriority; label: string }[] = [
@@ -744,8 +757,8 @@ function CreateTaskModal({
           )}
         </Field>
 
-        <Button onClick={submit} className="mt-1 h-12" disabled={!title.trim()}>
-          {t("common.create")}
+        <Button onClick={submit} className="mt-1 h-12" disabled={!title.trim() || submitting}>
+          {submitting ? "Kaydediliyor…" : t("common.create")}
         </Button>
       </div>
     </Modal>
