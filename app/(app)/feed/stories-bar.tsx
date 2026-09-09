@@ -75,12 +75,8 @@ export function StoriesBar({
 
   function handleViewerPointerDown() {
     holdTimerRef.current = setTimeout(() => setPaused(true), 180)
-    // User gesture: unlock music if autoplay failed on reopen
-    const audio = storyAudioRef.current
-    if (audio && musicBlocked) {
-      audio.play()
-        .then(() => setMusicBlocked(false))
-        .catch(() => {})
+    if (musicBlocked && musicUrlRef.current) {
+      playStoryMusic(musicUrlRef.current)
     }
   }
 
@@ -104,48 +100,87 @@ export function StoriesBar({
   const fileRef = useRef<HTMLInputElement>(null)
   const storyAudioRef = useRef<HTMLAudioElement | null>(null)
   const [musicBlocked, setMusicBlocked] = useState(false)
-  // Preserve user-gesture unlock so autoplay works on reopen
+  /** True after user opened the viewer with a tap (required for iOS autoplay). */
   const musicGestureRef = useRef(false)
+  const musicUrlRef = useRef<string | undefined>(undefined)
 
-  function destroyStoryAudio() {
+  function resolveMusicSrc(previewUrl?: string | null) {
+    if (!previewUrl) return ""
+    // Already proxied or relative
+    if (previewUrl.startsWith("/api/deezer-preview")) return previewUrl
+    // Deezer CDN — proxy to avoid silent hotlink blocks
+    if (/dzcdn\.net|deezer\.com/i.test(previewUrl)) {
+      return `/api/deezer-preview?url=${encodeURIComponent(previewUrl)}`
+    }
+    return previewUrl
+  }
+
+  function ensureAudioEl() {
+    if (storyAudioRef.current) return storyAudioRef.current
+    const audio = new Audio()
+    audio.preload = "auto"
+    audio.loop = true
+    // @ts-expect-error playsInline exists on HTMLMediaElement in WebKit
+    audio.playsInline = true
+    storyAudioRef.current = audio
+    return audio
+  }
+
+  function stopStoryMusic() {
     const audio = storyAudioRef.current
-    storyAudioRef.current = null
     if (!audio) return
     try {
       audio.pause()
-      audio.onended = null
-      audio.onerror = null
-      audio.oncanplay = null
       audio.removeAttribute("src")
       audio.load()
     } catch {}
   }
 
-  /** Must run inside a user gesture (tap) so iOS/Safari allow playback. */
-  function playStoryMusic(previewUrl?: string) {
-    destroyStoryAudio()
-    setMusicBlocked(false)
-    if (!previewUrl) return
+  /** Call from a tap handler — keeps play() inside the user-gesture window. */
+  function playStoryMusic(previewUrl?: string | null) {
+    const src = resolveMusicSrc(previewUrl)
+    if (!src) {
+      stopStoryMusic()
+      setMusicBlocked(false)
+      return
+    }
     musicGestureRef.current = true
-    const audio = new Audio(previewUrl)
-    audio.preload = "auto"
+    const audio = ensureAudioEl()
     audio.loop = true
-    audio.volume = 0.7
-    storyAudioRef.current = audio
+    audio.volume = 0.85
     audio.onerror = () => setMusicBlocked(true)
-    void audio.play()
-      .then(() => setMusicBlocked(false))
-      .catch(() => {
-        // One retry after canplay (still often within gesture window on Android)
-        const retry = () => {
-          if (storyAudioRef.current !== audio) return
-          void audio.play()
-            .then(() => setMusicBlocked(false))
-            .catch(() => setMusicBlocked(true))
-        }
-        audio.addEventListener("canplay", retry, { once: true })
-        setMusicBlocked(true)
-      })
+
+    // Same track already loaded
+    if (audio.getAttribute("data-ys-src") === src) {
+      if (audio.paused) {
+        void audio.play().then(() => setMusicBlocked(false)).catch(() => setMusicBlocked(true))
+      } else {
+        setMusicBlocked(false)
+      }
+      return
+    }
+
+    audio.setAttribute("data-ys-src", src)
+    audio.src = src
+    // play() immediately in gesture; browser buffers as needed
+    const attempt = () =>
+      audio.play()
+        .then(() => setMusicBlocked(false))
+        .catch(() => {
+          const onReady = () => {
+            void audio.play()
+              .then(() => setMusicBlocked(false))
+              .catch(() => setMusicBlocked(true))
+          }
+          audio.addEventListener("canplay", onReady, { once: true })
+          audio.addEventListener("loadeddata", onReady, { once: true })
+          // Brief delayed retry still helps on Android
+          setTimeout(() => {
+            if (storyAudioRef.current === audio && audio.paused) onReady()
+          }, 120)
+          setMusicBlocked(true)
+        })
+    attempt()
   }
 
   // Load seen IDs per user (shared device must not inherit another account's seen state)
@@ -430,6 +465,7 @@ export function StoriesBar({
     : []
   const currentStory  = activeStories[storyIdx] ?? null
   const activeStation = STATIONS_SORTED.find((s) => s.id === active)
+  musicUrlRef.current = currentStory?.musicPreviewUrl
 
   // Preload adjacent story when index changes
   useEffect(() => {
@@ -443,35 +479,37 @@ export function StoriesBar({
 
   // Stop music when the viewer closes
   useEffect(() => {
-    if (!active) destroyStoryAudio()
+    if (!active) {
+      stopStoryMusic()
+      musicGestureRef.current = false
+    }
   }, [active])
 
-  // Pause/resume music with story hold-to-pause (respect intentional mute)
+  // Pause/resume music with story hold-to-pause
   useEffect(() => {
     const audio = storyAudioRef.current
-    if (!audio || !audio.src) return
+    if (!audio?.src) return
     if (paused) {
       audio.pause()
       return
     }
-    if (!musicBlocked) {
-      audio.play().catch(() => setMusicBlocked(true))
+    if (!musicBlocked && musicGestureRef.current) {
+      void audio.play().catch(() => setMusicBlocked(true))
     }
-  }, [paused, musicBlocked])
+  }, [paused])
 
   function toggleMusic() {
-    const audio = storyAudioRef.current
     const url = currentStory?.musicPreviewUrl
-    if (!audio || !audio.src) {
+    musicGestureRef.current = true
+    const audio = storyAudioRef.current
+    if (!audio?.src || musicBlocked) {
       if (url) playStoryMusic(url)
       return
     }
-    musicGestureRef.current = true
-    if (musicBlocked || audio.paused) {
+    if (audio.paused) {
       void audio.play()
         .then(() => setMusicBlocked(false))
         .catch(() => {
-          // Re-create under this gesture if the element is stuck
           if (url) playStoryMusic(url)
           else setMusicBlocked(true)
         })
