@@ -14,7 +14,7 @@ export default async function TasksPage() {
     supabase.from("profiles").select("id,name,photo_url"),
     supabase
       .from("tasks")
-      .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at,created_by")
+      .select("id,title,description,status,priority,station,assignee,assignee_initials,assigned_by,assigned_by_initials,assigned_by_station,created_at,created_by,due_date")
       .order("created_at", { ascending: false }),
     supabase
       .from("task_comments")

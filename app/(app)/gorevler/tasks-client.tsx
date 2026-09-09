@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown, Check, Trash2 } from "lucide-react"
+import { Plus, Circle, CircleDot, CheckCircle2, MessageSquare, Send, ChevronDown, Check, Trash2, CalendarClock } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { type Task, type TaskStatus, type TaskPriority, type TaskComment } from "@/lib/data/tasks"
 import { getStation, STATIONS, MEMBERS, type StationId } from "@/lib/data/stations"
@@ -55,6 +55,7 @@ function mapTasksFromRaw(
     assignedByStation: ((t.assigned_by_station as StationId) ?? "paris"),
     comments: commentsByTask[t.id as string] ?? [],
     createdById: (t.created_by as string) ?? undefined,
+    dueDate: (t.due_date as string) || undefined,
   }))
 }
 
@@ -103,6 +104,7 @@ export function TasksClient({
             assignedByStation: ((t.assigned_by_station as StationId) ?? "paris"),
             comments: [],
             createdById: (t.created_by as string) ?? undefined,
+            dueDate: (t.due_date as string) || undefined,
           }, ...prev]
         })
       })
@@ -268,6 +270,7 @@ export function TasksClient({
             assigned_by_initials: task.assignedByInitials || null,
             assigned_by_station: task.assignedByStation || null,
             created_by: u?.id ?? null,
+            due_date: task.dueDate || null,
           }).select().single()
           if (!error && data) {
             // Replace temp ID with real UUID, and set createdById
@@ -368,6 +371,7 @@ function TaskCard({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const station = getStation(task.station)
   const StatusIcon = STATUS_ICON[task.status]
+  const overdue = !!task.dueDate && task.status !== "done" && task.dueDate < new Date().toISOString().slice(0, 10)
 
   const priorityLabel: Record<TaskPriority, string> = {
     urgent: t("tasks.urgent"),
@@ -381,7 +385,9 @@ function TaskCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.97 }}
-      className="overflow-hidden rounded-2xl border border-border bg-card"
+      className={`overflow-hidden rounded-2xl border bg-card ${
+        overdue ? "border-destructive/40" : "border-border"
+      }`}
     >
       <div className="flex gap-3 p-3.5">
         <button
@@ -436,6 +442,17 @@ function TaskCard({
             >
               {station.short}
             </span>
+            {task.dueDate && (
+              <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                overdue
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-secondary text-muted-foreground"
+              }`}>
+                <CalendarClock className="size-3" />
+                {formatDueDate(task.dueDate)}
+                {overdue ? " · Gecikti" : ""}
+              </span>
+            )}
             {/* assignedBy → assignee */}
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <MiniAvatar name={task.assignedBy} initials={task.assignedByInitials} photoMap={photoMap} colorClass="bg-primary/15 text-primary" />
@@ -538,6 +555,7 @@ function CreateTaskModal({
   const [description, setDescription]           = useState("")
   const [station, setStation]                   = useState<string>(isIntl ? "paris" : creatorStation)
   const [priority, setPriority]                 = useState<TaskPriority>("normal")
+  const [dueDate, setDueDate]                   = useState("")
   const [selectedAssignee, setSelectedAssignee] = useState<AssigneeMember | null>(null)
   const [stationMembers, setStationMembers]     = useState<AssigneeMember[]>([])
 
@@ -582,11 +600,13 @@ function CreateTaskModal({
       assigneeInitials: selectedAssignee?.initials ?? "NA",
       status: "todo",
       comments: [],
+      dueDate: dueDate || undefined,
     })
     setTitle("")
     setDescription("")
     setStation(isIntl ? "paris" : creatorStation)
     setPriority("normal")
+    setDueDate("")
     setSelectedAssignee(null)
   }
 
@@ -628,6 +648,18 @@ function CreateTaskModal({
               </button>
             ))}
           </div>
+        </Field>
+
+        <Field label="Son tarih">
+          <input
+            type="date"
+            lang="tr"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            min={new Date().toISOString().slice(0, 10)}
+            className={inputClass + " text-sm"}
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">İsteğe bağlı — görev için deadline seçin</p>
         </Field>
 
         {/* Station (intl seulement) */}
@@ -718,4 +750,10 @@ function CreateTaskModal({
       </div>
     </Modal>
   )
+}
+
+function formatDueDate(isoDate: string) {
+  const d = new Date(isoDate + "T00:00:00")
+  if (Number.isNaN(d.getTime())) return isoDate
+  return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" })
 }

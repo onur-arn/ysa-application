@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { ADMIN_EMAILS } from "@/lib/admin"
 import { sendMail } from "@/lib/mailer"
 
-export const FEED_RETENTION_DAYS = 30
+export const FEED_RETENTION_DAYS = 7
 export const FEED_RETENTION_MS = FEED_RETENTION_DAYS * 24 * 60 * 60 * 1000
 
 function escapeHtml(s: unknown): string {
