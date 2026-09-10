@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sendMail } from "@/lib/mailer"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { createOrReuseAuthUser } from "@/lib/auth-admin"
 import { createHmac } from "crypto"
 import { buildWelcomePost } from "@/lib/welcome-post"
 import { isRoleAvailable } from "@/lib/roles"
@@ -60,32 +61,34 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Create auth user
-  let userId: string | null = null
-  const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
-    email: pending.email,
-    password: pending.password,
-    email_confirm: true,
-  })
-
-  if (authErr) {
-    if (authErr.code === "email_exists") {
-      // Find existing auth user via profiles table
-      const { data: existingProfile } = await admin.from("profiles").select("id").eq("email", pending.email).maybeSingle()
-      if (existingProfile) userId = existingProfile.id
-    } else {
-      console.error("[signup-approve] Auth user creation failed:", authErr)
-      return new NextResponse(
-        page("error", "Erreur lors de la création du compte."),
-        { headers: { "Content-Type": "text/html; charset=utf-8" } }
-      )
-    }
-  } else if (authUser.user) {
-    userId = authUser.user.id
+  const password = typeof pending.password === "string" ? pending.password : ""
+  if (!password || password.length < 6) {
+    return new NextResponse(
+      page("error", "Mot de passe de la demande invalide ou trop court. Demandez à l'utilisateur de se réinscrire."),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } },
+    )
   }
 
+  // Create auth user, or reuse orphan Auth account left by a previous failed approval
+  const { userId, error: authResolveErr, reused } = await createOrReuseAuthUser(
+    admin,
+    pending.email,
+    password,
+  )
+
   if (!userId) {
-    return new NextResponse(page("error", "Impossible de créer le compte."), { headers: { "Content-Type": "text/html; charset=utf-8" } })
+    console.error("[signup-approve] Auth user creation failed:", authResolveErr)
+    return new NextResponse(
+      page(
+        "error",
+        `Impossible de créer le compte.<br><small style="color:#6b7280">${authResolveErr ?? "Erreur Auth inconnue"}</small>`,
+      ),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } },
+    )
+  }
+
+  if (reused) {
+    console.log("[signup-approve] reused existing Auth user for", pending.email)
   }
 
   const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ""
