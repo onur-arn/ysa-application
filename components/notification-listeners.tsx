@@ -146,12 +146,12 @@ export function NotificationListeners({
         const isDirect = sameName(row.callee_name, nameRef.current)
         const isGroup = row.callee_name === GROUP_CALL_CALLEE
         if (!isDirect && !isGroup) return
-        showAppNotification("Yeni Mesaj", {
+        showAppNotification(isGroup ? "Gelen arama" : "Gelen arama", {
           body: isGroup
             ? `${row.caller_name ?? "Birisi"} grup araması başlattı`
             : `${row.caller_name ?? "Birisi"} seni arıyor`,
           tag: `call-${row.id ?? Date.now()}`,
-          url: row.conversation_id ? `/messages?open=${row.conversation_id}` : "/messages",
+          url: row.conversation_id ? `/messages?open=${row.conversation_id}&call=${row.id}` : "/messages",
         })
       })
     void subscribeChannel(supabase, channel)
