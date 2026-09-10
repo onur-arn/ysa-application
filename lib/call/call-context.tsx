@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { createClient } from "@/lib/supabase/client"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 import { CallOverlay } from "@/components/messaging/call-overlay"
-import { loadIceServers, prefetchIceServers, getTurnLoadError, isTurnConfigured } from "@/lib/call/ice-servers"
+import { loadIceServers, prefetchIceServers, getTurnLoadError, getTurnSource, getTurnWarning, isTurnConfigured, hasTurnRelay } from "@/lib/call/ice-servers"
 import { encodeCallEvent, type CallOutcome } from "@/lib/call/call-event"
 import { GROUP_CALL_CALLEE } from "@/lib/group-avatar"
 
@@ -46,8 +46,8 @@ type CallContextValue = {
 
 const CallContext = createContext<CallContextValue | null>(null)
 const RING_TIMEOUT_MS = 45_000
-const CONNECTING_TIMEOUT_MS = 30_000
-const ICE_BATCH_MS = 40
+const CONNECTING_TIMEOUT_MS = 35_000
+const ICE_POLL_MS = 900
 
 export function useCallOptional() {
   return useContext(CallContext)
@@ -131,6 +131,18 @@ export function CallProvider({ userName, children }: { userName: string; childre
     )
   }, [userName])
 
+  /** Send one ICE candidate immediately (trickle) — avoids batch races across NATs. */
+  const sendIceCandidate = useCallback((sessionId: string, candidate: RTCIceCandidateInit) => {
+    if (!userName) return
+    const supabase = createClient()
+    void supabase.from("call_signals").insert({
+      session_id: sessionId,
+      sender_name: userName,
+      signal_type: "ice",
+      payload: candidate,
+    })
+  }, [userName])
+
   const resetPc = useCallback(() => {
     if (iceTimerRef.current) clearTimeout(iceTimerRef.current)
     iceTimerRef.current = null
@@ -172,10 +184,15 @@ export function CallProvider({ userName, children }: { userName: string; childre
   }, [clearConnectingTimer])
 
   const failConnection = useCallback(async (message = "Bağlantı kurulamadı") => {
+    const src = getTurnSource()
+    const warn = getTurnWarning()
+    const detail = warn
+      ? `${message} (TURN: ${src}). ${warn}`
+      : `${message} (TURN: ${src})`
     const session = sessionRef.current ?? activeRef.current
     if (!session || session.id.startsWith("pending-")) {
       cleanup()
-      setCallError(message)
+      setCallError(detail)
       return
     }
     const hadMedia = connectedAtRef.current != null
@@ -194,7 +211,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     }
     await postCallEventRef.current?.(session, hadMedia ? "ended" : "missed")
     cleanup()
-    setCallError(message)
+    setCallError(detail)
   }, [cleanup, userName])
 
   // Wired after postCallEvent is defined
@@ -213,7 +230,9 @@ export function CallProvider({ userName, children }: { userName: string; childre
     }, CONNECTING_TIMEOUT_MS)
   }, [clearConnectingTimer, failConnection])
 
-  const queueOrAddIce = useCallback(async (sessionId: string, candidate: RTCIceCandidateInit) => {
+  const queueOrAddIce = useCallback(async (sessionId: string, candidate: RTCIceCandidateInit | null | undefined) => {
+    if (!candidate || typeof candidate !== "object") return
+    if (candidate.candidate === "") return
     const pc = pcRef.current
     const session = sessionRef.current ?? activeRef.current ?? incomingRef.current
     if (pc && pc.remoteDescription && session && session.id === sessionId) {
@@ -307,9 +326,13 @@ export function CallProvider({ userName, children }: { userName: string; childre
     resetPc()
 
     const iceServers = await loadIceServers()
+    const useRelay = hasTurnRelay(iceServers)
+    console.info("[call] ICE source", getTurnSource(), "relayPreferred", useRelay, "servers", iceServers.length)
     const pc = new RTCPeerConnection({
       iceServers,
-      iceCandidatePoolSize: 4,
+      iceCandidatePoolSize: 8,
+      // Force TURN when available — host/srflx often fail on 4G↔4G / CGNAT
+      iceTransportPolicy: useRelay ? "relay" : "all",
     })
     pc.ontrack = (e) => {
       e.track.enabled = true
@@ -318,21 +341,14 @@ export function CallProvider({ userName, children }: { userName: string; childre
         track.enabled = true
       }
       setRemoteStream(streamFromEvent)
+      if (e.track.kind === "audio") markMediaConnected()
     }
     pc.onicecandidate = (e) => {
       if (!e.candidate) {
         flushIce(sessionId)
         return
       }
-      iceBatchRef.current.push(e.candidate.toJSON())
-      if (!iceTimerRef.current) {
-        // Flush the first candidate immediately so the peer gets TURN relays fast
-        const delay = iceBatchRef.current.length <= 1 ? 0 : ICE_BATCH_MS
-        iceTimerRef.current = setTimeout(() => {
-          iceTimerRef.current = null
-          flushIce(sessionId)
-        }, delay)
-      }
+      sendIceCandidate(sessionId, e.candidate.toJSON())
     }
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
@@ -344,7 +360,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
       if (state === "failed") {
         console.warn("[call] connection failed")
-        if (!iceRestartAttemptedRef.current) {
+        if (!iceRestartAttemptedRef.current && useRelay) {
           iceRestartAttemptedRef.current = true
           try {
             pc.restartIce()
@@ -357,10 +373,15 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
     }
     pc.oniceconnectionstatechange = () => {
-      console.info("[call] iceConnectionState", pc.iceConnectionState)
+      const state = pc.iceConnectionState
+      console.info("[call] iceConnectionState", state)
+      if (state === "connected" || state === "completed") {
+        markMediaConnected()
+      } else if (state === "failed") {
+        void failConnection("ICE başarısız. TURN ayarlarını kontrol edin.")
+      }
     }
 
-    // Prefer addTrack — more reliable send path than addTransceiver(track)
     const audioTracks = stream.getAudioTracks()
     if (audioTracks.length > 0) {
       for (const track of audioTracks) {
@@ -376,6 +397,20 @@ export function CallProvider({ userName, children }: { userName: string; childre
     pcRef.current = pc
     return pc
   }
+
+  // While "connecting", re-pull ICE from DB in case Realtime missed candidates
+  useEffect(() => {
+    if (active?.status !== "connecting" || !active.id) return
+    const sessionId = active.id
+    const tick = () => {
+      const pc = pcRef.current
+      if (!pc?.remoteDescription || connectedAtRef.current) return
+      void loadStoredIce(sessionId, pc)
+    }
+    tick()
+    const t = setInterval(tick, ICE_POLL_MS)
+    return () => clearInterval(t)
+  }, [active?.status, active?.id, loadStoredIce])
 
   async function startCall({ conversationId, peerName, isGroup }: StartCallOpts) {
     const callType: CallType = "audio"

@@ -7,6 +7,7 @@ let cached: RTCIceServer[] | null = null
 let cacheUntil = 0
 let lastSource: "static" | "metered" | "openrelay" | "stun-only" | "none" = "none"
 let lastError: string | null = null
+let lastWarning: string | null = null
 
 function readTurnConfig() {
   if (typeof window !== "undefined" && window.__YS_CONFIG__) {
@@ -34,10 +35,27 @@ function iceFromStaticConfig(): RTCIceServer[] | null {
   return [...DEFAULT_STUN, turn]
 }
 
-function hasTurnRelay(servers: RTCIceServer[]): boolean {
+/** Normalize Metered / misc ICE payloads (`url` → `urls`). */
+export function normalizeIceServers(raw: unknown): RTCIceServer[] {
+  if (!Array.isArray(raw)) return []
+  const out: RTCIceServer[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const row = item as Record<string, unknown>
+    const urls = row.urls ?? row.url
+    if (!urls) continue
+    const server: RTCIceServer = { urls: urls as string | string[] }
+    if (typeof row.username === "string") server.username = row.username
+    if (typeof row.credential === "string") server.credential = row.credential
+    out.push(server)
+  }
+  return out
+}
+
+export function hasTurnRelay(servers: RTCIceServer[]): boolean {
   return servers.some((s) => {
     const list = Array.isArray(s.urls) ? s.urls : [s.urls]
-    return list.some((u) => typeof u === "string" && u.startsWith("turn"))
+    return list.some((u) => typeof u === "string" && (u.startsWith("turn:") || u.startsWith("turns:")))
   })
 }
 
@@ -54,6 +72,10 @@ export function getTurnLoadError(): string | null {
   return lastError
 }
 
+export function getTurnWarning(): string | null {
+  return lastWarning
+}
+
 export function getTurnSource() {
   return lastSource
 }
@@ -67,6 +89,7 @@ type IceApiResponse = {
   iceServers?: RTCIceServer[]
   source?: "static" | "metered" | "openrelay" | "stun-only" | "none"
   error?: string
+  warning?: string
   configured?: boolean
 }
 
@@ -76,6 +99,7 @@ export async function loadIceServers(): Promise<RTCIceServer[]> {
   if (staticIce) {
     lastSource = "static"
     lastError = null
+    lastWarning = null
     return staticIce
   }
 
@@ -87,26 +111,39 @@ export async function loadIceServers(): Promise<RTCIceServer[]> {
     const res = await fetch("/api/turn/ice-servers", { credentials: "include" })
     const data = (await res.json().catch(() => ({}))) as IceApiResponse | RTCIceServer[]
 
-    // Backward-compat: old API returned a bare array
-    const servers = Array.isArray(data)
+    const rawServers = Array.isArray(data)
       ? data
       : Array.isArray(data.iceServers)
         ? data.iceServers
-        : DEFAULT_STUN
+        : []
+    const servers = normalizeIceServers(rawServers)
+    const withStun = servers.length > 0 ? servers : DEFAULT_STUN
 
     lastSource = Array.isArray(data)
-      ? (hasTurnRelay(servers) ? "metered" : "stun-only")
+      ? (hasTurnRelay(withStun) ? "metered" : "stun-only")
       : (data.source ?? "stun-only")
     lastError = Array.isArray(data) ? null : (data.error ?? null)
+    lastWarning = Array.isArray(data) ? null : (data.warning ?? null)
 
-    if (hasTurnRelay(servers)) {
-      cached = servers
-      cacheUntil = Date.now() + 12 * 60 * 60 * 1000
-      lastError = null
-      return servers
+    if (hasTurnRelay(withStun)) {
+      // Only treat Metered/static as durable cache — openrelay is flaky
+      if (lastSource === "metered" || lastSource === "static") {
+        cached = withStun
+        cacheUntil = Date.now() + 12 * 60 * 60 * 1000
+      } else {
+        cached = withStun
+        cacheUntil = Date.now() + 5 * 60 * 1000
+      }
+      if (lastSource === "openrelay") {
+        lastWarning =
+          lastWarning ??
+          "TURN Open Relay (fallback). Configurez METERED_APP_NAME + METERED_SECRET_KEY sur Vercel."
+      } else {
+        lastError = null
+      }
+      return withStun
     }
 
-    // STUN-only — do not cache as "configured TURN"
     cached = null
     cacheUntil = 0
     if (!lastError) {
@@ -116,6 +153,7 @@ export async function loadIceServers(): Promise<RTCIceServer[]> {
   } catch {
     lastSource = "stun-only"
     lastError = "TURN servisine ulaşılamadı"
+    lastWarning = null
     return DEFAULT_STUN
   }
 }
