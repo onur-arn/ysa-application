@@ -104,6 +104,25 @@ async function fetchIceWithApiKey(base: string, apiKey: string): Promise<RTCIceS
   return hasTurnRelay(iceServers) ? iceServers : null
 }
 
+async function listMeteredCredentialApiKey(base: string, secretKey: string): Promise<string | null> {
+  const res = await fetch(
+    `${base}/api/v2/turn/credentials?secretKey=${encodeURIComponent(secretKey)}`,
+    { cache: "no-store" },
+  )
+  if (!res.ok) {
+    console.error("[turn] Metered list credentials:", res.status, await res.text())
+    return null
+  }
+  const body = (await res.json()) as { data?: { apiKey?: string; label?: string; expiryInSeconds?: number | null }[] }
+  const rows = body.data ?? []
+  // Prefer long-lived / our app label
+  const preferred =
+    rows.find((r) => r.label === "ysa-app" && r.apiKey) ??
+    rows.find((r) => r.apiKey && (r.expiryInSeconds == null || r.expiryInSeconds === 0)) ??
+    rows.find((r) => r.apiKey)
+  return preferred?.apiKey ?? null
+}
+
 async function tryMetered(userId: string): Promise<{ servers: RTCIceServer[] | null; detail: string }> {
   const base = meteredBaseUrl()
   const secretKey = process.env.METERED_SECRET_KEY?.trim()?.replace(/^["']|["']$/g, "")
@@ -143,6 +162,14 @@ async function tryMetered(userId: string): Promise<{ servers: RTCIceServer[] | n
   if (!createRes.ok) {
     const body = (await createRes.text()).slice(0, 200)
     console.error("[turn] Metered create:", createRes.status, body)
+    // Free-plan limit: reuse an existing credential apiKey
+    if (createRes.status === 403 && /credential limit/i.test(body)) {
+      const existing = await listMeteredCredentialApiKey(base, secretKey)
+      if (existing) {
+        const ice = await fetchIceWithApiKey(base, existing)
+        if (ice) return { servers: ice, detail: "reusedListedApiKey" }
+      }
+    }
     return { servers: null, detail: `Metered create ${createRes.status}: ${body}` }
   }
 
