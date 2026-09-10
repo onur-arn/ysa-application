@@ -14,12 +14,18 @@ type RawMsg = {
   image_url: string | null
   gif_url?: string | null
   audio_url?: string | null
+  file_url?: string | null
+  file_name?: string | null
+  file_mime?: string | null
+  file_size?: number | null
   message_type?: string | null
   is_system: boolean
   created_at: string
 }
 
 const SELECT_FULL =
+  "id,sender_name,sender_initials,text,image_url,gif_url,audio_url,file_url,file_name,file_mime,file_size,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))"
+const SELECT_NO_FILE =
   "id,sender_name,sender_initials,text,image_url,gif_url,audio_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))"
 const SELECT_NO_AUDIO =
   "id,sender_name,sender_initials,text,image_url,gif_url,message_type,is_system,created_at,message_polls(id,question,message_poll_options(id,text,position,message_poll_votes(option_id,voter_name)))"
@@ -45,26 +51,59 @@ function parsePoll(rawPoll: RawPoll | RawPoll[] | null | undefined): ChatPoll | 
 export function rowToChatMessage(m: RawMsg, senderName: string, poll?: ChatPoll): ChatMessage {
   const urlLooksAudio = (u?: string | null) =>
     !!u && /\.(webm|m4a|ogg|mp3|wav|aac)(\?|$)/i.test(u)
+  const urlLooksFile = (u?: string | null) =>
+    !!u && /\.(pdf|docx?|xlsx?|pptx?|txt|csv|zip)(\?|$)/i.test(u)
   const isAudio =
     m.message_type === "audio" ||
     !!m.audio_url ||
     urlLooksAudio(m.image_url) ||
     (m.text ?? "").startsWith("🎤")
+  const isFile =
+    !isAudio &&
+    (m.message_type === "file" ||
+      !!m.file_url ||
+      ((m.text ?? "").startsWith("📎 ") && urlLooksFile(m.image_url)))
   const audio =
     m.audio_url ??
     (isAudio ? (m.image_url ?? undefined) : undefined)
+  const fileUrl = m.file_url ?? (isFile ? (m.image_url ?? undefined) : undefined)
+  const fileName =
+    m.file_name ??
+    (isFile
+      ? ((m.text ?? "").replace(/^📎\s*/, "").trim() ||
+          fileUrl?.split("/").pop()?.split("?")[0] ||
+          "Dosya")
+      : undefined)
+  const caption =
+    isAudio
+      ? ""
+      : isFile
+        ? ((m.text ?? "").startsWith("📎") ? "" : (m.text ?? ""))
+        : (m.text ?? "")
   return {
     id: m.id,
     author: m.sender_name,
     initials: m.sender_initials,
-    text: isAudio ? "" : (m.text ?? ""),
+    text: caption,
     time: new Date(m.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
     createdAt: m.created_at,
     self: m.sender_name === senderName,
-    image: isAudio ? undefined : (m.image_url ?? undefined),
+    image: isAudio || isFile ? undefined : (m.image_url ?? undefined),
     gif: m.gif_url ?? undefined,
     audio: audio ?? undefined,
-    messageType: isAudio ? "audio" : ((m.message_type as ChatMessage["messageType"]) ?? undefined),
+    file: fileUrl
+      ? {
+          url: fileUrl,
+          name: fileName || "Dosya",
+          mime: m.file_mime ?? undefined,
+          size: m.file_size ?? undefined,
+        }
+      : undefined,
+    messageType: isAudio
+      ? "audio"
+      : isFile
+        ? "file"
+        : ((m.message_type as ChatMessage["messageType"]) ?? undefined),
     system: !!m.is_system,
     poll,
   }
@@ -76,7 +115,7 @@ export async function fetchChatMessages(conversationId: string, senderName: stri
   let data: Record<string, unknown>[] | null = null
   let errorMessage: string | undefined
 
-  for (const select of [SELECT_FULL, SELECT_NO_AUDIO, SELECT_MIN]) {
+  for (const select of [SELECT_FULL, SELECT_NO_FILE, SELECT_NO_AUDIO, SELECT_MIN]) {
     const res = await supabase
       .from("chat_messages")
       .select(select)

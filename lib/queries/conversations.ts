@@ -10,12 +10,14 @@ const CONV_WITH_AVATAR_UID =
   "id,type,name,initials,admin_name,avatar_url,created_at,conversation_members(member_name,is_admin,user_id)"
 
 const MSG_COLS_RICH =
+  "id,conversation_id,sender_name,sender_initials,text,image_url,gif_url,audio_url,file_url,file_name,file_mime,file_size,message_type,is_system,created_at"
+const MSG_COLS_MID =
   "id,conversation_id,sender_name,sender_initials,text,image_url,gif_url,message_type,is_system,created_at"
 const MSG_COLS_MIN =
   "id,conversation_id,sender_name,sender_initials,text,image_url,is_system,created_at"
 
 function isSchemaError(message?: string) {
-  return !!message && /user_id|audio_url|gif_url|avatar_url|message_type|schema cache|42703|PGRST/i.test(message)
+  return !!message && /user_id|audio_url|gif_url|file_url|file_name|avatar_url|message_type|schema cache|42703|PGRST/i.test(message)
 }
 
 async function membershipIds(
@@ -55,7 +57,7 @@ async function latestMessageByConv(
   const map = new Map<string, Record<string, unknown>>()
   if (convIds.length === 0) return map
 
-  const colsList = [MSG_COLS_RICH, MSG_COLS_MIN]
+  const colsList = [MSG_COLS_RICH, MSG_COLS_MID, MSG_COLS_MIN]
   let cols = colsList[0]
 
   // One latest message per conversation (parallel) — reliable sort by recency

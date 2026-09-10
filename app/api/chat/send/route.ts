@@ -14,12 +14,16 @@ export async function POST(req: NextRequest) {
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl : null
   const gifUrl = typeof body.gifUrl === "string" ? body.gifUrl : null
   const audioUrl = typeof body.audioUrl === "string" ? body.audioUrl : null
+  const fileUrl = typeof body.fileUrl === "string" ? body.fileUrl : null
+  const fileName = typeof body.fileName === "string" ? body.fileName : null
+  const fileMime = typeof body.fileMime === "string" ? body.fileMime : null
+  const fileSize = typeof body.fileSize === "number" ? body.fileSize : null
   const messageType = (body.messageType as string | undefined) ?? "text"
 
   if (!conversationId || conversationId.startsWith("pending-")) {
     return NextResponse.json({ error: "Geçersiz sohbet" }, { status: 400 })
   }
-  if (!text.trim() && !imageUrl && !gifUrl && !audioUrl) {
+  if (!text.trim() && !imageUrl && !gifUrl && !audioUrl && !fileUrl) {
     return NextResponse.json({ error: "Boş mesaj" }, { status: 400 })
   }
 
@@ -68,15 +72,26 @@ export async function POST(req: NextRequest) {
   // Try rich columns, then lean insert if schema is older
   let inserted: { id: string; created_at?: string } | null = null
   const attempts = [
+    {
+      ...base,
+      gif_url: gifUrl,
+      audio_url: audioUrl,
+      file_url: fileUrl,
+      file_name: fileName,
+      file_mime: fileMime,
+      file_size: fileSize,
+    },
     { ...base, gif_url: gifUrl, audio_url: audioUrl },
     { ...base, gif_url: gifUrl },
-    { ...base, image_url: imageUrl ?? gifUrl ?? audioUrl },
+    { ...base, image_url: imageUrl ?? gifUrl ?? audioUrl ?? fileUrl },
     {
       conversation_id: conversationId,
       sender_name: senderName,
       sender_initials: senderInitials,
-      text: text.trim() || (audioUrl ? "🎤 Sesli mesaj" : gifUrl ? "GIF" : null),
-      image_url: imageUrl ?? gifUrl ?? audioUrl,
+      text: text.trim()
+        || (fileUrl ? `📎 ${fileName || "Dosya"}` : null)
+        || (audioUrl ? "🎤 Sesli mesaj" : gifUrl ? "GIF" : null),
+      image_url: imageUrl ?? gifUrl ?? audioUrl ?? fileUrl,
     },
   ]
 
@@ -88,7 +103,7 @@ export async function POST(req: NextRequest) {
       break
     }
     lastError = error?.message ?? "insert failed"
-    if (error && !/audio_url|gif_url|message_type|PGRST|42703|schema/i.test(error.message)) {
+    if (error && !/audio_url|gif_url|file_url|file_name|file_mime|file_size|message_type|PGRST|42703|schema/i.test(error.message)) {
       break
     }
   }

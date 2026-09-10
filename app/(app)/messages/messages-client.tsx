@@ -7,7 +7,7 @@ import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion"
 import {
   Search, Send, ArrowLeft, Check, Plus,
   Users, X, ChevronRight, LogOut, UserPlus, Loader2, Pencil, ShieldCheck, BarChart2, Trash2,
-  Phone, Mic, Mail, Camera,
+  Phone, Mic, Mail, Camera, FileText, Download,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { GROUP_CHATS, DM_CHATS, type ChatMessage, type ChatPoll, type ChatPollOption, messagePreview } from "@/lib/data/messages"
@@ -133,7 +133,20 @@ function mapConversations(
     const memberNames = otherMembers.map((m) => m.member_name)
 
     // Derive last message from embedded chat_messages (newest by created_at)
-    const msgs = (c.chat_messages as { id: string; sender_name: string; sender_initials: string; text: string | null; image_url: string | null; gif_url?: string | null; audio_url?: string | null; message_type?: string | null; is_system: boolean; created_at: string }[]) ?? []
+    const msgs = (c.chat_messages as {
+      id: string
+      sender_name: string
+      sender_initials: string
+      text: string | null
+      image_url: string | null
+      gif_url?: string | null
+      audio_url?: string | null
+      file_url?: string | null
+      file_name?: string | null
+      message_type?: string | null
+      is_system: boolean
+      created_at: string
+    }[]) ?? []
     const lastMsgObj = msgs.reduce<(typeof msgs)[number] | null>((best, m) => {
       if (!best || m.created_at > best.created_at) return m
       return best
@@ -145,6 +158,11 @@ function mapConversations(
           image: lastMsgObj.image_url ?? undefined,
           gif: lastMsgObj.gif_url ?? undefined,
           audio: lastMsgObj.audio_url ?? undefined,
+          file: lastMsgObj.file_url
+            ? { name: lastMsgObj.file_name ?? undefined }
+            : lastMsgObj.message_type === "file"
+              ? { name: lastMsgObj.file_name ?? undefined }
+              : undefined,
         })
       : ((c.type as string) === "group" ? "Grup oluşturuldu" : "")
     const lastAt = lastMsgObj?.created_at ?? (c.created_at as string) ?? ""
@@ -2104,6 +2122,7 @@ function ChatView({
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const scrollRef   = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
   const attachRef = useRef<HTMLDivElement>(null)
 
   const chromeBubble =
@@ -2261,6 +2280,105 @@ function ChatView({
       console.error("[chat] gif:", e)
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
       window.alert("GIF gönderilemedi. Lütfen tekrar deneyin.")
+    }
+  }
+
+  function formatFileSize(bytes?: number) {
+    if (!bytes || bytes < 1) return ""
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  async function sendDocument(file: File) {
+    if (!conversationId || conversationId.startsWith("pending-") || !file) return
+    if (!senderName.trim()) {
+      window.alert("Profil adınız eksik.")
+      return
+    }
+    const time = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+    const createdAt = new Date().toISOString()
+    const tempId = `temp-file-${Date.now()}`
+    const localUrl = URL.createObjectURL(file)
+    const fileMeta = { url: localUrl, name: file.name, mime: file.type, size: file.size }
+
+    setMessages((prev) => [...prev, {
+      id: tempId,
+      author: senderName,
+      initials: senderInitials,
+      text: "",
+      time,
+      createdAt,
+      self: true,
+      file: fileMeta,
+      messageType: "file" as const,
+    }])
+    markConversationRead(conversationId, createdAt)
+    setUploading(true)
+
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("conversationId", conversationId)
+      const upRes = await fetch("/api/chat/upload-file", { method: "POST", body: form })
+      const upData = await upRes.json().catch(() => ({}))
+      if (!upRes.ok || !upData.url) {
+        console.error("[chat] file upload failed:", upData.error || upData.detail)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert(upData.error || "Dosya yüklenemedi. Lütfen tekrar deneyin.")
+        return
+      }
+
+      const res = await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          fileUrl: upData.url,
+          fileName: upData.name || file.name,
+          fileMime: upData.mime || file.type,
+          fileSize: upData.size ?? file.size,
+          messageType: "file",
+          text: `📎 ${upData.name || file.name}`,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.id) {
+        console.error("[chat] file send failed:", data.error)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        window.alert("Dosya gönderilemedi. Lütfen tekrar deneyin.")
+        return
+      }
+
+      const newMsg: ChatMessage = {
+        id: data.id as string,
+        author: senderName,
+        initials: senderInitials,
+        text: "",
+        time,
+        createdAt: (data.createdAt as string) || createdAt,
+        self: true,
+        file: {
+          url: upData.url as string,
+          name: (upData.name as string) || file.name,
+          mime: (upData.mime as string) || file.type,
+          size: (upData.size as number) ?? file.size,
+        },
+        messageType: "file",
+      }
+      setMessages((prev) => {
+        const updated = prev.map((m) => (m.id === tempId ? newMsg : m))
+        onMessagesChange?.(updated)
+        return updated
+      })
+      void broadcastChatMessage(conversationId, newMsg)
+      URL.revokeObjectURL(localUrl)
+    } catch (e) {
+      console.error("[chat] file:", e)
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      window.alert("Dosya gönderilemedi. Lütfen tekrar deneyin.")
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -2610,6 +2728,28 @@ function ChatView({
                       <img src={m.gif} alt="" className="mb-1 max-h-48 rounded-lg" />
                     )}
                     {m.audio && <AudioMessage src={m.audio} self={m.self} durationHint={m.audioDuration} />}
+                    {m.file && (
+                      <a
+                        href={m.file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download={m.file.name}
+                        className={`mb-1 flex items-center gap-2.5 rounded-xl px-2.5 py-2 ${
+                          m.self ? "bg-primary-foreground/15" : "bg-background/70"
+                        }`}
+                      >
+                        <span className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${m.self ? "bg-primary-foreground/20" : "bg-secondary"}`}>
+                          <FileText className="size-5" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-semibold leading-tight">{m.file.name}</span>
+                          <span className={`block text-[10px] ${m.self ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                            {[m.file.mime?.includes("pdf") ? "PDF" : m.file.name.split(".").pop()?.toUpperCase(), formatFileSize(m.file.size)].filter(Boolean).join(" · ")}
+                          </span>
+                        </span>
+                        <Download className="size-4 shrink-0 opacity-70" />
+                      </a>
+                    )}
                     {m.text && !m.audio && <p className="text-[15px] leading-relaxed">{m.text}</p>}
                     <span
                       className={`mt-0.5 block text-right text-[10px] ${m.self ? "text-primary-foreground/70" : "text-muted-foreground"}`}
@@ -2738,6 +2878,18 @@ function ChatView({
               }
             }}
           />
+          <input
+            ref={docInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv,application/zip"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              e.target.value = ""
+              void sendDocument(file)
+            }}
+          />
           <div ref={attachRef} className="relative">
             <button
               type="button"
@@ -2751,6 +2903,7 @@ function ChatView({
               open={showAttachMenu}
               onClose={() => setShowAttachMenu(false)}
               onImage={() => fileInputRef.current?.click()}
+              onFile={() => docInputRef.current?.click()}
               onGif={() => setShowGifPicker(true)}
               onPoll={() => setShowPollCompose(true)}
             />

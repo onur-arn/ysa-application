@@ -1,13 +1,14 @@
 "use client"
 
-import { BarChart2, ImageIcon, Smile } from "lucide-react"
+import { BarChart2, FileText, ImageIcon, Smile } from "lucide-react"
 
-export function AttachMenu({ open, onClose, onImage, onGif, onPoll }: {
+export function AttachMenu({ open, onClose, onImage, onGif, onPoll, onFile }: {
   open: boolean
   onClose: () => void
   onImage: () => void
   onGif: () => void
   onPoll: () => void
+  onFile?: () => void
 }) {
   if (!open) return null
   return (
@@ -15,6 +16,11 @@ export function AttachMenu({ open, onClose, onImage, onGif, onPoll }: {
       <button type="button" onClick={() => { onImage(); onClose() }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm active:bg-secondary">
         <ImageIcon className="size-5 text-primary" /> Fotoğraf
       </button>
+      {onFile && (
+        <button type="button" onClick={() => { onFile(); onClose() }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm active:bg-secondary">
+          <FileText className="size-5 text-sky-500" /> Belge
+        </button>
+      )}
       <button type="button" onClick={() => { onGif(); onClose() }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm active:bg-secondary">
         <Smile className="size-5 text-amber-500" /> GIF
       </button>

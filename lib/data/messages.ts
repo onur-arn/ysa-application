@@ -1,7 +1,7 @@
 import type { StationId } from "./stations"
 import { parseCallEvent, callEventPreview } from "@/lib/call/call-event"
 
-export type MessageType = "text" | "image" | "gif" | "audio" | "call" | "poll"
+export type MessageType = "text" | "image" | "gif" | "audio" | "call" | "poll" | "file"
 
 export type ChatPollOption = {
   id: string
@@ -29,6 +29,7 @@ export type ChatMessage = {
   audio?: string
   /** Voice note length in seconds (hint for UI before metadata loads) */
   audioDuration?: number
+  file?: { url: string; name: string; mime?: string; size?: number }
   messageType?: MessageType
   system?: boolean
   poll?: ChatPoll
@@ -60,13 +61,22 @@ export const GROUP_CHATS: GroupConversation[] = []
 
 export const DM_CHATS: DMConversation[] = []
 
-export function messagePreview(msg: { text?: string; messageType?: MessageType; image?: string; gif?: string; audio?: string }): string {
+export function messagePreview(msg: {
+  text?: string
+  messageType?: MessageType
+  image?: string
+  gif?: string
+  audio?: string
+  file?: { name?: string }
+}): string {
   if (msg.messageType === "audio" || msg.audio) return "🎤 Sesli mesaj"
+  if (msg.messageType === "file" || msg.file) return `📎 ${msg.file?.name || "Dosya"}`
   if (msg.messageType === "gif" || msg.gif) return "GIF"
   if (msg.messageType === "image" || msg.image) return "📷 Fotoğraf"
   if (msg.messageType === "call") {
     const event = parseCallEvent(msg.text)
     return event ? callEventPreview(event) : "📞 Arama"
   }
+  if ((msg.text ?? "").startsWith("📎 ")) return msg.text || "📎 Dosya"
   return msg.text || ""
 }
