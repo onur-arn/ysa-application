@@ -527,6 +527,19 @@ export function CallProvider({ userName, children }: { userName: string; childre
         },
       })
 
+      // Wake callee even if app is backgrounded / closed (Web Push)
+      void fetch("/api/call/ring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.id,
+          conversationId,
+          callerName: userName,
+          calleeName,
+          isGroup: !!isGroup,
+        }),
+      }).catch((err) => console.warn("[call] ring push failed", err))
+
       ringTimerRef.current = setTimeout(() => {
         void (async () => {
           const current = sessionRef.current
@@ -678,6 +691,82 @@ export function CallProvider({ userName, children }: { userName: string; childre
     if (!userName) return
     const supabase = createClient()
 
+    function adoptIncoming(row: {
+      id: string
+      conversation_id: string
+      caller_name: string
+      callee_name: string
+      call_type: CallType
+      status: string
+    }, isGroup: boolean) {
+      if (row.status !== "ringing") return
+      if (row.caller_name === userName) return
+      if (activeRef.current || incomingRef.current) return
+      setIncoming({
+        id: row.id,
+        conversationId: row.conversation_id,
+        callerName: row.caller_name,
+        calleeName: row.callee_name,
+        callType: row.call_type,
+        status: row.status,
+        isGroup,
+      })
+    }
+
+    // Recover ringing call after opening from push / cold start (Realtime INSERT already missed)
+    void (async () => {
+      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null
+      const callId = params?.get("call")
+
+      if (callId) {
+        const { data } = await supabase.from("call_sessions").select("*").eq("id", callId).maybeSingle()
+        if (data) {
+          const isGroup = data.callee_name === GROUP_CALL_CALLEE
+          const isDirect = (data.callee_name as string)?.trim() === userName.trim()
+          if (data.status === "ringing" && (isDirect || isGroup)) {
+            if (isGroup) {
+              const { data: mem } = await supabase
+                .from("conversation_members")
+                .select("conversation_id")
+                .eq("conversation_id", data.conversation_id)
+                .eq("member_name", userName)
+                .maybeSingle()
+              if (mem) adoptIncoming(data as never, true)
+            } else {
+              adoptIncoming(data as never, false)
+            }
+          }
+        }
+      }
+
+      const { data: ringing } = await supabase
+        .from("call_sessions")
+        .select("*")
+        .eq("status", "ringing")
+        .order("started_at", { ascending: false })
+        .limit(8)
+
+      for (const row of ringing ?? []) {
+        const isDirect = (row.callee_name as string)?.trim() === userName.trim()
+        const isGroup = row.callee_name === GROUP_CALL_CALLEE
+        if (!isDirect && !isGroup) continue
+        if ((row.caller_name as string) === userName) continue
+        if (isGroup) {
+          const { data: mem } = await supabase
+            .from("conversation_members")
+            .select("conversation_id")
+            .eq("conversation_id", row.conversation_id)
+            .eq("member_name", userName)
+            .maybeSingle()
+          if (!mem) continue
+          adoptIncoming(row as never, true)
+        } else {
+          adoptIncoming(row as never, false)
+        }
+        break
+      }
+    })()
+
     const sessionsChannel = supabase
       .channel(`calls-in-${userName}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "call_sessions" }, (payload) => {
@@ -694,7 +783,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
           if (row.caller_name === userName) return
           if (activeRef.current || incomingRef.current) return
 
-          const isDirect = row.callee_name === userName
+          const isDirect = row.callee_name.trim() === userName.trim()
           const isGroup = row.callee_name === GROUP_CALL_CALLEE
           if (!isDirect && !isGroup) return
 
@@ -708,15 +797,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
             if (!mem) return
           }
 
-          setIncoming({
-            id: row.id,
-            conversationId: row.conversation_id,
-            callerName: row.caller_name,
-            calleeName: row.callee_name,
-            callType: row.call_type,
-            status: row.status,
-            isGroup,
-          })
+          adoptIncoming(row, isGroup)
         })()
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "call_sessions" }, (payload) => {

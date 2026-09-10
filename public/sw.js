@@ -1,18 +1,38 @@
 self.addEventListener("push", (event) => {
   if (!event.data) return
-  const data = event.data.json()
+  let data
+  try {
+    data = event.data.json()
+  } catch {
+    return
+  }
+  const isCall = data.kind === "call" || (typeof data.tag === "string" && data.tag.startsWith("call-"))
   event.waitUntil(
-    self.registration.showNotification(data.title, {
+    self.registration.showNotification(data.title || "YSA", {
       body: data.body,
       icon: "/icon.png",
       badge: "/icon.png",
-      data: { url: data.url ?? "/feed" },
-      vibrate: [100, 50, 100],
-    })
+      tag: data.tag ?? (isCall ? `call-${Date.now()}` : undefined),
+      renotify: isCall,
+      requireInteraction: isCall || !!data.requireInteraction,
+      vibrate: isCall ? [300, 100, 300, 100, 300] : [100, 50, 100],
+      data: { url: data.url ?? "/feed", kind: data.kind ?? null },
+      actions: isCall
+        ? [
+            { action: "answer", title: "Yanıtla" },
+            { action: "dismiss", title: "Kapat" },
+          ]
+        : undefined,
+    }),
   )
 })
 
 self.addEventListener("notificationclick", (event) => {
+  const action = event.action
+  if (action === "dismiss") {
+    event.notification.close()
+    return
+  }
   event.notification.close()
   const url = event.notification.data?.url ?? "/feed"
   event.waitUntil(
@@ -24,6 +44,6 @@ self.addEventListener("notificationclick", (event) => {
         }
       }
       return clients.openWindow(url)
-    })
+    }),
   )
 })

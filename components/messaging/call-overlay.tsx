@@ -124,6 +124,7 @@ export function CallOverlay({
 }) {
   const session = incoming ?? active
   const [elapsed, setElapsed] = useState(0)
+  const [audioBlocked, setAudioBlocked] = useState(false)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const isIncoming = !!incoming
@@ -139,26 +140,46 @@ export function CallOverlay({
     if (!el) return
     if (!remoteStream) {
       el.srcObject = null
+      setAudioBlocked(false)
       return
+    }
+    for (const track of remoteStream.getAudioTracks()) {
+      track.enabled = true
     }
     el.srcObject = remoteStream
     el.muted = false
+    el.defaultMuted = false
     el.volume = 1
-    const play = () => {
-      void el.play().catch((err) => console.warn("[call] remote audio play", err))
+
+    const tryPlay = () => {
+      void el.play()
+        .then(() => setAudioBlocked(false))
+        .catch((err) => {
+          console.warn("[call] remote audio play", err)
+          setAudioBlocked(true)
+        })
     }
-    play()
-    // Some browsers need a second attempt after tracks settle
-    const t = setTimeout(play, 250)
-    return () => clearTimeout(t)
-  }, [remoteStream])
+    tryPlay()
+    const t1 = setTimeout(tryPlay, 200)
+    const t2 = setTimeout(tryPlay, 800)
+    const onUnmute = () => tryPlay()
+    remoteStream.getAudioTracks().forEach((t) => {
+      t.addEventListener("unmute", onUnmute)
+      t.enabled = true
+    })
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+      remoteStream.getAudioTracks().forEach((t) => t.removeEventListener("unmute", onUnmute))
+    }
+  }, [remoteStream, isConnected, isConnecting])
 
   // Speakerphone routing
   useEffect(() => {
     const el = remoteAudioRef.current
     if (!el) return
     void applySpeakerOutput(el, speakerOn)
-  }, [speakerOn, remoteStream])
+  }, [speakerOn, remoteStream, isConnected])
 
   useEffect(() => {
     if (!isConnected) {
@@ -207,12 +228,13 @@ export function CallOverlay({
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-white">
-      {/* Hidden but required — plays peer's microphone */}
+      {/* Remote peer audio — keep in layout (not opacity-0) so mobile browsers play */}
       <audio
         ref={remoteAudioRef}
         autoPlay
         playsInline
-        className="pointer-events-none absolute h-px w-px opacity-0"
+        controls={false}
+        className="absolute left-[-9999px] top-0 h-px w-px"
       />
 
       <div className="relative z-20 flex flex-1 flex-col items-center justify-center gap-3 px-6">
@@ -228,6 +250,21 @@ export function CallOverlay({
           <p className="text-xs text-white/50">Grup araması</p>
         )}
         <p className={`text-sm ${error ? "text-red-300" : "text-white/70"}`}>{statusText}</p>
+        {audioBlocked && (isConnected || isConnecting) && (
+          <button
+            type="button"
+            onClick={() => {
+              const el = remoteAudioRef.current
+              if (!el) return
+              void el.play()
+                .then(() => setAudioBlocked(false))
+                .catch(() => setAudioBlocked(true))
+            }}
+            className="rounded-full bg-amber-500/90 px-4 py-2 text-xs font-semibold text-zinc-900"
+          >
+            Sesi aç (dokun)
+          </button>
+        )}
         {isConnected && muted && (
           <p className="text-xs text-amber-300">Mikrofon kapalı</p>
         )}
