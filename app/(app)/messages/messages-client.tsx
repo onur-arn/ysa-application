@@ -234,14 +234,6 @@ export function MessagesClient({
   const [profileDirectory, setProfileDirectory] = useState<Member[]>([])
   const [forcedUnread, setForcedUnread] = useState<Record<string, number>>({})
 
-  // Hide app header + bottom nav in chat / compose / group create / profile
-  const urlOpen = searchParams.get("open")
-  useEffect(() => {
-    const immersive = openId !== null || !!urlOpen || composeOpen || createGroupOpen || !!profileMember
-    setHideNav(immersive)
-    return () => setHideNav(false)
-  }, [openId, urlOpen, composeOpen, createGroupOpen, profileMember, setHideNav])
-
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     station: (initialProfile?.station as StationId) ?? "intl",
     name: initialProfile?.name ?? "",
@@ -556,11 +548,18 @@ export function MessagesClient({
     let cancelled = false
 
     ensureConversationInState(convId).then((ok) => {
-      if (!cancelled && ok) setOpenId(convId)
+      if (cancelled) return
+      if (ok) {
+        setOpenId(convId)
+      } else {
+        // Stale/invalid ?open= — clear it so the inbox keeps the bottom nav
+        setOpenId(null)
+        router.replace(pathname, { scroll: false })
+      }
     })
 
     return () => { cancelled = true }
-  }, [searchParams, ensureConversationInState])
+  }, [searchParams, ensureConversationInState, router, pathname])
 
 
   // ── Group actions ─────────────────────────────────────────────────────────
@@ -1197,6 +1196,31 @@ export function MessagesClient({
   const activeStationGroup = !activeCustomGroup && !activeCustomDM ? GROUP_CHATS.find((g) => g.id === openId) : null
   const activeDM           = !activeCustomGroup && !activeCustomDM && !activeStationGroup
     ? DM_CHATS.find((d) => d.id === openId) : null
+
+  const showingThread = !!(activeCustomGroup || activeCustomDM || activeStationGroup || activeDM)
+
+  // Hide app header + bottom nav only when ChatView / compose / profile is on screen.
+  // Previously also keyed off ?open= or bare openId, which hid the nav on the inbox list.
+  useEffect(() => {
+    const immersive = showingThread || composeOpen || createGroupOpen || !!profileMember
+    setHideNav(immersive)
+    return () => setHideNav(false)
+  }, [showingThread, composeOpen, createGroupOpen, profileMember, setHideNav])
+
+  // openId set but thread not in inbox (soft-hidden / deleted) — reset instead of blank chrome
+  useEffect(() => {
+    if (!openId || showingThread || openId.startsWith("pending-")) return
+    // Give ensureConversationInState a moment to hydrate after openConversation()
+    const t = setTimeout(() => {
+      const stillMissing =
+        !customGroups.some((g) => g.id === openId) &&
+        !customDMs.some((d) => d.id === openId) &&
+        !GROUP_CHATS.some((g) => g.id === openId) &&
+        !DM_CHATS.some((d) => d.id === openId)
+      if (stillMissing) closeConversation()
+    }, 800)
+    return () => clearTimeout(t)
+  }, [openId, showingThread, customGroups, customDMs, closeConversation])
 
   const chatExtras = profileMember ? (
     <MemberProfileSheet
