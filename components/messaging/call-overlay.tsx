@@ -127,8 +127,9 @@ export function CallOverlay({
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const isIncoming = !!incoming
-  const isConnected = !isIncoming && (session?.status === "active")
-  const isOutgoingRinging = !!session && !isIncoming && !isConnected && !error
+  const isConnecting = !isIncoming && session?.status === "connecting"
+  const isConnected = !isIncoming && session?.status === "active"
+  const isOutgoingRinging = !!session && !isIncoming && !isConnecting && !isConnected && !error
 
   useOutgoingRingtone(isOutgoingRinging)
 
@@ -200,7 +201,9 @@ export function CallOverlay({
       ? (isGroup ? "Gelen grup araması…" : "Gelen sesli arama…")
       : isConnected
         ? formatCallDuration(elapsed)
-        : "Çalıyor…"
+        : isConnecting
+          ? "Bağlanıyor…"
+          : "Çalıyor…"
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-white">

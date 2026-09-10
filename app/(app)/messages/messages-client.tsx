@@ -366,6 +366,7 @@ export function MessagesClient({
   }, [initialUserId, initialConversations, queryClient])
 
   // Reload conversations from DB via reliable API (never cache an empty wipe over real data)
+  const [inboxRealtimeHealthy, setInboxRealtimeHealthy] = useState(false)
   const { data: liveConversations } = useQuery({
     queryKey: messageKeys.conversations(initialUserId),
     queryFn: async (): Promise<Record<string, unknown>[]> => {
@@ -389,7 +390,7 @@ export function MessagesClient({
     staleTime: 15_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
-    refetchInterval: 12_000,
+    refetchInterval: inboxRealtimeHealthy ? false : 30_000,
     retry: 2,
   })
 
@@ -985,8 +986,13 @@ export function MessagesClient({
         }))
       })
 
-    void subscribeChannel(supabase, channel)
-    return () => { supabase.removeChannel(channel) }
+    void subscribeChannel(supabase, channel, (status) => {
+      setInboxRealtimeHealthy(status === "SUBSCRIBED")
+    })
+    return () => {
+      setInboxRealtimeHealthy(false)
+      supabase.removeChannel(channel)
+    }
   }, [currentUser.name, ensureConversationInState, closeConversation])
 
   // Open a conversation instantly; hydrate membership in background if needed

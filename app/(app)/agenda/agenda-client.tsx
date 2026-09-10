@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { ChevronLeft, ChevronRight, CalendarDays, List, MapPin, Clock, Plus, Link as LinkIcon, FileText, Trash2, Pencil } from "lucide-react"
 import { useI18n } from "@/lib/i18n/context"
 import { createClient } from "@/lib/supabase/client"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 import { type EventItem } from "@/lib/data/feed"
 import { STATIONS_SORTED, getStation, type StationId } from "@/lib/data/stations"
 import { Modal } from "@/components/ui/modal"
@@ -128,7 +129,7 @@ export function AgendaClient({
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "events" }, (payload) => {
         setEvents((prev) => prev.filter((e) => e.id !== (payload.old as Record<string, unknown>).id))
       })
-      .subscribe()
+    void subscribeChannel(supabase, channel)
 
     return () => { supabase.removeChannel(channel) }
   }, [])

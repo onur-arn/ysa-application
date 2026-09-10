@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 
 type PresenceState = Set<string>
 
@@ -16,22 +17,22 @@ export function PresenceProvider({ userName, children }: { userName: string; chi
     const supabase = createClient()
     const channel = supabase.channel("app:presence")
 
-    channel
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState<{ name: string }>()
-        const names = new Set(
-          Object.values(state)
-            .flat()
-            .map((p) => p.name)
-            .filter(Boolean),
-        )
-        setActiveUsers(names)
-      })
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          await channel.track({ name: userName })
-        }
-      })
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState() as Record<string, Array<{ name?: string }>>
+      const names = new Set(
+        Object.values(state)
+          .flat()
+          .map((p) => p.name)
+          .filter((n): n is string => Boolean(n)),
+      )
+      setActiveUsers(names)
+    })
+
+    void subscribeChannel(supabase, channel, async (status) => {
+      if (status === "SUBSCRIBED") {
+        await channel.track({ name: userName })
+      }
+    })
 
     function handleVisibility() {
       if (document.hidden) {

@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal"
 import { StationSelect, Field, inputClass } from "@/components/form-fields"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { subscribeChannel } from "@/lib/supabase/realtime"
 import { isAdminEmail } from "@/lib/admin"
 
 type CurrentUser = { id: string; station: StationId; role: string; name: string; initials: string }
@@ -145,10 +146,10 @@ export function TasksClient({
           }
         }))
       })
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR") console.error("[tasks-realtime] channel error:", err)
-        if (status === "TIMED_OUT") console.warn("[tasks-realtime] timed out")
-      })
+    void subscribeChannel(supabase, channel, (status, err) => {
+      if (status === "CHANNEL_ERROR") console.error("[tasks-realtime] channel error:", err)
+      if (status === "TIMED_OUT") console.warn("[tasks-realtime] timed out")
+    })
 
     return () => { supabase.removeChannel(channel) }
   }, [])

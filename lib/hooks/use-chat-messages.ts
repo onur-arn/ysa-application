@@ -1,14 +1,19 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/client"
 import { subscribeChannel } from "@/lib/supabase/realtime"
 import type { ChatMessage, ChatPoll } from "@/lib/data/messages"
 import { fetchChatMessages, rowToChatMessage } from "@/lib/queries/messages"
 import { messageKeys } from "@/lib/queries/keys"
 
-const POLL_MS = 4_000
+/** Fallback poll when Realtime is unhealthy — keep light when subscribed. */
+const POLL_FALLBACK_MS = 15_000
+
+/** Long-lived broadcast channels opened by useChatMessages — reused by send helpers. */
+const liveBroadcastChannels = new Map<string, RealtimeChannel>()
 
 function mergeIncoming(
   prev: ChatMessage[],
@@ -22,25 +27,35 @@ function mergeIncoming(
   return [...withoutTemp, incoming]
 }
 
-/** Broadcast helper — works without DB publication (instant peer delivery). */
-export async function broadcastChatMessage(conversationId: string, msg: ChatMessage) {
+async function sendOnBroadcastChannel(
+  conversationId: string,
+  event: "new_message" | "poll_vote",
+  payload: unknown,
+) {
   if (!conversationId || conversationId.startsWith("pending-")) return
+
+  const existing = liveBroadcastChannels.get(conversationId)
+  if (existing) {
+    await existing.send({ type: "broadcast", event, payload })
+    return
+  }
+
+  // Peer may not have the thread open — open briefly, send, then drop
   const supabase = createClient()
   const channel = supabase.channel(`chat-broadcast-${conversationId}`)
   await new Promise<void>((resolve) => {
-    channel.subscribe((status) => {
+    void subscribeChannel(supabase, channel, (status) => {
       if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") resolve()
     })
-    // safety timeout
     setTimeout(resolve, 1500)
   })
-  await channel.send({
-    type: "broadcast",
-    event: "new_message",
-    payload: msg,
-  })
-  // Keep channel briefly so peers can receive, then drop
+  await channel.send({ type: "broadcast", event, payload })
   setTimeout(() => { void supabase.removeChannel(channel) }, 2000)
+}
+
+/** Broadcast helper — prefers the long-lived thread channel when open. */
+export async function broadcastChatMessage(conversationId: string, msg: ChatMessage) {
+  await sendOnBroadcastChannel(conversationId, "new_message", msg)
 }
 
 export type ChatPollVoteBroadcast = {
@@ -51,21 +66,7 @@ export type ChatPollVoteBroadcast = {
 }
 
 export async function broadcastChatPollVote(conversationId: string, vote: ChatPollVoteBroadcast) {
-  if (!conversationId || conversationId.startsWith("pending-")) return
-  const supabase = createClient()
-  const channel = supabase.channel(`chat-broadcast-${conversationId}`)
-  await new Promise<void>((resolve) => {
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") resolve()
-    })
-    setTimeout(resolve, 1500)
-  })
-  await channel.send({
-    type: "broadcast",
-    event: "poll_vote",
-    payload: vote,
-  })
-  setTimeout(() => { void supabase.removeChannel(channel) }, 2000)
+  await sendOnBroadcastChannel(conversationId, "poll_vote", vote)
 }
 
 function applyPollVoteToMessages(
@@ -100,13 +101,14 @@ export function useChatMessages(
   const qc = useQueryClient()
   const senderRef = useRef(senderName)
   senderRef.current = senderName
+  const [realtimeHealthy, setRealtimeHealthy] = useState(false)
 
   const query = useQuery({
     queryKey: messageKeys.thread(conversationId ?? ""),
     queryFn: () => fetchChatMessages(conversationId!, senderName),
     enabled: !!conversationId && !conversationId.startsWith("pending-"),
     staleTime: 10_000,
-    refetchInterval: POLL_MS,
+    refetchInterval: realtimeHealthy ? false : POLL_FALLBACK_MS,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     retry: 1,
@@ -116,37 +118,47 @@ export function useChatMessages(
 
   // postgres_changes + broadcast
   useEffect(() => {
-    if (!conversationId || conversationId.startsWith("pending-")) return
+    if (!conversationId || conversationId.startsWith("pending-")) {
+      setRealtimeHealthy(false)
+      return
+    }
+    const threadId = conversationId
     const supabase = createClient()
+    let pgOk = false
+    let bcOk = false
+
+    function syncHealth() {
+      setRealtimeHealthy(pgOk && bcOk)
+    }
 
     function ingestRow(m: Parameters<typeof rowToChatMessage>[0]) {
       const me = senderRef.current
       const incoming = rowToChatMessage(m, me)
-      qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+      qc.setQueryData<ChatMessage[]>(messageKeys.thread(threadId), (prev = []) =>
         mergeIncoming(prev, incoming, me),
       )
     }
 
     function ingestMessage(msg: ChatMessage) {
       const me = senderRef.current
-      qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+      qc.setQueryData<ChatMessage[]>(messageKeys.thread(threadId), (prev = []) =>
         mergeIncoming(prev, { ...msg, self: msg.author === me }, me),
       )
     }
 
     const pgChannel = supabase
-      .channel(`chat-pg-${conversationId}`)
+      .channel(`chat-pg-${threadId}`)
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
         table: "chat_messages",
-        filter: `conversation_id=eq.${conversationId}`,
-      }, (payload) => {
-        ingestRow(payload.new as Parameters<typeof rowToChatMessage>[0])
+        filter: `conversation_id=eq.${threadId}`,
+      }, (payload: { new: Parameters<typeof rowToChatMessage>[0] }) => {
+        ingestRow(payload.new)
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_poll_votes" }, (payload) => {
-        const v = payload.new as { option_id: string; voter_name: string }
-        qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_poll_votes" }, (payload: { new: { option_id: string; voter_name: string } }) => {
+        const v = payload.new
+        qc.setQueryData<ChatMessage[]>(messageKeys.thread(threadId), (prev = []) =>
           prev.map((msg) => {
             if (!msg.poll?.options.some((o) => o.id === v.option_id)) return msg
             return {
@@ -163,9 +175,9 @@ export function useChatMessages(
           }),
         )
       })
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_poll_votes" }, (payload) => {
-        const v = payload.old as { option_id: string; voter_name: string }
-        qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_poll_votes" }, (payload: { old: { option_id: string; voter_name: string } }) => {
+        const v = payload.old
+        qc.setQueryData<ChatMessage[]>(messageKeys.thread(threadId), (prev = []) =>
           prev.map((msg) => {
             if (!msg.poll?.options.some((o) => o.id === v.option_id)) return msg
             return {
@@ -182,8 +194,8 @@ export function useChatMessages(
           }),
         )
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_polls" }, (payload) => {
-        const poll = payload.new as { id: string; message_id: string }
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_polls" }, (payload: { new: { id: string; message_id: string } }) => {
+        const poll = payload.new
         void (async () => {
           const { data } = await supabase
             .from("message_polls")
@@ -198,30 +210,48 @@ export function useChatMessages(
               .sort((a, b) => a.position - b.position)
               .map((o) => ({ id: o.id, text: o.text, voters: (o.message_poll_votes ?? []).map((v) => v.voter_name) })),
           }
-          qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+          qc.setQueryData<ChatMessage[]>(messageKeys.thread(threadId), (prev = []) =>
             prev.map((msg) => (msg.id === poll.message_id ? { ...msg, poll: chatPoll } : msg)),
           )
         })()
       })
 
     const bcChannel = supabase
-      .channel(`chat-broadcast-${conversationId}`)
-      .on("broadcast", { event: "new_message" }, ({ payload }) => {
+      .channel(`chat-broadcast-${threadId}`)
+      .on("broadcast", { event: "new_message" }, ({ payload }: { payload: unknown }) => {
         if (!payload || typeof payload !== "object") return
         ingestMessage(payload as ChatMessage)
       })
-      .on("broadcast", { event: "poll_vote" }, ({ payload }) => {
+      .on("broadcast", { event: "poll_vote" }, ({ payload }: { payload: unknown }) => {
         if (!payload || typeof payload !== "object") return
         const vote = payload as ChatPollVoteBroadcast
-        qc.setQueryData<ChatMessage[]>(messageKeys.thread(conversationId), (prev = []) =>
+        qc.setQueryData<ChatMessage[]>(messageKeys.thread(threadId), (prev = []) =>
           applyPollVoteToMessages(prev, vote),
         )
       })
 
-    void subscribeChannel(supabase, pgChannel)
-    void subscribeChannel(supabase, bcChannel)
+    liveBroadcastChannels.set(threadId, bcChannel)
+
+    void subscribeChannel(supabase, pgChannel, (status) => {
+      pgOk = status === "SUBSCRIBED"
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        pgOk = false
+      }
+      syncHealth()
+    })
+    void subscribeChannel(supabase, bcChannel, (status) => {
+      bcOk = status === "SUBSCRIBED"
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        bcOk = false
+      }
+      syncHealth()
+    })
 
     return () => {
+      if (liveBroadcastChannels.get(threadId) === bcChannel) {
+        liveBroadcastChannels.delete(threadId)
+      }
+      setRealtimeHealthy(false)
       supabase.removeChannel(pgChannel)
       supabase.removeChannel(bcChannel)
     }

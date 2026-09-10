@@ -45,7 +45,9 @@ type CallContextValue = {
 }
 
 const CallContext = createContext<CallContextValue | null>(null)
-const RING_TIMEOUT_MS = 10_000
+const RING_TIMEOUT_MS = 45_000
+const CONNECTING_TIMEOUT_MS = 30_000
+const ICE_BATCH_MS = 40
 
 export function useCallOptional() {
   return useContext(CallContext)
@@ -90,8 +92,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
   const iceBatchRef = useRef<RTCIceCandidateInit[]>([])
   const iceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const connectingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectedAtRef = useRef<number | null>(null)
   const postedEventRef = useRef(false)
+  const iceRestartAttemptedRef = useRef(false)
   /** ICE that arrived before remote description / PC was ready */
   const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
 
@@ -105,6 +109,11 @@ export function CallProvider({ userName, children }: { userName: string; childre
   const clearRingTimer = useCallback(() => {
     if (ringTimerRef.current) clearTimeout(ringTimerRef.current)
     ringTimerRef.current = null
+  }, [])
+
+  const clearConnectingTimer = useCallback(() => {
+    if (connectingTimerRef.current) clearTimeout(connectingTimerRef.current)
+    connectingTimerRef.current = null
   }, [])
 
   const flushIce = useCallback((sessionId: string) => {
@@ -126,12 +135,14 @@ export function CallProvider({ userName, children }: { userName: string; childre
     if (iceTimerRef.current) clearTimeout(iceTimerRef.current)
     iceTimerRef.current = null
     iceBatchRef.current = []
+    iceRestartAttemptedRef.current = false
     pcRef.current?.close()
     pcRef.current = null
   }, [])
 
   const cleanup = useCallback(() => {
     clearRingTimer()
+    clearConnectingTimer()
     resetPc()
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
@@ -147,7 +158,60 @@ export function CallProvider({ userName, children }: { userName: string; childre
     setActive(null)
     setIncoming(null)
     setCallError(null)
-  }, [clearRingTimer, resetPc])
+  }, [clearRingTimer, clearConnectingTimer, resetPc])
+
+  const markMediaConnected = useCallback(() => {
+    clearConnectingTimer()
+    if (connectedAtRef.current) return
+    connectedAtRef.current = Date.now()
+    const session = sessionRef.current ?? activeRef.current
+    if (!session) return
+    const live = { ...session, status: "active" }
+    sessionRef.current = live
+    setActive(live)
+  }, [clearConnectingTimer])
+
+  const failConnection = useCallback(async (message = "Bağlantı kurulamadı") => {
+    const session = sessionRef.current ?? activeRef.current
+    if (!session || session.id.startsWith("pending-")) {
+      cleanup()
+      setCallError(message)
+      return
+    }
+    const hadMedia = connectedAtRef.current != null
+    const supabase = createClient()
+    await supabase.from("call_sessions").update({
+      status: "ended",
+      ended_at: new Date().toISOString(),
+    }).eq("id", session.id)
+    if (userName) {
+      await supabase.from("call_signals").insert({
+        session_id: session.id,
+        sender_name: userName,
+        signal_type: "hangup",
+        payload: {},
+      })
+    }
+    await postCallEventRef.current?.(session, hadMedia ? "ended" : "missed")
+    cleanup()
+    setCallError(message)
+  }, [cleanup, userName])
+
+  // Wired after postCallEvent is defined
+  const postCallEventRef = useRef<((
+    session: CallSession,
+    outcome: CallOutcome,
+    durationSec?: number,
+  ) => Promise<void>) | null>(null)
+
+  const armConnectingTimeout = useCallback((sessionId: string) => {
+    clearConnectingTimer()
+    connectingTimerRef.current = setTimeout(() => {
+      const current = sessionRef.current
+      if (!current || current.id !== sessionId || connectedAtRef.current) return
+      void failConnection("Bağlantı zaman aşımı. Tekrar deneyin.")
+    }, CONNECTING_TIMEOUT_MS)
+  }, [clearConnectingTimer, failConnection])
 
   const queueOrAddIce = useCallback(async (sessionId: string, candidate: RTCIceCandidateInit) => {
     const pc = pcRef.current
@@ -235,6 +299,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
     })
   }, [userName])
 
+  useEffect(() => {
+    postCallEventRef.current = postCallEvent
+  }, [postCallEvent])
+
   async function buildPc(sessionId: string, stream: MediaStream) {
     resetPc()
 
@@ -244,7 +312,11 @@ export function CallProvider({ userName, children }: { userName: string; childre
       iceCandidatePoolSize: 4,
     })
     pc.ontrack = (e) => {
+      e.track.enabled = true
       const streamFromEvent = e.streams[0] ?? new MediaStream([e.track])
+      for (const track of streamFromEvent.getAudioTracks()) {
+        track.enabled = true
+      }
       setRemoteStream(streamFromEvent)
     }
     pc.onicecandidate = (e) => {
@@ -254,17 +326,38 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
       iceBatchRef.current.push(e.candidate.toJSON())
       if (!iceTimerRef.current) {
+        // Flush the first candidate immediately so the peer gets TURN relays fast
+        const delay = iceBatchRef.current.length <= 1 ? 0 : ICE_BATCH_MS
         iceTimerRef.current = setTimeout(() => {
           iceTimerRef.current = null
           flushIce(sessionId)
-        }, 150)
+        }, delay)
       }
     }
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "failed") {
-        console.warn("[call] connection failed")
-        setCallError("Bağlantı koptu. Tekrar deneyin.")
+      const state = pc.connectionState
+      console.info("[call] connectionState", state)
+      if (state === "connected") {
+        iceRestartAttemptedRef.current = false
+        markMediaConnected()
+        return
       }
+      if (state === "failed") {
+        console.warn("[call] connection failed")
+        if (!iceRestartAttemptedRef.current) {
+          iceRestartAttemptedRef.current = true
+          try {
+            pc.restartIce()
+            return
+          } catch (err) {
+            console.warn("[call] restartIce failed", err)
+          }
+        }
+        void failConnection("Bağlantı koptu. Tekrar deneyin.")
+      }
+    }
+    pc.oniceconnectionstatechange = () => {
+      console.info("[call] iceConnectionState", pc.iceConnectionState)
     }
 
     // Prefer addTrack — more reliable send path than addTransceiver(track)
@@ -448,15 +541,17 @@ export function CallProvider({ userName, children }: { userName: string; childre
     }
 
     const supabase = createClient()
+    // DB "active" stops other group members from ringing; local UI stays "connecting" until media up
     await supabase.from("call_sessions").update({ status: "active" }).eq("id", session.id)
-    const live = { ...session, status: "active", callType: "audio" as CallType }
+    const live = { ...session, status: "connecting", callType: "audio" as CallType }
     sessionRef.current = live
     isCallerRef.current = false
-    connectedAtRef.current = Date.now()
+    connectedAtRef.current = null
     postedEventRef.current = false
     setActive(live)
     setIncoming(null)
     clearRingTimer()
+    armConnectingTimeout(session.id)
 
     try {
       const pc = await buildPc(session.id, stream)
@@ -492,9 +587,8 @@ export function CallProvider({ userName, children }: { userName: string; childre
       }
     } catch (err) {
       console.error("[call] answer failed:", err)
-      resetPc()
       stream.getTracks().forEach((t) => t.stop())
-      setCallError("Bağlantı kurulamadı")
+      await failConnection("Bağlantı kurulamadı")
     }
   }
 
@@ -517,7 +611,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
     const session = sessionRef.current ?? activeRef.current ?? incomingRef.current
     if (!session) { cleanup(); return }
 
-    const connected = connectedAtRef.current != null || session.status === "active"
+    const connected = connectedAtRef.current != null
     const outcome: CallOutcome = connected ? "ended" : "missed"
     const durationSec = connected && connectedAtRef.current
       ? Math.round((Date.now() - connectedAtRef.current) / 1000)
@@ -628,10 +722,10 @@ export function CallProvider({ userName, children }: { userName: string; childre
 
         if (sig.signal_type === "answer" && isCallerRef.current) {
           clearRingTimer()
-          connectedAtRef.current = Date.now()
-          const live = { ...session, status: "active" }
+          const live = { ...session, status: "connecting" }
           sessionRef.current = live
           setActive(live)
+          armConnectingTimeout(session.id)
           try {
             const remote = sig.payload as RTCSessionDescriptionInit
             if (pc && remote?.type === "answer" && remote.sdp && pc.signalingState === "have-local-offer") {
@@ -640,6 +734,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
             }
           } catch (err) {
             console.error("[call] setRemoteDescription failed:", err)
+            void failConnection("Bağlantı kurulamadı")
           }
         } else if (sig.signal_type === "ice") {
           await queueOrAddIce(sig.session_id, sig.payload as RTCIceCandidateInit)
@@ -655,7 +750,7 @@ export function CallProvider({ userName, children }: { userName: string; childre
       supabase.removeChannel(sessionsChannel)
       supabase.removeChannel(signalsChannel)
     }
-  }, [userName, cleanup, clearRingTimer, queueOrAddIce, loadStoredIce])
+  }, [userName, cleanup, clearRingTimer, queueOrAddIce, loadStoredIce, armConnectingTimeout, failConnection])
 
   return (
     <CallContext.Provider value={{
