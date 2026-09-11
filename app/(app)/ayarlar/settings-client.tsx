@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   User, Bell, Info, LogOut, Moon, Sun, Rocket, X, Camera,
   Pencil, Mail, Lock, Phone, Cake, ExternalLink, MapPin, Check,
-  ChevronDown, ZoomIn, Loader2, Briefcase, Shield,
+  ChevronDown, ZoomIn, Loader2, Briefcase, Shield, Trash2,
 } from "lucide-react"
 import Link from "next/link"
 import Cropper from "react-easy-crop"
@@ -89,6 +89,9 @@ export function SettingsClient({
     })
   }
   const [loggingOut, setLoggingOut] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [igemOpen, setIgemOpen] = useState(false)
   const [igemMotivation, setIgemMotivation] = useState("")
   const [igemSent, setIgemSent] = useState(false)
@@ -141,6 +144,29 @@ export function SettingsClient({
     } catch {}
     sessionStorage.removeItem("ys-splash") // Replay splash on next login
     window.location.href = "/auth/login"
+  }
+
+  async function deleteAccount() {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch("/api/account/delete", { method: "POST" })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDeleteError(json.error || t("settings.deleteAccountError"))
+        setDeleting(false)
+        return
+      }
+      try {
+        const supabase = createClient()
+        await supabase.auth.signOut()
+      } catch {}
+      sessionStorage.removeItem("ys-splash")
+      window.location.href = "/auth/login"
+    } catch {
+      setDeleteError(t("settings.deleteAccountError"))
+      setDeleting(false)
+    }
   }
 
 
@@ -293,6 +319,46 @@ export function SettingsClient({
           <LogOut className="size-5" />
           {t("settings.logout")}
         </button>
+
+        {/* Delete account */}
+        {!confirmDelete ? (
+          <button
+            onClick={() => { setConfirmDelete(true); setDeleteError(null) }}
+            disabled={deleting}
+            className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-transparent py-3 text-sm font-semibold text-muted-foreground transition-colors active:bg-secondary disabled:opacity-60"
+          >
+            <Trash2 className="size-4" />
+            {t("settings.deleteAccount")}
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+            <p className="text-center text-sm text-destructive">
+              {t("settings.deleteAccountConfirm")}
+            </p>
+            {deleteError && (
+              <p className="text-center text-xs text-destructive">{deleteError}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setConfirmDelete(false); setDeleteError(null) }}
+                disabled={deleting}
+                className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium text-muted-foreground disabled:opacity-60"
+              >
+                {t("settings.deleteAccountCancel")}
+              </button>
+              <button
+                type="button"
+                onClick={deleteAccount}
+                disabled={deleting}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-destructive py-2.5 text-sm font-bold text-white disabled:opacity-60"
+              >
+                {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                {deleting ? t("settings.deleteAccountDeleting") : t("settings.deleteAccountConfirmBtn")}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Developer credit + discrete admin entry */}
         <div className="mb-4 mt-5 flex flex-col items-center gap-2 text-center text-[11px] text-muted-foreground/55">

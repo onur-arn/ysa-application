@@ -562,18 +562,23 @@ export function StoriesBar({
             }
           }}
         >
-          <span className={`relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full overflow-hidden ${
-            myStories.length > 0
-              ? "ring-[2.5px] ring-primary ring-offset-2 ring-offset-background"
-              : "border-2 border-dashed border-primary/50 bg-primary/5"
+          {/* Same outer p-[2.5px] wrapper as station circles so the label aligns */}
+          <span className={`relative rounded-full p-[2.5px] ${
+            myStories.length > 0 ? "bg-primary" : "bg-transparent"
           }`}>
-            {myStories.length > 0 ? (
-              <img src={myStories[myStories.length - 1].imageUrl} alt="Hikayem" className="h-full w-full object-cover" />
-            ) : user.photoUrl ? (
-              <img src={user.photoUrl} alt="Hikayem" className="h-full w-full object-cover" />
-            ) : (
-              <Plus className="h-6 w-6 text-primary" />
-            )}
+            <span className={`relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 ${
+              myStories.length > 0
+                ? "border-card"
+                : "border-dashed border-primary/50 bg-primary/5"
+            }`}>
+              {myStories.length > 0 ? (
+                <img src={myStories[myStories.length - 1].imageUrl} alt="Hikayem" className="h-full w-full object-cover" />
+              ) : user.photoUrl ? (
+                <img src={user.photoUrl} alt="Hikayem" className="h-full w-full object-cover" />
+              ) : (
+                <Plus className="h-6 w-6 text-primary" />
+              )}
+            </span>
             {myStories.length > 0 && (
               <span
                 role="button"
